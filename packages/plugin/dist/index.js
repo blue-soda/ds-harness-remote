@@ -5719,15 +5719,14 @@ var RemoteClientCore = class {
       throw error;
     }
   }
-  async rpc(method, params, signal, options) {
+  async rpc(method, params, signal) {
     if (signal?.aborted)
       throw rpcAbortedError(method, signal.reason);
-    const timeoutMs = callTimeoutMs(this.timeoutMs, options);
     const request = createRpcRequest(method, params);
     const result = new Promise((resolve4, reject) => {
       const timer = setTimeout(() => {
-        this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+        this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${this.timeoutMs}ms`));
+      }, this.timeoutMs);
       const pending = {
         method,
         resolve: resolve4,
@@ -5836,12 +5835,6 @@ var RemoteClientCore = class {
 };
 function rpcAbortedError(method, reason) {
   return new RemoteClientError("RPC_ABORTED", `RPC ${method} was aborted`, reason === void 0 ? void 0 : { cause: reason });
-}
-function callTimeoutMs(fallback, options) {
-  const timeoutMs = options?.timeoutMs;
-  if (typeof timeoutMs !== "number")
-    return fallback;
-  return Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2147483647 ? timeoutMs : fallback;
 }
 function transportSendError(error) {
   return error instanceof Error ? error : new Error("remote transport send failed", { cause: error });
