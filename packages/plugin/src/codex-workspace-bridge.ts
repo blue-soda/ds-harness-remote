@@ -381,8 +381,10 @@ export class CodexWorkspaceBridge {
   }
 
   private async safePath(root: string, path: string, directory: boolean): Promise<string> {
-    if (isAbsolute(path)) throw new RpcError('CODEX_WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the CodeX workspace.')
-    const candidate = resolve(root, path)
+    // Native clients may pass the displayed absolute workspace path (not only
+    // a relative child). Accept it only when lexical and canonical containment
+    // still prove that it belongs to this authenticated workspace root.
+    const candidate = isAbsolute(path) ? resolve(path) : resolve(root, path)
     const rel = relative(root, candidate)
     if (rel.startsWith('..') || isAbsolute(rel)) throw new RpcError('CODEX_WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the CodeX workspace.')
     try {
