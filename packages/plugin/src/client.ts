@@ -279,6 +279,8 @@ const en = {
   saving: 'Saving…',
   signOut: 'Sign out',
   signingOut: 'Signing out…',
+  hostName: 'Host name',
+  deviceId: 'Device ID',
   serverUrl: 'Server URL',
   serverUrlHint: 'HTTPS origin used for account authorization and encrypted relay.',
   serverSaved: 'Server address saved. Restart DSH to apply it.',
@@ -521,6 +523,8 @@ const zh: Record<keyof typeof en, string> = {
   saving: '保存中…',
   signOut: '退出授权',
   signingOut: '正在退出…',
+  hostName: '主机名称',
+  deviceId: '设备 ID',
   serverUrl: 'Server 地址',
   serverUrlHint: '用于账号授权和加密中继的 HTTPS 地址。',
   serverSaved: 'Server 地址已保存，重启 DSH 后生效。',
@@ -1078,6 +1082,8 @@ window.__ModuleLoader__.load({
       const [acpArguments, setAcpArguments] = React.useState('acp')
       const [reconnectBusy, setReconnectBusy] = React.useState(false)
       const [hostStatus, setHostStatus] = React.useState<RemoteStatus['host'] | undefined>(undefined)
+      const [hostName, setHostName] = React.useState('')
+      const [hostDeviceId, setHostDeviceId] = React.useState('')
       const [notice, setNotice] = React.useState<LocalizedMessage | undefined>(undefined)
       const [error, setError] = React.useState<string | undefined>(undefined)
       const [settingsView, setSettingsView] = React.useState<PluginSettingsView | undefined>(undefined)
@@ -1106,6 +1112,8 @@ window.__ModuleLoader__.load({
         ])
         applyView(view)
         setHostStatus(status?.host)
+        setHostName(status?.deviceName ?? '')
+        setHostDeviceId(status?.host?.deviceId ?? '')
       }
 
       React.useEffect(() => {
@@ -1116,7 +1124,11 @@ window.__ModuleLoader__.load({
         // The pushed status keeps this Host account line current; it replaces
         // the periodic unary status read this card used to perform.
         if (association === undefined) return
-        return props.statusFeed.subscribe(status => setHostStatus(status.host))
+        return props.statusFeed.subscribe(status => {
+          setHostStatus(status.host)
+          setHostName(status.deviceName ?? '')
+          setHostDeviceId(status.host?.deviceId ?? '')
+        })
       }, [association !== undefined])
 
       const save = async (event?: Event): Promise<void> => {
@@ -1380,6 +1392,13 @@ window.__ModuleLoader__.load({
             React.createElement('p', null, association.account === undefined
               ? serverUrl
               : t('authorizedOn', { role: 'Remote', serverUrl })))),
+        React.createElement('div', { className: 'dshRemoteHostIdentity' },
+          React.createElement('div', null,
+            React.createElement('span', null, t('hostName')),
+            React.createElement('strong', null, hostName || '—')),
+          React.createElement('div', null,
+            React.createElement('span', null, t('deviceId')),
+            React.createElement('code', null, hostDeviceId || '—'))),
         React.createElement('div', { className: 'dshRemoteField' },
           React.createElement('label', { htmlFor: 'dsh-remote-server-url-authorized' }, t('serverUrl')),
           React.createElement('input', {
@@ -1437,7 +1456,8 @@ window.__ModuleLoader__.load({
           draftDirty
             ? React.createElement(React.Fragment, null,
               React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy, onClick: discard }, t('discard')),
-              React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')))
+              React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')),
+              React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || !writable, onClick: () => void logout() }, t(busy ? 'signingOut' : 'signOut')))
             : React.createElement('button', {
               type: 'button',
               className: 'dshRemoteDiscard',
@@ -1445,6 +1465,13 @@ window.__ModuleLoader__.load({
               onClick: () => void logout(),
             }, t(busy ? 'signingOut' : 'signOut'))))
               : React.createElement('form', { className: 'dshRemoteSettings', noValidate: true, onSubmit: (event: Event) => void save(event) },
+        React.createElement('div', { className: 'dshRemoteHostIdentity' },
+          React.createElement('div', null,
+            React.createElement('span', null, t('hostName')),
+            React.createElement('strong', null, hostName || '—')),
+          React.createElement('div', null,
+            React.createElement('span', null, t('deviceId')),
+            React.createElement('code', null, hostDeviceId || '—'))),
         React.createElement('div', { className: 'dshRemoteField' },
           React.createElement('label', { htmlFor: 'dsh-remote-server-url' }, t('serverUrl')),
           React.createElement('input', {
@@ -2828,6 +2855,7 @@ window.__ModuleLoader__.load({
         '.dshRemotePluginCardHeader{display:flex;align-items:center}.dshRemotePluginCardToggle{appearance:none;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;display:flex;align-items:center;gap:12px;padding:14px 16px}.dshRemotePluginCardToggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
         '.dshRemotePluginCardHeading{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.dshRemotePluginCardHeading>strong{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.dshRemotePluginCardHeading>span{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemotePluginCardStatus{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.dshRemotePluginCardStatus.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemotePluginCardStatus.isReconnecting{color:var(--dsw-alias-state-warn-label)}.dshRemotePluginCardStatus.isOffline{color:var(--dsw-alias-state-error-primary)}.dshRemotePluginCardChevron{color:var(--dsw-alias-label-tertiary);font-size:18px;line-height:14px;transition:transform .16s}.dshRemotePluginCard.isOpen .dshRemotePluginCardChevron{transform:rotate(180deg)}',
         '.dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:720px}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}',
+        '.dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}',
         '.dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
         '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
         '.dshRemoteAssociation{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.dshRemoteAssociation>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteAssociation p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',

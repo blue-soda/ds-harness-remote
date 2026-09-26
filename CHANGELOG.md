@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.20 - 2026-09-27
+
+- Restores the Remote settings page's sign-out action in both clean and unsaved states.
+- Shows the local Host name and device ID in Remote settings.
+- Includes localized package metadata for the DSH plugin manager.
+
 ## 0.4.19 - 2026-09-27
 
 - Refreshes the published npm package README and release metadata to match the repository's current 0.4.18 feature set, compatibility range, self-hosted Server scope, and installation commands.

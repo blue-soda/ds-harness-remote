@@ -1804,6 +1804,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     saving: "Saving\u2026",
     signOut: "Sign out",
     signingOut: "Signing out\u2026",
+    hostName: "Host name",
+    deviceId: "Device ID",
     serverUrl: "Server URL",
     serverUrlHint: "HTTPS origin used for account authorization and encrypted relay.",
     serverSaved: "Server address saved. Restart DSH to apply it.",
@@ -2043,6 +2045,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     saving: "\u4FDD\u5B58\u4E2D\u2026",
     signOut: "\u9000\u51FA\u6388\u6743",
     signingOut: "\u6B63\u5728\u9000\u51FA\u2026",
+    hostName: "\u4E3B\u673A\u540D\u79F0",
+    deviceId: "\u8BBE\u5907 ID",
     serverUrl: "Server \u5730\u5740",
     serverUrlHint: "\u7528\u4E8E\u8D26\u53F7\u6388\u6743\u548C\u52A0\u5BC6\u4E2D\u7EE7\u7684 HTTPS \u5730\u5740\u3002",
     serverSaved: "Server \u5730\u5740\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
@@ -2440,7 +2444,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       }
       function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
           setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setTerminalEnabled(view.config.terminal?.enabled ?? !1), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
@@ -2448,13 +2452,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
             props.control("status").catch(() => {
             })
           ]);
-          applyView(view), setHostStatus(status?.host);
+          applyView(view), setHostStatus(status?.host), setHostName(status?.deviceName ?? ""), setHostDeviceId(status?.host?.deviceId ?? "");
         };
         React.useEffect(() => {
           load().catch((reason) => setError(messageOf(reason)));
         }, []), React.useEffect(() => {
           if (association !== void 0)
-            return props.statusFeed.subscribe((status) => setHostStatus(status.host));
+            return props.statusFeed.subscribe((status) => {
+              setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "");
+            });
         }, [association !== void 0]);
         let save = async (event) => {
           if (event?.preventDefault(), !(!writable || !serverDirty)) {
@@ -2737,6 +2743,22 @@ Minimum version required to store current data is: ` + bestVersion + `.
               ),
               React.createElement(
                 "div",
+                { className: "dshRemoteHostIdentity" },
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("span", null, t("hostName")),
+                  React.createElement("strong", null, hostName || "\u2014")
+                ),
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("span", null, t("deviceId")),
+                  React.createElement("code", null, hostDeviceId || "\u2014")
+                )
+              ),
+              React.createElement(
+                "div",
                 { className: "dshRemoteField" },
                 React.createElement("label", { htmlFor: "dsh-remote-server-url-authorized" }, t("serverUrl")),
                 React.createElement("input", {
@@ -2811,7 +2833,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   React.Fragment,
                   null,
                   React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy, onClick: discard }, t("discard")),
-                  React.createElement("button", { type: "button", className: "dshRemoteSave", disabled: busy || !writable, onClick: () => void save() }, t(busy ? "saving" : "save"))
+                  React.createElement("button", { type: "button", className: "dshRemoteSave", disabled: busy || !writable, onClick: () => void save() }, t(busy ? "saving" : "save")),
+                  React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy || !writable, onClick: () => void logout() }, t(busy ? "signingOut" : "signOut"))
                 ) : React.createElement("button", {
                   type: "button",
                   className: "dshRemoteDiscard",
@@ -2822,6 +2845,22 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ) : React.createElement(
               "form",
               { className: "dshRemoteSettings", noValidate: !0, onSubmit: (event) => void save(event) },
+              React.createElement(
+                "div",
+                { className: "dshRemoteHostIdentity" },
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("span", null, t("hostName")),
+                  React.createElement("strong", null, hostName || "\u2014")
+                ),
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("span", null, t("deviceId")),
+                  React.createElement("code", null, hostDeviceId || "\u2014")
+                )
+              ),
               React.createElement(
                 "div",
                 { className: "dshRemoteField" },
@@ -4003,6 +4042,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           ".dshRemotePluginCardHeader{display:flex;align-items:center}.dshRemotePluginCardToggle{appearance:none;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;display:flex;align-items:center;gap:12px;padding:14px 16px}.dshRemotePluginCardToggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}",
           ".dshRemotePluginCardHeading{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.dshRemotePluginCardHeading>strong{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.dshRemotePluginCardHeading>span{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemotePluginCardStatus{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.dshRemotePluginCardStatus.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemotePluginCardStatus.isReconnecting{color:var(--dsw-alias-state-warn-label)}.dshRemotePluginCardStatus.isOffline{color:var(--dsw-alias-state-error-primary)}.dshRemotePluginCardChevron{color:var(--dsw-alias-label-tertiary);font-size:18px;line-height:14px;transition:transform .16s}.dshRemotePluginCard.isOpen .dshRemotePluginCardChevron{transform:rotate(180deg)}",
           ".dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:720px}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}",
+          ".dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}",
           ".dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
           '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
           ".dshRemoteAssociation{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.dshRemoteAssociation>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteAssociation p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
