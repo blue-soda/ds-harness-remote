@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.21 - 2026-09-28
+
+- Fixes Remote Web model configuration against DeepSeek Harness 0.1.7 by translating legacy object-shaped configuration calls to the positional Typert wire format.
+- Keeps canonical positional calls unchanged and covers settings writes, credentials, and model discovery.
+- Adds one-time Host registration installers and the `ds-harness-remote register <server-token>` CLI command; the token installers enable the Host terminal setting for the registered service.
+
 ## 0.4.20 - 2026-09-27
 
 - Restores the Remote settings page's sign-out action in both clean and unsaved states.
