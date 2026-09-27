@@ -123,6 +123,7 @@ executable="${SERVICE_COMMAND:-}"
   {
     printf '#!/usr/bin/env bash\nset -euo pipefail\n'
     printf 'export PATH=%q\n' "$PATH"
+    if [[ "${DSH_REMOTE_TERMINAL_ENABLED:-}" == "true" ]]; then printf 'export DSH_REMOTE_TERMINAL_ENABLED=true\n'; fi
     printf 'cd %q\n' "$HOME"
     printf 'exec %q --profile %q\n' "$executable" "$DSH_PROFILE"
   } > "$runner"

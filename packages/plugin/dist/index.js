@@ -15301,7 +15301,7 @@ var RemoteTypertGateway2 = class {
     throw remoteFailure(result.error);
   }
   async dispatch(endpoint, payload, signal) {
-    const request = { endpoint, payload };
+    const request = { endpoint, payload: normalizeConfigArguments(endpoint, payload) };
     const encoded = new TextEncoder().encode(JSON.stringify(request));
     let response;
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES2) {
@@ -15427,6 +15427,37 @@ var RemoteTypertGateway2 = class {
     }
   }
 };
+function normalizeConfigArguments(endpoint, payload) {
+  if (!isRecord4(payload) || !isRecord4(payload.args) || Array.isArray(payload.args)) return payload;
+  const args = payload.args;
+  const positional = (() => {
+    switch (endpoint) {
+      case "settings/describe":
+      case "llm/listProviders":
+      case "llm/listConfigurableProviders":
+        return [];
+      case "settings/update":
+        return [args.ns, args.patch, args.expectedRevision];
+      case "settings/replace":
+        return [args.ns, args.section, args.expectedRevision];
+      case "settings/mutate":
+        return [args.ns, args.ops, args.expectedRevision];
+      case "credentials/describe":
+        return [args.refs];
+      case "credentials/set":
+        return [args.ref, args.value];
+      case "credentials/unset":
+        return [args.ref];
+      case "llm/discoverModels": {
+        const { settingsNs, ...request } = args;
+        return [settingsNs, request];
+      }
+      default:
+        return void 0;
+    }
+  })();
+  return positional === void 0 ? payload : { ...payload, args: positional };
+}
 var AsyncValueQueue = class {
   values = [];
   bytes = 0;
@@ -18326,7 +18357,7 @@ function resolveConfig(input2 = {}, env = process.env) {
     role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
     deviceName: parsed.deviceName ?? hostname(),
-    terminal: { enabled: parsed.terminal?.enabled ?? false },
+    terminal: { enabled: parsed.terminal?.enabled ?? env.DSH_REMOTE_TERMINAL_ENABLED === "true" },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     logLevel: parsed.logLevel ?? "info",
@@ -27251,6 +27282,7 @@ async function runCli(args = process.argv.slice(2), dependencies = {}) {
   const [command, ...rest] = args;
   try {
     if (command === "login") return await login(rest, runtime);
+    if (command === "register") return await register(rest, runtime);
     if (command === "status") return await status(rest, runtime);
     if (command === "logout") return await logout(rest, runtime);
     if (command === "help" || command === "--help" || command === "-h" || command === void 0) {
@@ -27265,6 +27297,15 @@ async function runCli(args = process.argv.slice(2), dependencies = {}) {
 ${helpText()}`);
     return error instanceof CliUsageError ? 2 : 1;
   }
+}
+async function register(args, runtime) {
+  if (args.length !== 1 || args[0] === void 0 || args[0].trim() === "") {
+    throw new CliUsageError("Usage: ds-harness-remote register <server-token>");
+  }
+  const context = await hostContext(runtime);
+  await context.api.authorizeHostWithCode(context.identity, args[0]);
+  write(runtime.stdout, "Remote Host registration complete. Restart dsh-tui to bring the Remote Host online.\n");
+  return 0;
 }
 async function login(args, runtime) {
   if (args.length > 1) throw new CliUsageError("Usage: ds-harness-remote login [github|zhihu]");
@@ -27473,6 +27514,7 @@ function helpText() {
   return [
     "Usage:",
     "  ds-harness-remote login [github|zhihu]",
+    "  ds-harness-remote register <server-token>",
     "  ds-harness-remote status",
     "  ds-harness-remote logout",
     "",
@@ -27610,9 +27652,9 @@ function registerRemoteCommand(ctx, commands, pluginHost, definition) {
 function hasErrorCode2(error, code) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
-function registerOptional(ctx, feature, register) {
+function registerOptional(ctx, feature, register2) {
   try {
-    return register() ?? (() => {
+    return register2() ?? (() => {
     });
   } catch (error) {
     ctx.logger.warn(`dsh-TUI Remote ${feature} is unavailable`, { code: errorCode4(error) });

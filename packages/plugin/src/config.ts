@@ -145,7 +145,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
     deviceName: parsed.deviceName ?? hostname(),
-    terminal: { enabled: parsed.terminal?.enabled ?? false },
+    terminal: { enabled: parsed.terminal?.enabled ?? env.DSH_REMOTE_TERMINAL_ENABLED === 'true' },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     logLevel: parsed.logLevel ?? 'info',

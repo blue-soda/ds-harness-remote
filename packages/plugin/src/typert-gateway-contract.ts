@@ -1,7 +1,8 @@
 export interface TypertGatewayRequest {
   namespace: string
   method: string
-  args: Readonly<Record<string, unknown>>
+  /** Generated Typert clients use positional arrays; older clients used objects. */
+  args: Readonly<Record<string, unknown>> | readonly unknown[]
   signal?: AbortSignal
 }
 

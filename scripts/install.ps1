@@ -131,6 +131,7 @@ $codexHomeXml = if ($env:CODEX_HOME) { '<env name="CODEX_HOME" value="' + (Xml $
   <arguments>&quot;$(Xml $dshEntry)&quot; --profile $(Xml $dshProfile)</arguments>
   <workingdirectory>$(Xml $env:USERPROFILE)</workingdirectory>
   <env name="DSH_HOME" value="$(Xml $dshHome)"/>
+  <env name="DSH_REMOTE_TERMINAL_ENABLED" value="$(if ($env:DSH_REMOTE_TERMINAL_ENABLED -eq 'true') { 'true' } else { '' })"/>
   <env name="USERPROFILE" value="$(Xml $env:USERPROFILE)"/>
   <env name="APPDATA" value="$(Xml $env:APPDATA)"/>
   <env name="LOCALAPPDATA" value="$(Xml $env:LOCALAPPDATA)"/>

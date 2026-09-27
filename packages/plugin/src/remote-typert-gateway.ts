@@ -47,7 +47,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     payload: unknown,
     signal: AbortSignal,
   ): Promise<TypertRpcResult> {
-    const request = { endpoint, payload }
+    const request = { endpoint, payload: normalizeConfigArguments(endpoint, payload) }
     const encoded = new TextEncoder().encode(JSON.stringify(request))
     let response: unknown
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES) {
@@ -193,6 +193,37 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       if (opened) await this.client.rpc('harness.remote.transfer.close', { transferId }).catch(() => undefined)
     }
   }
+}
+
+/**
+ * DSH 0.1.7's generated Remote services encode method parameters positionally.
+ * Older Web bundles sent a named object for the configuration plane. Accept the
+ * old form at this boundary and emit the current wire shape; arrays are already
+ * canonical and pass through unchanged.
+ */
+function normalizeConfigArguments(endpoint: string, payload: unknown): unknown {
+  if (!isRecord(payload) || !isRecord(payload.args) || Array.isArray(payload.args)) return payload
+  const args = payload.args
+  const positional = (() => {
+    switch (endpoint) {
+      case 'settings/describe':
+      case 'llm/listProviders':
+      case 'llm/listConfigurableProviders':
+        return []
+      case 'settings/update': return [args.ns, args.patch, args.expectedRevision]
+      case 'settings/replace': return [args.ns, args.section, args.expectedRevision]
+      case 'settings/mutate': return [args.ns, args.ops, args.expectedRevision]
+      case 'credentials/describe': return [args.refs]
+      case 'credentials/set': return [args.ref, args.value]
+      case 'credentials/unset': return [args.ref]
+      case 'llm/discoverModels': {
+        const { settingsNs, ...request } = args
+        return [settingsNs, request]
+      }
+      default: return undefined
+    }
+  })()
+  return positional === undefined ? payload : { ...payload, args: positional }
 }
 
 class AsyncValueQueue implements AsyncIterable<unknown> {

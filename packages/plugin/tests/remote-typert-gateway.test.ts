@@ -4,6 +4,37 @@ import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
 
 describe('RemoteTypertGateway', () => {
+  it('translates legacy object-shaped model settings calls to positional Typert arguments', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => {
+      expect(params).toMatchObject({
+        endpoint: 'settings/mutate',
+        payload: {
+          args: ['llm-pi-ai', [{ op: 'set', path: ['profiles', 'custom'], value: { model: 'm' } }], 4],
+        },
+      })
+      return { ok: true, value: { revision: 5 } }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    await expect(new RemoteTypertGateway(client).dispatch('settings/mutate', {
+      args: {
+        ns: 'llm-pi-ai',
+        ops: [{ op: 'set', path: ['profiles', 'custom'], value: { model: 'm' } }],
+        expectedRevision: 4,
+      },
+    }, new AbortController().signal)).resolves.toEqual({ ok: true, value: { revision: 5 } })
+  })
+
+  it('keeps canonical positional discovery arguments unchanged', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => {
+      expect(params.payload.args).toEqual(['llm-pi-ai', { provider: 'custom', baseURL: 'https://gateway.example/v1' }])
+      return { ok: true, value: { models: [] } }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    await new RemoteTypertGateway(client).dispatch('llm/discoverModels', {
+      args: ['llm-pi-ai', { provider: 'custom', baseURL: 'https://gateway.example/v1' }],
+    }, new AbortController().signal)
+  })
+
   it('retries an oversized direct response through the bounded transfer path', async () => {
     const methods: string[] = []
     const rpc = vi.fn(async (method: string, params: unknown) => {
