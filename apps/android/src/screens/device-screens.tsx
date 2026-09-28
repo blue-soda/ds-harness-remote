@@ -168,6 +168,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const [attempt, setAttempt] = useState(0)
   const [stuck, setStuck] = useState(false)
   const launchedAttempt = useRef(-1)
+  const completedAttempt = useRef(-1)
   const leaving = useRef(false)
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
@@ -176,23 +177,31 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const styles = useThemedStyles(createStyles)
 
   useEffect(() => {
+    const current = useAppStore.getState()
+    if (current.selectedDevice?.deviceId === device.deviceId && current.connection.phase === 'connected') {
+      if (completedAttempt.current !== attempt) {
+        completedAttempt.current = attempt
+        onConnectedRef.current()
+      }
+      return
+    }
+    if (current.selectedDevice?.deviceId === device.deviceId
+      && (current.connection.phase === 'connecting' || current.connection.phase === 'reconnecting')) return
     if (launchedAttempt.current === attempt) return
     launchedAttempt.current = attempt
     let active = true
-    const current = useAppStore.getState()
-    if (current.selectedDevice?.deviceId === device.deviceId && current.connection.phase === 'connected') {
-      onConnectedRef.current()
-      return
-    }
     void connect(device).then(async connected => {
       if (!connected) return
       // Match the Plugin hand-off: let assistive technology and the visible
       // progress state announce completion before replacing this screen.
       await new Promise(resolve => setTimeout(resolve, 220))
-      if (active && !leaving.current) onConnectedRef.current()
+      if (active && !leaving.current && completedAttempt.current !== attempt) {
+        completedAttempt.current = attempt
+        onConnectedRef.current()
+      }
     })
     return () => { active = false }
-  }, [attempt, connect, device])
+  }, [attempt, connect, connection.phase, device, selectedDevice?.deviceId])
 
   const currentStage = connectionStage ?? 'authenticating'
   const selectedProbe = probeTransportForMode(connection.stats.mode)

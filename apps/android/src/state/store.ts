@@ -15,7 +15,7 @@ import {
   type AppLanguage,
   type LanguagePreference,
 } from '../locales/i18n'
-import { friendlyError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
+import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import {
   loginFlow,
@@ -60,6 +60,7 @@ import {
   loadOrCreateIdentity,
   loadLanguagePreference,
   loadCodexPermissionPresets,
+  loadCompactChat,
   loadRecentWorkspaces,
   loadServerConfig,
   loadThemePreference,
@@ -70,6 +71,7 @@ import {
   saveLastConnectedDeviceId,
   saveRecentWorkspaces,
   saveCodexPermissionPreset,
+  saveCompactChat,
   saveServerConfig,
   saveThemePreference,
   saveTransportPreference,
@@ -135,6 +137,7 @@ interface AppState {
   languagePreference: LanguagePreference
   language: AppLanguage
   themePreference: ThemePreference
+  compactChat: boolean
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
   authPhase: AuthPhase
@@ -189,6 +192,7 @@ interface AppState {
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
+  setCompactChat(value: boolean): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>
   signOut(): Promise<void>
@@ -231,6 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   languagePreference: 'system',
   language: getActiveLanguage(),
   themePreference: 'system',
+  compactChat: true,
   authPhase: 'idle',
   refreshing: false,
   reauthRequired: false,
@@ -238,12 +243,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   async bootstrap() {
     set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
     try {
-      const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
+      const [config, identity, transportPreference, languagePreference, themePreference, compactChat, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
         loadServerConfig(),
         loadOrCreateIdentity(),
         loadTransportPreference(),
         loadLanguagePreference(),
         loadThemePreference(),
+        loadCompactChat(),
         loadFavoriteWorkspaces(),
         loadRecentWorkspaces(),
         loadLastConnectedDeviceId(),
@@ -257,6 +263,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         languagePreference,
         language,
         themePreference,
+        compactChat,
         favoriteWorkspaces,
         recentWorkspaces,
         lastConnectedDeviceId,
@@ -559,7 +566,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async reconnect(options = {}) {
     const device = get().selectedDevice
-    if (device === undefined || get().connection.phase === 'connecting') return false
+    const phase = get().connection.phase
+    if (device === undefined || phase === 'connecting' || phase === 'reconnecting') return false
     set(state => ({ connection: { ...state.connection, phase: 'reconnecting', error: undefined } }))
     return get().connectDevice(device, options)
   },
@@ -673,7 +681,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await rememberRecentWorkspace(session)
       return true
     } catch (error) {
-      if (isRpcTimeoutError(error)) {
+      if (isRpcTimeoutError(error) || isRecoverableTransportError(error)) {
         // session.history is read-only, so it is safe to recover the stale
         // path with a fresh Relay-only connection and retry exactly once.
         // Mutating ApiProxy calls deliberately do not use this path because a
@@ -1103,6 +1111,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
+        // Keep the sending state until the Host event stream confirms that
+        // execution has actually started. `session.prompt` only acknowledges
+        // receipt, so clearing busyAction here briefly re-enables the quick
+        // actions before the first assistant/tool event arrives.
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        return true
       }
       set({ busyAction: undefined })
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -1295,6 +1309,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ themePreference })
   },
 
+  async setCompactChat(compactChat) {
+    await saveCompactChat(compactChat)
+    set({ compactChat })
+  },
+
   syncSystemLocales(localeTags) {
     const language = updateSystemLocales(localeTags)
     if (language !== get().language) set({ language })
@@ -1314,9 +1333,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleMuxFrame(frame) {
-    set(state => ({
-      messages: applyMuxFrameToMessages(state.messages, frame),
-    }))
+    set(state => {
+      const sessionId = frame.payload.sessionId
+      const releasePrompt = state.busyAction === 'send-message'
+        && sessionId !== undefined
+        && state.selectedSession?.sessionId === sessionId
+        && isHarnessPromptStarted(frame)
+      return {
+        messages: applyMuxFrameToMessages(state.messages, frame),
+        ...(releasePrompt ? { busyAction: undefined } : {}),
+      }
+    })
   },
 
   handleCodexFrame(frame) {
@@ -1396,6 +1423,27 @@ function withActiveCodexTurn(timeline: CodexTimelineState, activeTurnId: string 
       ? timeline.session
       : { ...timeline.session, status: 'running' },
   }
+}
+
+/**
+ * `session.prompt` acknowledges enqueueing only. Keep the local sending state
+ * until a meaningful event from that session proves that the turn has begun.
+ */
+function isHarnessPromptStarted(frame: MuxStreamFrame): boolean {
+  const payload = frame.payload
+  if (payload.type === 'approval/requested' || payload.type === 'question/requested') return true
+  if (payload.type !== 'session/event' || payload.event === undefined) return false
+  const event = payload.event
+  if (event.type === 'assistant/message' || event.type === 'tool/call' || event.type === 'tool/result') return true
+  if (event.type !== 'assistant/chunk') return false
+  const chunk = event.data.chunk
+  if (typeof chunk !== 'object' || chunk === null) return false
+  const value = chunk as Record<string, unknown>
+  if (value.type === 'text-delta' || value.type === 'reasoning-delta') {
+    return typeof value.text === 'string' && value.text.length > 0
+  }
+  return value.type === 'tool-call-delta'
+    && (typeof value.argumentsDelta !== 'string' || value.argumentsDelta.length > 0)
 }
 
 /** Number of recently visited workspaces kept for the home-screen fallback list. */

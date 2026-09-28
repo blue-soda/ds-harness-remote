@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Alert,
   Animated,
   FlatList,
@@ -40,6 +41,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   const session = useAppStore(state => state.selectedSession)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
+  const compactChat = useAppStore(state => state.compactChat)
   const connection = useAppStore(state => state.connection)
   const historyHasMore = useAppStore(state => state.historyHasMore)
   const historyLoadingOlder = useAppStore(state => state.historyLoadingOlder)
@@ -92,8 +94,8 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   const visibleMessages = useMemo(() => messages.filter(item =>
     item.kind !== 'message'
       || hasVisibleMessageText(item.text)
-      || hasVisibleMessageText(item.reasoning ?? '')
-      || (item.images?.length ?? 0) > 0), [messages])
+      || (!compactChat && hasVisibleMessageText(item.reasoning ?? ''))
+      || (item.images?.length ?? 0) > 0), [compactChat, messages])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
@@ -149,6 +151,15 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
     scrollToBottom(false)
   }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
 
+  const onListLayout = useCallback(() => {
+    // A session switch can render the list before its viewport and markdown
+    // rows have measured. Defer one extra frame so the initial jump reaches
+    // the actual end rather than the pre-layout content height.
+    if (visibleMessages.length === 0 || historyLoadingOlder) return
+    if (!pinToBottomRef.current && !initialPinRef.current) return
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom(false)))
+  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
@@ -160,8 +171,8 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
   const renderChatItem = useCallback(({ item }: { item: ChatItem }) => (
-    <ChatItemView item={item} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
-  ), [busy, respondApproval, respondQuestion])
+    <ChatItemView item={item} busyAction={busy} compact={compactChat} onApproval={respondApproval} onQuestion={respondQuestion} />
+  ), [busy, compactChat, respondApproval, respondQuestion])
 
   if (session === undefined) return null
 
@@ -239,9 +250,11 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
 
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const connected = connection.phase === 'connected' && !reconnectingSession
-  const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running)
+  const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
+  const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
-  const showGenerating = (busy === 'send-message' || session.running) && !messages.some(isActiveChatItem)
+  const replyActive = busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem
+  const showGenerating = (busy === 'send-message' || session.running) && !hasActiveChatItem
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
   const currentPermission = permissions?.options.find(option => option.value === permissions.currentValue)
@@ -310,6 +323,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
 
       <FlatList
         ref={listRef}
+        key={session.sessionId}
         style={styles.list}
         contentContainerStyle={[styles.listContent, visibleMessages.length === 0 && styles.emptyList]}
         data={visibleMessages}
@@ -317,6 +331,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
         renderItem={renderChatItem}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onLayout={onListLayout}
         onContentSizeChange={onListContentSizeChange}
         onScroll={onListScroll}
         scrollEventThrottle={16}
@@ -341,35 +356,37 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
       />
 
       <View style={styles.composerWrap}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
-          contentContainerStyle={styles.quickActions}
-        >
-          {([
-            [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
-            [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
-            [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
-          ] as const).map(([label, prompt]) => (
-            <Pressable
-              key={label}
-              accessibilityRole="link"
-              accessibilityLabel={label}
-              accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
-              disabled={!connected || permissionSelecting || busy !== undefined}
-              onPress={() => runQuickPrompt(prompt)}
-              hitSlop={6}
-              style={styles.quickAction}
-            >
-              {({ pressed }) => <Text style={[
-                styles.quickActionText,
-                (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
-                pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
-              ]}>{label}</Text>}
-            </Pressable>
-          ))}
-        </ScrollView>
+        {!replyActive && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
+            contentContainerStyle={styles.quickActions}
+          >
+            {([
+              [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
+              [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
+              [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
+            ] as const).map(([label, prompt]) => (
+              <Pressable
+                key={label}
+                accessibilityRole="link"
+                accessibilityLabel={label}
+                accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
+                disabled={!connected || permissionSelecting || busy !== undefined}
+                onPress={() => runQuickPrompt(prompt)}
+                hitSlop={6}
+                style={styles.quickAction}
+              >
+                {({ pressed }) => <Text style={[
+                  styles.quickActionText,
+                  (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
+                  pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
+                ]}>{label}</Text>}
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -386,6 +403,17 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
               </View>
             ))}
           </ScrollView>
+        )}
+        {replyActive && (
+          <View
+            accessible
+            accessibilityLabel={stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : zhCN.chat.generating}
+            accessibilityLiveRegion="polite"
+            style={styles.replyStatus}
+          >
+            <Text style={styles.replyStatusText}>{stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : zhCN.chat.generating}</Text>
+            {!stopping && <ReplyStatusDots />}
+          </View>
         )}
         <View style={styles.composer}>
           <Pressable
@@ -615,27 +643,28 @@ function sessionTitle(session: RemoteSession): string {
   return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
 }
 
-const ChatItemView = memo(function ChatItemView({ item, busyAction, onApproval, onQuestion }: {
+const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion }: {
   item: ChatItem
   busyAction?: string
+  compact: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
 }) {
   if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
-  if (item.kind === 'tool') return <ToolRow item={item} />
-  if (item.role === 'assistant'
+  if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
+  if (!compact && item.role === 'assistant'
     && !hasVisibleMessageText(item.text)
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} />
+  return <MessageBubble item={item} compact={compact} />
 })
 
-function MessageBubble({ item }: { item: ChatMessage }) {
+function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
-  const showReasoning = remote && hasVisibleMessageText(item.reasoning ?? '')
+  const showReasoning = !compact && remote && hasVisibleMessageText(item.reasoning ?? '')
   const showText = hasVisibleMessageText(item.text)
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
@@ -723,13 +752,13 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
   )
 }
 
-function ToolRow({ item }: { item: ToolActivity }) {
+function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [expanded, setExpanded] = useState(false)
   const stateText = item.state === 'running' ? zhCN.status.running : item.state === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const detail = compactActivityText(item.summary ?? item.arguments)
-  const hasDetail = item.callDetail !== undefined || item.resultDetail !== undefined
+  const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
       <Pressable
@@ -925,7 +954,6 @@ function GeneratingIndicator() {
   return (
     <View style={styles.generatingIndicator} accessibilityRole="progressbar" accessibilityLabel={zhCN.chat.generating}>
       <ActivityIndicator size="small" color={colors.accent} />
-      <Text style={styles.generatingText}>{zhCN.chat.generating}</Text>
     </View>
   )
 }
@@ -944,6 +972,51 @@ function StreamingCursor() {
   }, [opacity])
 
   return <Animated.View style={[styles.streamingCursor, { opacity }]} accessibilityLabel={zhCN.chat.generating} />
+}
+
+function ReplyStatusDots() {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const progress = useRef(new Animated.Value(0)).current
+  const [reduceMotion, setReduceMotion] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    void AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
+      if (mounted) setReduceMotion(enabled)
+    })
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
+    return () => {
+      mounted = false
+      subscription.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const animation = Animated.loop(Animated.timing(progress, {
+      toValue: 3,
+      duration: 900,
+      useNativeDriver: true,
+    }))
+    animation.start()
+    return () => animation.stop()
+  }, [progress, reduceMotion])
+
+  return (
+    <View style={styles.replyDots} importantForAccessibility="no-hide-descendants">
+      {[0, 1, 2].map(index => (
+        <Animated.Text
+          key={index}
+          style={[styles.replyDot, { color: colors.accent, opacity: reduceMotion ? 1 : progress.interpolate({
+              inputRange: [index, index + 0.5, index + 1],
+              outputRange: [0.25, 1, 0.25],
+              extrapolate: 'clamp',
+            }) }]}
+        >·</Animated.Text>
+      ))}
+    </View>
+  )
 }
 
 function isActiveChatItem(item: ChatItem): boolean {
@@ -1012,7 +1085,6 @@ function createStyles(colors: ThemeColors) {
   activitySeparator: { ...type.small, color: colors.subtle },
   reasoningBody: { backgroundColor: colors.surface, padding: spacing.sm, marginHorizontal: spacing.xs, marginBottom: spacing.xs, borderRadius: radius.sm },
   generatingIndicator: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, marginVertical: spacing.xs },
-  generatingText: { ...type.small, color: colors.muted },
   streamingCursor: { width: 7, height: 16, backgroundColor: colors.accent, borderRadius: 2, marginTop: 3 },
   toolCard: { borderRadius: radius.md, overflow: 'hidden' },
   toolCardExpanded: { backgroundColor: colors.surface },
@@ -1056,12 +1128,16 @@ function createStyles(colors: ThemeColors) {
   welcomeIcon: { width: 52, height: 52, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
   welcomeTitle: { ...type.heading, color: colors.ink },
   welcomeBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs, maxWidth: 340 },
-  composerWrap: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
   quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
   quickAction: { minHeight: 32, justifyContent: 'center' },
   quickActionText: { ...type.smallStrong, color: colors.primary },
   quickActionPressed: { opacity: 0.6 },
   quickActionDisabled: { color: colors.disabled },
+  replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
+  replyStatusText: { ...type.caption, color: colors.accent },
+  replyDots: { flexDirection: 'row', alignItems: 'center', marginLeft: -spacing.xs },
+  replyDot: { ...type.caption, fontSize: 18, lineHeight: 18, fontWeight: '700' },
   imageTray: { gap: spacing.xs, paddingBottom: spacing.xs },
   imagePreviewWrap: { width: 72, height: 72 },
   imagePreview: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },

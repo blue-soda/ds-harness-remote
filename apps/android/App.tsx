@@ -77,14 +77,18 @@ function AppNavigator() {
   const error = useAppStore(state => state.error)
   const bootstrap = useAppStore(state => state.bootstrap)
   const reconnect = useAppStore(state => state.reconnect)
+  const openSession = useAppStore(state => state.openSession)
   const reauthRequired = useAppStore(state => state.reauthRequired)
   const setOffline = useAppStore(state => state.setOffline)
   const clearError = useAppStore(state => state.clearError)
   const [routes, setRoutes] = useState<Route[]>([{ name: 'server' }])
   const [homeMenuOpen, setHomeMenuOpen] = useState(false)
   const didChooseInitialRoute = useRef(false)
+  const backgrounded = useRef(false)
   const networkRoute = useRef<NetworkRoute | undefined>(undefined)
   const route = routes[routes.length - 1]!
+  const routeRef = useRef(route)
+  routeRef.current = route
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
@@ -243,10 +247,24 @@ function AppNavigator() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active' && useAppStore.getState().connection.phase === 'offline') void reconnect()
+      if (state === 'background') {
+        backgrounded.current = true
+        return
+      }
+      if (state !== 'active' || !backgrounded.current) return
+      backgrounded.current = false
+      const current = useAppStore.getState()
+      if (current.selectedDevice === undefined
+        || current.connection.phase === 'connecting'
+        || current.connection.phase === 'reconnecting') return
+      void (async () => {
+        if (!await reconnect()) return
+        const session = useAppStore.getState().selectedSession
+        if (routeRef.current.name === 'chat' && session !== undefined) await openSession(session)
+      })()
     })
     return () => subscription.remove()
-  }, [reconnect])
+  }, [openSession, reconnect])
 
   if (bootPhase === 'loading') return <LoadingScreen />
   if (bootPhase === 'error') return <BootError onRetry={() => void bootstrap()} message={error} />
