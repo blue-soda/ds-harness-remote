@@ -4,6 +4,7 @@
 
 - Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.
 - Tightens the Typert gateway request type to match the current Remote contract and adds regression coverage for empty provider-directory calls.
+- Advances the Android app to `0.4.22` (`versionCode 33`) alongside the Plugin release.
 
 ## 0.4.21 - 2026-09-28
 
