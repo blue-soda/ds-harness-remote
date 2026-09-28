@@ -15294,7 +15294,7 @@ var RemoteTypertGateway2 = class {
     throw remoteFailure(result.error);
   }
   async dispatch(endpoint, payload, signal) {
-    const request = { endpoint, payload: normalizeConfigArguments(endpoint, payload) };
+    const request = { endpoint, payload };
     const encoded = new TextEncoder().encode(JSON.stringify(request));
     let response;
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES2) {
@@ -15420,37 +15420,6 @@ var RemoteTypertGateway2 = class {
     }
   }
 };
-function normalizeConfigArguments(endpoint, payload) {
-  if (!isRecord4(payload) || !isRecord4(payload.args) || Array.isArray(payload.args)) return payload;
-  const args = payload.args;
-  const positional = (() => {
-    switch (endpoint) {
-      case "settings/describe":
-      case "llm/listProviders":
-      case "llm/listConfigurableProviders":
-        return [];
-      case "settings/update":
-        return [args.ns, args.patch, args.expectedRevision];
-      case "settings/replace":
-        return [args.ns, args.section, args.expectedRevision];
-      case "settings/mutate":
-        return [args.ns, args.ops, args.expectedRevision];
-      case "credentials/describe":
-        return [args.refs];
-      case "credentials/set":
-        return [args.ref, args.value];
-      case "credentials/unset":
-        return [args.ref];
-      case "llm/discoverModels": {
-        const { settingsNs, ...request } = args;
-        return [settingsNs, request];
-      }
-      default:
-        return void 0;
-    }
-  })();
-  return positional === void 0 ? payload : { ...payload, args: positional };
-}
 var AsyncValueQueue = class {
   values = [];
   bytes = 0;
@@ -18390,7 +18359,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.21";
+var PLUGIN_VERSION = "0.4.22";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;

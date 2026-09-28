@@ -1,5 +1,7 @@
 ## English
 
+- Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.
+
 - Fixes Remote Web model configuration on DeepSeek Harness 0.1.7 by translating legacy object-shaped configuration calls to the positional Typert wire format.
 - Adds one-time Host registration installers and the `ds-harness-remote register <server-token>` CLI command; token installers enable the Host terminal setting for the registered service.
 - Refreshes the npm package documentation and installation metadata for the current release line.
@@ -9,6 +11,8 @@
 - Includes the native workspace file tree and read-only previews, Host-local terminals, and authorized loopback development-service previews from the 0.4.15 release.
 
 ## 中文
+
+- 修复最新版 Typert Remote 提供商目录请求，保留协议要求的普通对象 `args` 载荷。
 
 - 修复 DeepSeek Harness 0.1.7 上 Remote Web 模型配置不生效的问题，将旧版对象形式的配置调用转换为 Typert 位置参数格式。
 - 新增一次性 Host 注册安装脚本和 `ds-harness-remote register <server-token>` CLI 命令；Token 安装脚本会为注册后的服务开启远程终端。
@@ -22,4 +26,4 @@
 
 - [@ccch1mneyyy](https://github.com/ccch1mneyyy) — Android 文件预览、会话工具栏和终端面板改动（PR [#73](https://github.com/liguobao/ds-harness-remote/pull/73)、[#74](https://github.com/liguobao/ds-harness-remote/pull/74)）。
 
-[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.20...v0.4.21) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.21/README.md)
+[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.21...v0.4.22) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.22/README.md)

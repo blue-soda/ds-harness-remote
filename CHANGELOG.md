@@ -1,9 +1,13 @@
 # Changelog
 
+## 0.4.22 - 2026-09-28
+
+- Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.
+- Tightens the Typert gateway request type to match the current Remote contract and adds regression coverage for empty provider-directory calls.
+
 ## 0.4.21 - 2026-09-28
 
-- Fixes Remote Web model configuration against DeepSeek Harness 0.1.7 by translating legacy object-shaped configuration calls to the positional Typert wire format.
-- Keeps canonical positional calls unchanged and covers settings writes, credentials, and model discovery.
+- Updates Remote Web model configuration compatibility for DeepSeek Harness 0.1.7; the provider-directory payload regression in that release is fixed in 0.4.22.
 - Adds one-time Host registration installers and the `ds-harness-remote register <server-token>` CLI command; the token installers enable the Host terminal setting for the registered service.
 
 ## 0.4.20 - 2026-09-27
