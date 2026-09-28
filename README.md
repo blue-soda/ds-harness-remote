@@ -40,7 +40,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 ## Features
 
 - Continue active sessions and review their latest progress from another device
-- Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.1.6-alpha.1`
+- Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.2.0-rc.1`
 - Answer questions and permission requests from clients with live conversation controls
 - Open workspaces from another authorized computer on the same account
 - Reuse the native Harness interface instead of maintaining a separate desktop conversation UI
@@ -76,7 +76,7 @@ Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.22
+dsh plugin --profile web add -w ds-harness-remote@0.4.23
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -149,7 +149,7 @@ Sign in to the Android client with your existing account, select an available co
 open a workspace, and continue the conversation with text or image prompts. The conversation
 toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
-Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1`) and an updated Remote Host plugin. Enable **Remote terminal** in the Host's local Remote settings before opening a shell. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
+Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.1`) and an updated Remote Host plugin. Enable **Remote terminal** in the Host's local Remote settings before opening a shell. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
 
 The permission selector supports both older inline options and the separate `permissionPresets/catalog` used by newer DSH 0.1.6 builds. Update the Host Remote plugin too; unsupported Hosts show an actionable error instead of fabricated permission options.
 
@@ -233,7 +233,7 @@ Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
 `ApiProxy` or the v0.1.2 Typert Remote Gateway, and this plugin does not provide
 an adapter or wire-format translation for the old RPC surface.
 
-Plugin `0.4.22` primarily targets compatibility with DeepSeek Harness `dsh-v0.1.7-rc.1`, while also supporting `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports `dsh-v0.1.1-rc.2` through the legacy
+Plugin `0.4.23` targets DeepSeek Harness `dsh-v0.2.0-rc.1` and retains compatibility with `dsh-v0.1.7-rc.1`, while also supporting `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports `dsh-v0.1.1-rc.2` through the legacy
 official `ApiProxy`, and `dsh-v0.1.2-alpha.1`–`rc.1` through the
 official Typert Remote Gateway. It also supports
 `dsh-v0.1.5-rc.1` and `dsh-v0.1.6-alpha.1` Session V3 through the official Typert Remote
@@ -245,7 +245,7 @@ Remote Web/Desktop and the Android app also normalize released sessions that
 still report the retired `code` agent preset to `ptc`, so old sessions can
 resume on `dsh-v0.1.5-rc.1` or `dsh-v0.1.6-alpha.1` without changing DeepSeek Harness itself.
 
-Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.22` selects the legacy
+Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.23` selects the legacy
 ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop clients can open
 legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
 Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.
@@ -292,7 +292,7 @@ Run the optional single-account Relay Server in [`apps/server`](apps/server/READ
 
 ## Native sidebar and development previews
 
-Harness `0.1.6-alpha.2` and later workspace files and read-only previews use the official APIs; the existing dsh-file-viewer bridge remains available. The Remote Host activates on both host generations: the ≤`0.1.6` settings-registry path and the `0.1.7-rc.1` Volatile entry path are feature-detected at runtime, so one package covers both.
+Harness `0.1.6-alpha.2` and later workspace files and read-only previews use the official APIs; the existing dsh-file-viewer bridge remains available. The Remote Host activates on both host generations: the ≤`0.1.6` settings-registry path and the `0.1.7-rc.1` and `0.2.0-rc.1` Volatile entry paths are feature-detected at runtime, so one package covers all supported host generations.
 Reads follow the Host Session filesystem permissions, including authorized files outside cwd; directory listings stay within the workspace.
 These native sidebar features target Harness Sessions, not the CodeX in-memory projection.
 

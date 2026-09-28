@@ -1,32 +1,15 @@
 ## English
 
-- Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.
-- Publishes the Android APK as version `0.4.22` with Android `versionCode 33`, aligned with the plugin release.
-
-- Fixes Remote Web model configuration on DeepSeek Harness 0.1.7 by translating legacy object-shaped configuration calls to the positional Typert wire format.
-- Adds one-time Host registration installers and the `ds-harness-remote register <server-token>` CLI command; token installers enable the Host terminal setting for the registered service.
-- Refreshes the npm package documentation and installation metadata for the current release line.
-- Improves compatibility with DeepSeek Harness `dsh-v0.1.7-rc.1`: Volatile settings entries, the updated Typert stream-open signature, workspace file payloads, and byte responses are supported while the `0.1.6` settings path remains available.
-- Keeps `dsh-v0.1.6-alpha.2` and earlier settings hosts working, including onboarding acknowledgement handling when the older settings registry rejects the newer welcome field.
-- Ships the CodeX Remote workspace file and terminal forwarding added in 0.4.17, including PTY-backed subprocesses when available, pipe fallback, bounded output replay, reconnect snapshots, terminal ownership, resize, and state handling.
-- Includes the native workspace file tree and read-only previews, Host-local terminals, and authorized loopback development-service previews from the 0.4.15 release.
+- Upgrades the Remote Plugin dependency baseline to DeepSeek Harness `dsh-v0.2.0-rc.1`.
+- Keeps the official Session V3 carrier and the 0.1.7 workspace payload compatibility paths working on the 0.2.0 release line.
+- Adds the fixed, authenticated allowlist entries required by the 0.2.0 native Workspace and Session UI, including projections, application lookup, default Workspace initialization, and pinning.
+- Publishes the Android APK as version `0.4.23` with Android `versionCode 34`.
 
 ## 中文
 
-- 修复最新版 Typert Remote 提供商目录请求，保留协议要求的普通对象 `args` 载荷。
-- 发布 Android APK `0.4.22`（Android `versionCode 33`），与 Plugin 发布版本保持一致。
+- 将 Remote Plugin 的官方依赖基线升级到 DeepSeek Harness `dsh-v0.2.0-rc.1`。
+- 在 0.2.0 发布线上继续使用官方 Session V3 carrier，并保留 0.1.7 的 Workspace payload 兼容路径。
+- 为 0.2.0 原生 Workspace/Session UI 增加固定且经过认证的 allowlist 条目，包括 projections、应用查询、默认 Workspace 初始化和会话置顶。
+- 发布版本 `0.4.23` 的 Android APK（Android `versionCode 34`）。
 
-- 修复 DeepSeek Harness 0.1.7 上 Remote Web 模型配置不生效的问题，将旧版对象形式的配置调用转换为 Typert 位置参数格式。
-- 新增一次性 Host 注册安装脚本和 `ds-harness-remote register <server-token>` CLI 命令；Token 安装脚本会为注册后的服务开启远程终端。
-- 更新 npm 包文档和安装元数据，使其与当前发布线保持一致。
-- 提升对 DeepSeek Harness `dsh-v0.1.7-rc.1` 的兼容性：支持 Volatile settings、更新后的 Typert stream-open 签名、工作区文件 payload 与 byte 响应，同时保留 `0.1.6` settings 路径。
-- 保留 `dsh-v0.1.6-alpha.2` 及更早 settings Host 的可用性，包括旧 settings 注册表拒绝新版 welcome 字段时的引导确认兼容。
-- 包含 0.4.17 加入的 CodeX Remote 工作区文件和终端转发：优先使用 PTY，支持管道回退、有限输出回放、断线快照、终端归属、尺寸调整和状态更新。
-- 包含 0.4.15 加入的原生工作区文件树与只读预览、Host 本地终端及授权 loopback 开发服务预览。
-
-## Contributors / 贡献者
-
-- [@ccch1mneyyy](https://github.com/ccch1mneyyy) — Android 文件预览、会话工具栏和终端面板改动（PR [#73](https://github.com/liguobao/ds-harness-remote/pull/73)、[#74](https://github.com/liguobao/ds-harness-remote/pull/74)）。
-- [@HuanLinOTO](https://github.com/HuanLinOTO) — DeepSeek Harness `0.1.7-rc.1` 兼容性、Typert Remote 和设置注册表适配（PR [#75](https://github.com/liguobao/ds-harness-remote/pull/75)）。
-
-[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.21...v0.4.22) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.22/README.md)
+[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.22...v0.4.23) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.23/README.md)

@@ -32,7 +32,8 @@ export function harnessSessionGeneration(version: string | undefined): HarnessSe
   const major = Number(match[1])
   const minor = Number(match[2])
   const patch = Number(match[3])
-  return major === 0 && minor === 1 && patch >= 5 ? 'v3' : 'legacy'
+  // 0.2.0 retains the existing Remote carrier; its on-disk format is unrelated.
+  return major === 0 && ((minor === 1 && patch >= 5) || minor === 2) ? 'v3' : 'legacy'
 }
 
 /**

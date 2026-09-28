@@ -137,6 +137,9 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'session/modelCatalog',
   'session/page',
   'session/prompt',
+  'session/projections',
+  'session/initializeDefaultModel',
+  'session/workspacePathApplications',
   'session/rename',
   'session/search',
   'session/selectModel',
@@ -166,6 +169,10 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspace/insertBefore',
   'workspace/insertSessionBefore',
   'workspace/rename',
+  'workspace/unarchiveSession',
+  'workspace/initializeDefault',
+  'workspace/pinSession',
+  'workspace/unpinSession',
 ] as const
 
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
@@ -466,18 +473,33 @@ function normalizeWorkspaceChangesPayload(endpoint: string, payload: unknown, ha
  * older generated descriptors reject the new `options` field.
  */
 function normalizeWorkspaceRequestPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
-  if (endpoint !== 'workspaceFiles/readBytes' || !requiresWorkspaceChangePath(harnessVersion)) return payload
   if (!isRecord(payload) || !isRecord(payload.args)) return payload
   const args = payload.args
-  if (!Object.hasOwn(args, 'range') || Object.hasOwn(args, 'options')) return payload
-  const { range, ...rest } = args
-  return { ...payload, args: { ...rest, options: { range } } }
+  if (endpoint === 'workspaceFiles/readBytes' && requiresWorkspaceChangePath(harnessVersion)) {
+    if (!Object.hasOwn(args, 'range') || Object.hasOwn(args, 'options')) return payload
+    const { range, ...rest } = args
+    return { ...payload, args: { ...rest, options: { range } } }
+  }
+  // DSH 0.2 removes the first-use naming request; accept a legacy client
+  // payload while keeping the generated 0.2 endpoint's zero-argument shape.
+  if (endpoint === 'workspace/initializeDefault' && isDshV02OrNewer(harnessVersion) && Object.hasOwn(args, 'request')) {
+    const { request: _request, ...rest } = args
+    return { ...payload, args: rest }
+  }
+  return payload
+}
+
+function isDshV02OrNewer(version: string | undefined): boolean {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
+  if (match === null) return false
+  return Number(match[1]) === 0 && Number(match[2]) >= 2
 }
 
 function requiresWorkspaceChangePath(version: string | undefined): boolean {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
   if (match === null) return false
-  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) >= 7
+  return Number(match[1]) === 0
+    && ((Number(match[2]) === 1 && Number(match[3]) >= 7) || Number(match[2]) === 2)
 }
 
 async function dispatchCommandForHost(

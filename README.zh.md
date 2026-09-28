@@ -40,7 +40,7 @@
 ## 主要特性
 
 - 从另一台设备继续活跃会话，查看最新进展
-- 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.1.6-alpha.1` 范围内的受支持 Harness 版本中使用图片 Prompt
+- 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.2.0-rc.1` 范围内的受支持 Harness 版本中使用图片 Prompt
 - 在支持实时会话控制的客户端中回答问题、处理权限请求
 - 打开同一账号下另一台已授权电脑上的 Workspace
 - 复用 Harness 原生界面，不另外维护一套桌面会话 UI
@@ -76,7 +76,7 @@ irm https://dsh.r2049.cn/app/install.ps1 | iex
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.22
+dsh plugin --profile web add -w ds-harness-remote@0.4.23
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -141,7 +141,7 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
 会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 
-Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1`）的原生接口及更新后的 Remote Host 插件。使用终端前，在 Host 本地 Remote 设置中开启「远程终端」。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
+Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.1`）的原生接口及更新后的 Remote Host 插件。使用终端前，在 Host 本地 Remote 设置中开启「远程终端」。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
 
 权限选择器兼容旧版会话内选项与新版 DSH 0.1.6 的独立 `permissionPresets/catalog`。Host Remote 插件也需要更新；不支持的 Host 会显示更新提示，不会凭空补出权限选项。
 
@@ -216,10 +216,10 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
 本插件不提供旧 RPC 的适配层或 wire format 翻译。
 
-Plugin `0.4.22` 主要用于兼容 DeepSeek Harness `dsh-v0.1.7-rc.1`，同时保留
+Plugin `0.4.23` 主要用于兼容 DeepSeek Harness `dsh-v0.2.0-rc.1`，同时保留 `dsh-v0.1.7-rc.1`，并保留
 `dsh-v0.1.6-alpha.2` 及更早版本的 settings 兼容路径；它也兼容 `dsh-v0.1.1-rc.2` 与
 `dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
-Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` 与 `dsh-v0.1.6-alpha.1` 的 Session V3
+Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1`、`dsh-v0.1.6-alpha.1` 与 `dsh-v0.2.0-rc.1` 的 Session V3
 官方 Typert Remote Gateway——`0.1.6` 上报的 patch 为 `6`，会选中同一个 Session V3
 profile，不需要额外的 wire format 适配层。运行 rc.2 的 `0.4.13` Client 仍可通过
 legacy capability 降级连接旧 rc.2 Host。
@@ -228,7 +228,7 @@ Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的
 agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 或 `dsh-v0.1.6-alpha.1`
 上恢复，而无需修改 DeepSeek Harness 本身。
 
-Desktop 两端必须使用兼容的 Harness carrier。`0.4.22` 会在 Host 暴露 rc.2 ApiProxy 时
+Desktop 两端必须使用兼容的 Harness carrier。`0.4.23` 会在 Host 暴露 rc.2 ApiProxy 时
 选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
 打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
 前拒绝 Session V3 Host。
@@ -274,7 +274,7 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.22` 会在 Host 暴�
 
 ## 原生侧栏与开发服务预览
 
-Harness `0.1.6-alpha.2` 及更新版本的原生工作区文件树与只读预览通过官方 API 接入，旧 dsh-file-viewer 仍可用。Remote Host 同时支持两种宿主代际：≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 的 Volatile entry 路径在运行时特性检测，同一份包即可覆盖。
+Harness `0.1.6-alpha.2` 及更新版本的原生工作区文件树与只读预览通过官方 API 接入，旧 dsh-file-viewer 仍可用。Remote Host 同时支持这些宿主代际：≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径在运行时特性检测，同一份包即可覆盖。
 文件读取遵循 Host Session 文件系统权限，可能包含工作区外的已授权文件；目录树仍限于工作区。
 原生侧栏功能面向 Harness Session，CodeX 内存投影不自动获得原生文件/终端能力。
 

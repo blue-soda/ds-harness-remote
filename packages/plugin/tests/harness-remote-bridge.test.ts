@@ -33,6 +33,11 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenCalledWith('permissionPresets/catalog', { args: {} }, expect.any(AbortSignal))
     await expect(bridge.call({ endpoint: 'permissionPresets/select', payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     expect(dispatch).toHaveBeenCalledTimes(2)
+    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession']) {
+      const payload = { args: { request: { sessionId: 'session-1' } } }
+      await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
+      expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
+    }
   })
 
   it('falls back to Host directory metadata for the v0.1.2-rc.1 native-only picker failure', async () => {
@@ -69,12 +74,12 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
-  it('selects the renamed command attachment field for a 0.1.5 Host', async () => {
+  it.each(['0.1.5-rc.1', '0.2.0-rc.1'])('selects the renamed command attachment field for a %s Host', async version => {
     const dispatch = vi.fn(async (_endpoint: string, payload: { args: Record<string, unknown> }) => {
       expect(payload.args).toEqual({ agentId: 'session-1', line: '/goal complete', submittedAttachments: [] })
       return { ok: true as const, value: { commandId: 'cmd-0.1.5' } }
     })
-    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.1.5-rc.1')
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, version)
 
     await expect(bridge.call({
       endpoint: 'commands/execute',
@@ -117,7 +122,7 @@ describe('HarnessRemoteBridge', () => {
     ])
   })
 
-  it('adds the 0.1.7 workspace root to legacy file-change subscriptions', async () => {
+  it.each(['0.1.7-rc.1', '0.2.0-rc.1'])('adds the workspace root to legacy file-change subscriptions on %s', async version => {
     const open = vi.fn(async () => (async function* () {
       yield { kind: 'ready' }
     })())
@@ -125,7 +130,7 @@ describe('HarnessRemoteBridge', () => {
       gateway({ open }),
       vi.fn(async () => undefined),
       undefined,
-      '0.1.7-rc.1',
+      version,
     )
 
     await expect(bridge.openStream({
@@ -163,13 +168,13 @@ describe('HarnessRemoteBridge', () => {
     )
   })
 
-  it('nests readBytes ranges for a 0.1.7 Host', async () => {
+  it.each(['0.1.7-rc.1', '0.2.0-rc.1'])('nests readBytes ranges for a %s Host', async version => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
     const bridge = new HarnessRemoteBridge(
       gateway({ dispatch }),
       vi.fn(async () => undefined),
       undefined,
-      '0.1.7-rc.1',
+      version,
     )
 
     await bridge.call({

@@ -9,7 +9,7 @@ import type { AuthenticatedPeerChannel } from '../src/types.js'
 import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
-  it('advertises ApiProxy alongside Session V3 for older Remote Web clients', async () => {
+  it.each(['0.1.5-rc.1', '0.2.0-rc.1'])('advertises ApiProxy alongside Session V3 on %s', async version => {
     const runtime = new HostPluginRuntime(
       config(),
       identities(),
@@ -18,7 +18,7 @@ describe('HostPluginRuntime multi-Client routing', () => {
       localGateway(),
     )
     await runtime.start()
-    ;(runtime as unknown as { harnessVersion: string }).harnessVersion = '0.1.5-rc.1'
+    ;(runtime as unknown as { harnessVersion: string }).harnessVersion = version
 
     expect(runtime.diagnostics()).toMatchObject({
       capabilities: expect.arrayContaining([

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.23 - 2026-09-29
+
+- Upgrades the official DeepSeek Harness development baseline to `dsh-v0.2.0-rc.1` and publishes peer ranges for the new `0.2.0-rc.1` package line.
+- Keeps Session V3 selection and the 0.1.7 workspace payload adaptations correct on `0.2.0-rc.1`, including command attachments and byte-range reads.
+- Extends the authenticated fixed allowlist for the 0.2.0 native UI (`session/projections`, workspace application lookup, default workspace initialization, and session pinning).
+- Advances the Android app to `0.4.23` (`versionCode 34`) alongside the Plugin release.
+
 ## 0.4.22 - 2026-09-28
 
 - Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.

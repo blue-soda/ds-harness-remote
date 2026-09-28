@@ -19,7 +19,7 @@ Continue DeepSeek Harness sessions and experimental Codex workspaces from anothe
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.22
+dsh plugin --profile web add -w ds-harness-remote@0.4.23
 ```
 
 ### dsh-TUI Host
@@ -27,7 +27,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.22
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.22
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.23
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
@@ -44,13 +44,13 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 
 ## Compatibility
 
-Plugin `0.4.22` primarily targets DeepSeek Harness `dsh-v0.1.7-rc.1` and also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
+Plugin `0.4.23` targets DeepSeek Harness `dsh-v0.2.0-rc.1` and retains `dsh-v0.1.7-rc.1` compatibility; it also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
 
 - `dsh-v0.1.1-rc.2` through the official legacy `ApiProxy`;
 - `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` through the official Typert Remote Gateway;
-- `dsh-v0.1.5-rc.1` and `dsh-v0.1.6-alpha.1` Session V3 through the official Typert Remote Gateway.
+- `dsh-v0.1.5-rc.1`, `dsh-v0.1.6-alpha.1`, and `dsh-v0.2.0-rc.1` Session V3 through the official Typert Remote Gateway.
 
-The same package feature-detects the older settings registry and the `0.1.7-rc.1` Volatile settings entry. Remote Web/Desktop and Android normalize released sessions that still report the retired `code` agent preset to `ptc`.
+The same package feature-detects the older settings registry and the `0.1.7-rc.1` and `0.2.0-rc.1` Volatile settings entry. Remote Web/Desktop and Android normalize released sessions that still report the retired `code` agent preset to `ptc`.
 
 ## Self-hosted Server
 

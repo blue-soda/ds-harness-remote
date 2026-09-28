@@ -14756,7 +14756,7 @@ function harnessSessionGeneration(version) {
   const major = Number(match[1]);
   const minor = Number(match[2]);
   const patch = Number(match[3]);
-  return major === 0 && minor === 1 && patch >= 5 ? "v3" : "legacy";
+  return major === 0 && (minor === 1 && patch >= 5 || minor === 2) ? "v3" : "legacy";
 }
 async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
@@ -18366,7 +18366,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.22";
+var PLUGIN_VERSION = "0.4.23";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -24267,6 +24267,9 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "session/modelCatalog",
   "session/page",
   "session/prompt",
+  "session/projections",
+  "session/initializeDefaultModel",
+  "session/workspacePathApplications",
   "session/rename",
   "session/search",
   "session/selectModel",
@@ -24295,7 +24298,11 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspace/follow",
   "workspace/insertBefore",
   "workspace/insertSessionBefore",
-  "workspace/rename"
+  "workspace/rename",
+  "workspace/unarchiveSession",
+  "workspace/initializeDefault",
+  "workspace/pinSession",
+  "workspace/unpinSession"
 ];
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
@@ -24558,17 +24565,28 @@ function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (endpoint !== "workspaceFiles/readBytes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
   if (!isRecord10(payload) || !isRecord10(payload.args)) return payload;
   const args = payload.args;
-  if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
-  const { range, ...rest } = args;
-  return { ...payload, args: { ...rest, options: { range } } };
+  if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
+    if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
+    const { range, ...rest } = args;
+    return { ...payload, args: { ...rest, options: { range } } };
+  }
+  if (endpoint === "workspace/initializeDefault" && isDshV02OrNewer(harnessVersion) && Object.hasOwn(args, "request")) {
+    const { request: _request, ...rest } = args;
+    return { ...payload, args: rest };
+  }
+  return payload;
+}
+function isDshV02OrNewer(version) {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? "");
+  if (match === null) return false;
+  return Number(match[1]) === 0 && Number(match[2]) >= 2;
 }
 function requiresWorkspaceChangePath(version) {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? "");
   if (match === null) return false;
-  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) >= 7;
+  return Number(match[1]) === 0 && (Number(match[2]) === 1 && Number(match[3]) >= 7 || Number(match[2]) === 2);
 }
 async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) {
   const parsed = commandExecutePayloadSchema.parse(payload);
