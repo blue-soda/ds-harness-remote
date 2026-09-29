@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Terminal, ImagePlus, Images, RefreshCw, Send, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
+import { mergeReplyReasoning } from '../state/message-helpers'
 import type { ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
@@ -91,7 +92,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
-  const visibleMessages = useMemo(() => messages.filter(item =>
+  const visibleMessages = useMemo(() => mergeReplyReasoning(messages).filter(item =>
     item.kind !== 'message'
       || hasVisibleMessageText(item.text)
       || (!compactChat && hasVisibleMessageText(item.reasoning ?? ''))

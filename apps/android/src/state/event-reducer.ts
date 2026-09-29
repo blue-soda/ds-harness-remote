@@ -129,6 +129,7 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   const finalReasoning = hasVisibleMessageText(reasoning)
     ? reasoning
     : streamed?.kind === 'message' ? streamed.reasoning : undefined
+  const group = replyGroup(data) ?? (streamed?.kind === 'message' ? streamed.replyGroup : undefined)
   if (!hasVisibleMessageText(finalText) && !hasVisibleMessageText(finalReasoning ?? '')) {
     // Native assistant messages may contain only tool/content metadata. They
     // are not chat text and must not leave an empty avatar/"Remote" row.
@@ -137,6 +138,7 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   }
   const message: ChatMessage = {
     kind: 'message', id, sessionId, role: 'assistant', text: finalText, createdAt: now(data),
+    ...(group === undefined ? {} : { replyGroup: group }),
     ...(finalReasoning === undefined ? {} : { reasoning: finalReasoning }),
   }
   if (streamingIndex >= 0) {
@@ -166,6 +168,7 @@ function applyAssistantChunk(
     if (!hasVisibleMessageText(delta)) return current
     return [...current, {
       kind: 'message', id: streamId, sessionId, role: 'assistant',
+      ...(replyGroup(data) === undefined ? {} : { replyGroup: replyGroup(data) }),
       text: chunk.type === 'text-delta' ? delta : '',
       ...(chunk.type === 'reasoning-delta' ? { reasoning: delta } : {}),
       streaming: true,
@@ -539,6 +542,11 @@ function historyView(value: unknown): HistoryEntry['view'] | undefined {
 function stepKey(event: NativeSessionEvent): string {
   const data = isRecord(event.data) ? event.data : {}
   return `${keyPart(data.turn)}:${keyPart(data.step)}`
+}
+
+function replyGroup(data: UnknownRecord): string | undefined {
+  const turn = data.turn
+  return typeof turn === 'string' || typeof turn === 'number' ? String(turn) : undefined
 }
 
 function now(data: UnknownRecord): number {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.25 - 2026-09-29
+
+- Android now merges multiple reasoning and plan segments from the same assistant turn into one default-collapsed analysis section. The answer remains visible, and tapping the section expands the complete reasoning.
+- Preserves tool activity rows while grouping Harness turns and CodeX turns consistently by their native turn identifiers.
+- Advances the Android app to `0.4.25` (`versionCode 36`) alongside the Plugin release.
+
 ## 0.4.24 - 2026-09-29
 
 - Fixes Harness version detection on the DeepSeek Harness 0.2.0 Desktop shell. When the running entrypoint is `@deepseek-ai/dsh-desktop-host` inside `app.asar`, the Host now resolves the `@deepseek-ai/dsh` package through the entrypoint's module scope instead of relying on the ancestor chain only, so it reports `harnessVersion` again.

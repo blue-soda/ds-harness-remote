@@ -221,6 +221,8 @@ export interface ChatMessage extends ChatItemBase {
   kind: 'message'
   role: 'user' | 'assistant' | 'system'
   text: string
+  /** Native turn identifier used to merge multiple reasoning segments in one reply. */
+  replyGroup?: string
   reasoning?: string
   images?: ChatImage[]
   streaming?: boolean
