@@ -44,6 +44,29 @@ export function promptImageFromAsset(asset: ImagePicker.ImagePickerAsset): Promp
   }
 }
 
+/** Build one staged image from base64 bytes read outside expo-image-picker (the document picker). */
+export function promptImageFromBase64(input: {
+  uri: string
+  base64: string
+  mimeType?: string
+  name?: string
+  width: number
+  height: number
+}): PromptImage {
+  if (input.base64.length === 0) throw new Error('missing-image-data')
+  const mediaType = imageMediaType(input.mimeType, input.name ?? input.uri)
+  if (mediaType === undefined) throw new Error('unsupported-image-type')
+  return {
+    uri: input.uri,
+    mediaType,
+    data: input.base64,
+    bytes: decodedBase64Bytes(input.base64),
+    width: input.width,
+    height: input.height,
+    ...(input.name === undefined ? {} : { name: input.name.split(/[\\/]/).at(-1)?.slice(0, 255) }),
+  }
+}
+
 export function validatePromptImages(images: PromptImage[], limits?: ImageAttachmentLimits): string | undefined {
   if (limits === undefined) return undefined
   if (images.length > limits.maxImagesPerMessage) return zhCN.chat.tooManyImages(limits.maxImagesPerMessage)

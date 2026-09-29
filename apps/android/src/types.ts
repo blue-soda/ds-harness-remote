@@ -193,6 +193,15 @@ export interface PermissionPresetOption {
   description?: string
 }
 
+/** One agent-preset (mode) roster row from the Host. */
+export interface AgentPresetOption {
+  id: string
+  isDefault: boolean
+  name?: string
+  description?: string
+  broken?: string
+}
+
 export interface PermissionSelect {
   currentValue: string
   options: PermissionPresetOption[]

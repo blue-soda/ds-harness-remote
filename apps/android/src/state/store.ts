@@ -79,6 +79,7 @@ import {
 } from '../services/storage'
 import type { ThemePreference } from '../ui/theme'
 import type {
+  AgentPresetOption,
   ChatItem,
   CodexPermissionPreset,
   ConnectionProbeTransport,
@@ -130,6 +131,9 @@ interface AppState {
   sessionModels?: SessionModels
   modelSelecting: boolean
   permissionSelecting: boolean
+  agentPresetOptions?: AgentPresetOption[]
+  agentPresetLoading: boolean
+  agentPresetSelecting: boolean
   historyHasMore: boolean
   historyLoadingOlder: boolean
   oldestLoadedSeq?: number
@@ -178,6 +182,8 @@ interface AppState {
   archiveSession(sessionId: string): Promise<boolean>
   selectModel(selection: ModelSelection): Promise<boolean>
   selectPermission(preset: string): Promise<boolean>
+  loadAgentPresets(): Promise<boolean>
+  selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
   workspaceCreate(path: string, backend?: 'harness' | 'codex'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
@@ -229,6 +235,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   messages: {},
   modelSelecting: false,
   permissionSelecting: false,
+  agentPresetOptions: undefined,
+  agentPresetLoading: false,
+  agentPresetSelecting: false,
   historyHasMore: false,
   historyLoadingOlder: false,
   transportPreference: 'auto',
@@ -731,7 +740,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
       const sessions = await proxy.sessionList()
-      set({ sessions, busyAction: undefined })
+      set(state => ({
+        sessions,
+        busyAction: undefined,
+        ...(workspace === undefined ? {} : {
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? { ...item, sessionIds: [sessionId, ...item.sessionIds.filter(id => id !== sessionId)] }
+            : item),
+        }),
+      }))
       const created = sessions.find(session => session.sessionId === sessionId)
       if (created === undefined) return false
       return get().openSession(created)
@@ -768,6 +785,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         archivedSessionIds,
         sessions,
         busyAction: undefined,
+        workspaces: state.workspaces.map(workspace => ({
+          ...workspace,
+          sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
+        })),
         selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
         sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
       }))
@@ -845,6 +866,43 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true
     } catch (error) {
       set({ permissionSelecting: false, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async loadAgentPresets() {
+    if (get().connection.phase !== 'connected') return false
+    if (get().agentPresetLoading) return false
+    set({ agentPresetLoading: true, error: undefined })
+    try {
+      const roster = await connection.requireProxy().agentPresetList()
+      set({ agentPresetOptions: [...roster.presets], agentPresetLoading: false })
+      return true
+    } catch (error) {
+      set({ agentPresetLoading: false, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async selectAgentPreset(preset) {
+    const session = get().selectedSession
+    if (session === undefined || get().connection.phase !== 'connected') return false
+    if (session.backend === 'codex') return false
+    set({ agentPresetSelecting: true, error: undefined })
+    try {
+      const committed = await connection.requireProxy().agentPresetSelect(session.sessionId, preset)
+      set(state => {
+        const update = (item: RemoteSession): RemoteSession =>
+          item.sessionId === session.sessionId ? { ...item, agentPreset: committed } : item
+        return {
+          sessions: state.sessions.map(update),
+          selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+          agentPresetSelecting: false,
+        }
+      })
+      return true
+    } catch (error) {
+      set({ agentPresetSelecting: false, error: friendlyError(error) })
       return false
     }
   },
