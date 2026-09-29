@@ -2,8 +2,8 @@
 
 ## 0.4.25 - 2026-09-29
 
-- Android now merges multiple reasoning and plan segments from the same assistant turn into one default-collapsed analysis section. The answer remains visible, and tapping the section expands the complete reasoning.
-- Preserves tool activity rows while grouping Harness turns and CodeX turns consistently by their native turn identifiers.
+- Desktop Remote Web and Android now merge multiple reasoning and plan segments from the same assistant turn into one default-collapsed analysis section. The answer remains visible, and tapping the section expands the complete reasoning.
+- Both clients preserve tool activity rows while grouping Harness turns and CodeX turns consistently by their native turn identifiers.
 - Advances the Android app to `0.4.25` (`versionCode 36`) alongside the Plugin release.
 
 ## 0.4.24 - 2026-09-29
