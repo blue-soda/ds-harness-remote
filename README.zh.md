@@ -50,10 +50,9 @@
 
 ## 安装
 
-### 方式 A：DSH Desktop
+### 支持 DeepSeek Harness 桌面版
 
-在 Windows、macOS 或 Linux 上安装 [DSH Desktop](https://github.com/liguobao/dsh-desktop)。
-DSH Desktop 已默认集成并启用 Remote，无需另行安装插件。
+Remote 已支持 DeepSeek Harness 桌面版。通过已有的 DSH profile 安装时，使用下面的固定插件版本。
 
 ### 方式 B：自动安装
 
@@ -77,7 +76,12 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装�
 
 安装后按[快速开始](#快速开始)登录。目录配置、服务管理和卸载见[安装指南](docs/installation.zh.md)。
 
-### 方式 C：已有 DSH 环境
+### 方式 C：dsh-TUI Host
+
+将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
+[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
+
+### 方式 D：命令行安装
 
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
@@ -92,17 +96,12 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.25
 
 不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
 
-### 方式 D：dsh-TUI Host
-
-将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
-[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
-
 ## 快速开始
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
 2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
 3. 为当前机器启用远端控制。
-4. 在另一台设备上打开 DSH Desktop、Remote Web 或 Android 客户端，并登录同一账号。
+4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
 公开服务使用托管的 Remote 中继；单账号自建可使用仓库内的[最小 Server](apps/server/README.zh.md)，其 Web 页面仅提供设备状态。

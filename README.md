@@ -50,10 +50,10 @@ Return to the same Harness session from whichever device is with you. Harness ke
 
 ## Install
 
-### Path A: DSH Desktop
+### DeepSeek Harness Desktop support
 
-Install [DSH Desktop](https://github.com/liguobao/dsh-desktop) on Windows, macOS, or
-Linux. Remote is included and enabled by default, so no separate plugin installation is required.
+Remote supports the DeepSeek Harness desktop edition. Use the fixed plugin version below when
+installing it through an existing DSH profile.
 
 ### Path B: Automated installation
 
@@ -77,7 +77,12 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded insta
 
 Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs/installation.md) for configuration, service management, and uninstallation.
 
-### Path C: Existing DSH installation
+### Path C: dsh-TUI Host
+
+For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
+[dsh-TUI Remote guide](docs/dsh-tui.md).
+
+### Path D: Command-line installation
 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
@@ -93,17 +98,12 @@ Restart Harness after installation.
 Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
 adds the bundle's configuration layer.
 
-### Path D: dsh-TUI Host
-
-For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
-[dsh-TUI Remote guide](docs/dsh-tui.md).
-
 ## Quick start
 
 1. Open **Remote** from the Harness sidebar.
 2. Sign in with a GitHub or Zhihu QR code, or use your account and password. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
 3. Enable remote control for the current computer.
-4. On another device, open DSH Desktop, Remote Web, or the Android client and sign in to the same account.
+4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
 
 The public service uses the hosted Remote relay. For a minimal single-account deployment,
