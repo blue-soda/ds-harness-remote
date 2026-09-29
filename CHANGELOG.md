@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.24 - 2026-09-29
+
+- Fixes Harness version detection on the DeepSeek Harness 0.2.0 Desktop shell. When the running entrypoint is `@deepseek-ai/dsh-desktop-host` inside `app.asar`, the Host now resolves the `@deepseek-ai/dsh` package through the entrypoint's module scope instead of relying on the ancestor chain only, so it reports `harnessVersion` again.
+- Restores the version-gated workspace compatibility paths on 0.2.0 Hosts, fixing the Remote Web file-change subscription and byte-range reads (legacy `workspaceFiles/changes` root-path injection, `workspaceFiles/readBytes` range nesting under `options`, and the 0.2 default-Workspace request shape).
+- Advances the Android app to `0.4.24` (`versionCode 35`) alongside the Plugin release.
+
 ## 0.4.23 - 2026-09-29
 
 - Upgrades the official DeepSeek Harness development baseline to `dsh-v0.2.0-rc.1` and publishes peer ranges for the new `0.2.0-rc.1` package line.

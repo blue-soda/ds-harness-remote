@@ -14737,8 +14737,10 @@ function uuidV7(now = Date.now()) {
 
 // src/harness-version.ts
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join } from "node:path";
 var LEGACY_PLACEHOLDER_VERSION = "0.0.1";
+var HARNESS_PACKAGE_NAME = "@deepseek-ai/dsh";
 function normalizeHarnessVersion(value) {
   if (typeof value !== "string") return void 0;
   const version = value.trim();
@@ -14758,20 +14760,30 @@ function harnessSessionGeneration(version) {
   const patch = Number(match[3]);
   return major === 0 && (minor === 1 && patch >= 5 || minor === 2) ? "v3" : "legacy";
 }
+async function readHarnessManifestVersion(manifestPath) {
+  try {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (manifest.name !== HARNESS_PACKAGE_NAME) return void 0;
+    return normalizeHarnessVersion(manifest.version);
+  } catch {
+    return void 0;
+  }
+}
 async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
   let directory = dirname(entrypoint);
   for (let depth = 0; depth < 8; depth += 1) {
-    try {
-      const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-      if (manifest.name === "@deepseek-ai/dsh") return normalizeHarnessVersion(manifest.version);
-    } catch {
-    }
+    const version = await readHarnessManifestVersion(join(directory, "package.json"));
+    if (version !== void 0) return version;
     const parent = dirname(directory);
     if (parent === directory) break;
     directory = parent;
   }
-  return void 0;
+  try {
+    return await readHarnessManifestVersion(createRequire(entrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+  } catch {
+    return void 0;
+  }
 }
 
 // src/remote-api-proxy.ts
@@ -18366,7 +18378,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.23";
+var PLUGIN_VERSION = "0.4.24";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
