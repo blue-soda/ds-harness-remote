@@ -57,9 +57,30 @@ version such as `ds-harness-remote@0.4.25` through DSH's plugin manager.
 ### DeepSeek Harness Desktop support
 
 Remote supports the DeepSeek Harness desktop edition. Use a pinned plugin version such as
-`ds-harness-remote@0.4.25`; the command-line installation is the last install option below.
+`ds-harness-remote@0.4.25` through the command-line installation below.
 
-### Path B: Automated installation
+### Path B: dsh-TUI Host
+
+For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
+[dsh-TUI Remote guide](docs/dsh-tui.md).
+
+### Path C: Command-line installation
+
+Add the exact package version through DSH's plugin manager for the `web` profile:
+
+```sh
+dsh plugin --profile web add -w ds-harness-remote@0.4.25
+```
+
+`-w` targets the profile's own workspace root. It is required on pnpm below 11, which
+otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
+
+Restart Harness after installation.
+
+Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
+adds the bundle's configuration layer.
+
+### Path D: Automated installation
 
 macOS / Linux:
 
@@ -79,28 +100,7 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded insta
 & "$env:TEMP\install.ps1"
 ```
 
-Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs/installation.md) for configuration, service management, and uninstallation.
-
-### Path C: dsh-TUI Host
-
-For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
-[dsh-TUI Remote guide](docs/dsh-tui.md).
-
-### Path D: Command-line installation
-
-Add the exact package version through DSH's plugin manager for the `web` profile:
-
-```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.25
-```
-
-`-w` targets the profile's own workspace root. It is required on pnpm below 11, which
-otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
-
-Restart Harness after installation.
-
-Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
-adds the bundle's configuration layer.
+The automated installer installs Remote Host as a background service and keeps it available without a foreground terminal. It also installs the required runtime and plugins; see the [installation guide](docs/installation.md) for platform-specific service management and uninstallation.
 
 ## Quick start
 

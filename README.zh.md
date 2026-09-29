@@ -57,9 +57,29 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 ### 支持 DeepSeek Harness 桌面版
 
 Remote 已支持 DeepSeek Harness 桌面版。可以使用 `ds-harness-remote@0.4.25` 这类固定版本；
-命令行安装放在下面安装选项的最后。
+通过下面的命令行安装方式使用该固定版本。
 
-### 方式 B：自动安装
+### 方式 B：dsh-TUI Host
+
+将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
+[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
+
+### 方式 C：命令行安装
+
+通过 DSH 插件管理命令，将确切版本加入 `web` profile：
+
+```sh
+dsh plugin --profile web add -w ds-harness-remote@0.4.25
+```
+
+`-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
+`ERR_PNPM_ADDING_TO_ROOT`。
+
+安装后请重启 Harness。
+
+不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
+
+### 方式 D：自动安装
 
 macOS / Linux：
 
@@ -79,27 +99,7 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装�
 & "$env:TEMP\install.ps1"
 ```
 
-安装后按[快速开始](#快速开始)登录。目录配置、服务管理和卸载见[安装指南](docs/installation.zh.md)。
-
-### 方式 C：dsh-TUI Host
-
-将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
-[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
-
-### 方式 D：命令行安装
-
-通过 DSH 插件管理命令，将确切版本加入 `web` profile：
-
-```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.25
-```
-
-`-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
-`ERR_PNPM_ADDING_TO_ROOT`。
-
-安装后请重启 Harness。
-
-不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
+自动安装会将 Remote Host 注册为后台服务，无需保持前台终端即可持续运行，同时安装所需运行环境和插件。不同平台的服务管理与卸载方式见[安装指南](docs/installation.zh.md)。
 
 ## 快速开始
 
