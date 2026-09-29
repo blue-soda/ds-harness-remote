@@ -42,9 +42,9 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 - 支持 DeepSeek Harness 桌面版，并可使用固定版本的 Remote 插件
 - 打开同一账号下另一台已授权电脑上的 Workspace
 - 复用 Harness 原生界面，不另外维护一套桌面会话 UI
-- 两端 Harness 都安装可选 `dsh-file-viewer` 插件时，可以预览远端文件
 - 可将纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile 作为 Host，并通过 GitHub 或知乎终端二维码授权
 - Harness 主机无需开放公网监听端口。你可以从任意可上网的地方，通过双向端到端加密链路安全连接
+- 通过 Harness 原生侧栏提供工作区文件、只读预览、终端和已授权本机开发服务预览
 
 ## 安装
 
@@ -151,25 +151,6 @@ Android 文件预览还支持 PNG/JPEG/GIF/WebP 图片和 PDF；Host 提供 `off
   <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
 </p>
 
-## 原生侧栏与开发服务预览
-
-Harness `0.1.6-alpha.2` 及更新版本的原生工作区文件树与只读预览通过官方 API 接入，旧 dsh-file-viewer 仍可用。Remote Host 同时支持这些宿主代际：≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径在运行时特性检测，同一份包即可覆盖。
-文件读取遵循 Host Session 文件系统权限，可能包含工作区外的已授权文件；目录树仍限于工作区。
-原生侧栏功能面向 Harness Session，CodeX 内存投影不自动获得原生文件/终端能力。
-
-在 **Host 本机 → Remote 插件设置** 中开启「远程终端」（切换即保存并立即生效），填写「远程预览端口」后点右侧「保存访问设置」；两项运行时访问控制都无需重启 Host。
-
-终端默认关闭，尝试使用时会提示在 Host 开启；不要用该开关修复账号登录或普通连接错误。
-终端以 Host 用户身份执行命令，独立于 Agent 审批；只列出本 Remote 设备创建的终端，断线不重放输入。
-
-在 Desktop / 连接本机 Harness 的浏览器中，Remote 顶栏点击「预览服务」，输入已授权端口，
-即可在原生浏览器侧栏访问 Host 的 `127.0.0.1` HTTP 服务。支持 WebSocket 与采用当前 origin 的热更新，
-可使用 P2P 或 Relay；相对资源路径保持不变。仅绑定 IPv6 的服务需要另行监听 `127.0.0.1`。
-预览使用随机独立本机 origin，退出 Remote 或断线即关闭；不适用于远程 Web 页面、Android 或 VS Code 预览 UI。
-Host 未配置端口时默认拒绝。它允许与授权开发服务交互，并非只读 HTTP；不支持任意内网地址、CONNECT、
-HTTPS upstream、跨 origin 重定向或代码中硬编码的远端 localhost URL。请求体最多 1 MiB、响应最多 64 MiB。
-设置须在 Host 本地修改，不能从 Remote 会话开启自身的访问权限。
-
 ## 工作方式
 
 ```text
@@ -205,7 +186,7 @@ Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。高级配
 Harness 业务流量在 Client 加密，只能由选定的 Host 解密，固定使用
 `Noise_IK_25519_ChaChaPoly_SHA256`。连接必须同时通过同账号 membership 与本地固定的设备
 identity key 校验。服务端可以协调连接并看到必要的网络元数据，但不能读取会话消息、Prompt、
-工具输出、Workspace 路径或 File Viewer 内容。握手、密钥生命周期、可见元数据、重放保护和
+工具输出、Workspace 路径或 远端文件内容。握手、密钥生命周期、可见元数据、重放保护和
 安全边界详见[端到端加密](docs/end-to-end-encryption.md)。
 
 ## 网络与传输
@@ -221,52 +202,9 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
 - 交互终端需在 Host 本地开启 `terminal.enabled`（默认关闭），以 Host 用户身份运行，独立于 Agent 审批；不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
-- 可选 File Viewer 只通过已认证、已加密的分块读取访问文件，并继续执行 provider 根目录与 locator 授权。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote 是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
-
-## 版本兼容
-
-**破坏性更新声明：** Plugin `0.4.1` 已移除早期实验性的 Remote 业务 RPC
-（`sessions.*`、`session.*`、`permissions.respond`、`sync.from`）。Harness
-会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
-本插件不提供旧 RPC 的适配层或 wire format 翻译。
-
-Plugin `0.4.25` 主要用于兼容 DeepSeek Harness `dsh-v0.2.0-rc.1`，同时保留 `dsh-v0.1.7-rc.1`，并保留
-`dsh-v0.1.6-alpha.2` 及更早版本的 settings 兼容路径；它也兼容 `dsh-v0.1.1-rc.2` 与
-`dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
-Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1`、`dsh-v0.1.6-alpha.1` 与 `dsh-v0.2.0-rc.1` 的 Session V3
-官方 Typert Remote Gateway——`0.1.6` 上报的 patch 为 `6`，会选中同一个 Session V3
-profile，不需要额外的 wire format 适配层。运行 rc.2 的 `0.4.13` Client 仍可通过
-legacy capability 降级连接旧 rc.2 Host。`0.4.25` 还会同时从 CLI 入口与 0.2.0 Desktop
-外壳的 `@deepseek-ai/dsh-desktop-host` 入口读取 Harness 版本，使当前 Desktop 启动的 Host
-继续上报 `harnessVersion`，按版本生效的 Workspace 兼容路径（legacy `workspaceFiles/changes`、
-字节范围读取）不会失效。
-
-Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的已退役 `code`
-agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 或 `dsh-v0.1.6-alpha.1`
-上恢复，而无需修改 DeepSeek Harness 本身。
-
-Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴露 rc.2 ApiProxy 时
-选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
-打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
-前拒绝 Session V3 Host。
-
-## 授权恢复与多实例
-
-每个同时运行的 Host 都需要独立设备身份。共享 `DSH_HOME` 的 profile 也共享 Remote
-凭据；如果两个实例都需要在线，请分别设置独立的 `DSH_HOME` 并授权。
-当另一连接替换当前 Host（`CONNECTION_REPLACED`）时，自动重连会停止，避免两个实例反复互踢。
-
-过期凭据通过跨进程锁串行刷新。Server 拒绝握手时，Host 可刷新凭据后重试一次。
-若刷新被拒绝，请执行 `/remote login [github|zhihu]`，或在 Remote 设置中重新授权 Host。
-日志以 `phase: credential_refresh` 标记刷新失败，不输出凭据。
-
-`SERVER_CREDENTIALS_BUSY` 表示其他进程持有刷新锁。若此前异常退出，请停止共享该
-`DSH_HOME` 的**所有**实例，仅移除 `remote/servers/<serverHash>/<role>/` 下对应凭据旁的
-`server-credentials.json.refresh-lock` 目录，然后重新授权并启动。
-锁不会按存续时间被强行抢占，以免暂停中的进程恢复后继续使用旧 token。
 
 ## 文档
 
@@ -278,6 +216,7 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴�
 - [网络与传输](docs/network.md)
 - [远程协议](docs/protocol.md)
 - [开发进度与路线图](TODO.md)
+- 版本兼容详情见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 
