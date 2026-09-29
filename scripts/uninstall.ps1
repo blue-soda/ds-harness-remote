@@ -34,9 +34,21 @@ if ((Test-Path $dshEntry) -and -not $state.pluginsRemoved) {
   if (-not (Test-Path $node)) { throw 'Private Node is missing; restore the installation before removing plugins.' }
   $env:Path = "$nodeHome;$prefix;$env:Path"
   $env:DSH_HOME = $state.dshHome
-  # Remove together: a failed command must leave the runtime available for retry.
-  & $node $dshEntry plugin --profile $state.profile remove -w ds-harness-remote dsh-file-viewer
-  if ($LASTEXITCODE -ne 0) { throw 'Plugin removal failed; private runtime was retained. Correct the error and retry.' }
+  # New installs omit File Viewer; older installs and retries may have either plugin.
+  # pnpm rejects the entire removal if any requested dependency is absent.
+  $profileDir = Join-Path (Join-Path $state.dshHome 'profiles') $state.profile
+  $manifestPath = Join-Path $profileDir 'package.json'
+  if (Test-Path $manifestPath) {
+    $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+    $dependencies = foreach ($section in @('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies')) {
+      if ($manifest.$section) { $manifest.$section.PSObject.Properties.Name }
+    }
+    $plugins = @('ds-harness-remote', 'dsh-file-viewer' | Where-Object { $_ -in $dependencies })
+    if ($plugins.Count -gt 0) {
+      & $node $dshEntry plugin --profile $state.profile remove -w @plugins
+      if ($LASTEXITCODE -ne 0) { throw 'Plugin removal failed; private runtime was retained. Correct the error and retry.' }
+    }
+  }
   $state | Add-Member -NotePropertyName pluginsRemoved -NotePropertyValue $true -Force
   $state | ConvertTo-Json | Set-Content -Encoding UTF8 $statePath
 }
