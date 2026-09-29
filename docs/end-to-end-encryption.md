@@ -125,7 +125,8 @@ Noise 单条 transport message 有 65,535 bytes 上限。编码后的业务消�
 - **连接关闭**：销毁 Noise session、清理接收/发送状态和未完成分片；重新连接会重新握手。
 - **设备撤销**：撤销 device credential 与 membership，并关闭活动 Remote connection。再次授权被撤销角色时需要新的受信任身份流程。
 
-长期连接 rekey、跨实现 golden vectors 和独立密码安全审查仍在路线图中。在这些工作完成前，项目不额外宣称协议规范之外的长期密钥安全性质。
+`fixtures/crypto/v1/noise-ik.json` 提供 Noise IK 跨实现 golden vector。
+长期连接 rekey 和独立密码安全审查仍在路线图中。在这些工作完成前，项目不额外宣称协议规范之外的长期密钥安全性质。
 
 ## 8. TLS、WebRTC 与 Noise 的关系
 

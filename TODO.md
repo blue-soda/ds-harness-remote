@@ -93,7 +93,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
 - [ ] 完成 Noise 实现独立安全审查、长期连接 rekey 与断线密钥清理策略
-- [ ] 增加协议与加密 golden vectors
+- [ ] 增加剩余协议 golden vectors
+- [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
 - [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证
 
