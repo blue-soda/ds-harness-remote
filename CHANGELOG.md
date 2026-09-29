@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.26 - 2026-09-30
+
+- Improves the Android conversation composer and adds more actions to the conversation menu.
+- Adds transport heartbeat diagnostics and Noise IK golden-vector coverage for easier connection troubleshooting and protocol maintenance.
+- Fixes the Windows uninstall path when optional plugins are missing, and keeps the committed Host bundle aligned with the merged release state.
+- Advances the Android app to `0.4.26` (`versionCode 37`) alongside the Plugin release.
+
 ## 0.4.25 - 2026-09-29
 
 - Desktop Remote Web and Android now merge multiple reasoning and plan segments from the same assistant turn into one default-collapsed analysis section. The answer remains visible, and tapping the section expands the complete reasoning.
