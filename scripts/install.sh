@@ -6,7 +6,6 @@ set -euo pipefail
 NODE_VERSION="${NODE_VERSION:-22.14.0}"
 DSH_VERSION="${DSH_VERSION:-latest}"
 REMOTE_VERSION="${REMOTE_VERSION:-latest}"
-FILE_VIEWER_VERSION="${FILE_VIEWER_VERSION:-latest}"
 DSH_PROFILE="${DSH_PROFILE:-web}"
 NODE_HOME="${DSH_NODE_HOME:-${HOME}/.local/share/dsh-node/node-v${NODE_VERSION}}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
@@ -110,8 +109,6 @@ fi
 # (ERR_PNPM_ADDING_TO_ROOT), which aborts the install before the service step.
 say "Adding ds-harness-remote@${REMOTE_VERSION} to the ${DSH_PROFILE} profile"
 dsh plugin --profile "$DSH_PROFILE" add -w "$REMOTE_PACKAGE_DIR"
-say "Adding dsh-file-viewer@${FILE_VIEWER_VERSION} to the ${DSH_PROFILE} profile"
-npm_config_registry="$NPM_REGISTRY" dsh plugin --profile "$DSH_PROFILE" add -w "dsh-file-viewer@${FILE_VIEWER_VERSION}"
 
 say 'Plugins installed. Configuring the Host service.'
 
