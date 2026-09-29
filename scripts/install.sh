@@ -5,13 +5,17 @@ set -euo pipefail
 
 NODE_VERSION="${NODE_VERSION:-22.14.0}"
 DSH_VERSION="${DSH_VERSION:-latest}"
-REMOTE_VERSION="${REMOTE_VERSION:-0.4.23}"
+REMOTE_VERSION="${REMOTE_VERSION:-latest}"
 FILE_VIEWER_VERSION="${FILE_VIEWER_VERSION:-latest}"
 DSH_PROFILE="${DSH_PROFILE:-web}"
 NODE_HOME="${DSH_NODE_HOME:-${HOME}/.local/share/dsh-node/node-v${NODE_VERSION}}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 SERVICE_NAME="${DSH_SERVICE_NAME:-dsh-remote}"
 SERVICE_COMMAND="${DSH_SERVICE_COMMAND:-}"
+# Remote control is enabled by the bundled Host profile. Keep the terminal
+# opt-out available, but enable it for automated installations by default.
+DSH_REMOTE_TERMINAL_ENABLED="${DSH_REMOTE_TERMINAL_ENABLED:-true}"
+export DSH_REMOTE_TERMINAL_ENABLED
 INITIAL_PATH="$PATH"
 PATH_BLOCK_BEGIN='# >>> dsh-remote installer >>>'
 PATH_BLOCK_END='# <<< dsh-remote installer <<<'
@@ -123,7 +127,7 @@ executable="${SERVICE_COMMAND:-}"
   {
     printf '#!/usr/bin/env bash\nset -euo pipefail\n'
     printf 'export PATH=%q\n' "$PATH"
-    if [[ "${DSH_REMOTE_TERMINAL_ENABLED:-}" == "true" ]]; then printf 'export DSH_REMOTE_TERMINAL_ENABLED=true\n'; fi
+    printf 'export DSH_REMOTE_TERMINAL_ENABLED=%q\n' "$DSH_REMOTE_TERMINAL_ENABLED"
     printf 'cd %q\n' "$HOME"
     printf 'exec %q --profile %q\n' "$executable" "$DSH_PROFILE"
   } > "$runner"
