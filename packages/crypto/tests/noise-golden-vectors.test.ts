@@ -68,6 +68,20 @@ describe('Noise IK v1 golden vectors', () => {
     expect(file.vectors.length).toBeGreaterThan(0)
   })
 
+  it('adapts an ephemeral private key without fixing RNG read boundaries', () => {
+    const value = file.vectors[0]?.ephemeralPrivateKeys.initiator
+    if (value === undefined) throw new Error('Noise vector is missing an initiator ephemeral private key.')
+    const expected = fromBase64Url(value)
+    const random = ephemeralPrivateKeyRandom(value)
+
+    expect(random.consumed()).toBe(false)
+    const first = random.read(16)
+    const second = random.read(expected.byteLength - first.byteLength)
+    expect(Uint8Array.from([...first, ...second])).toEqual(expected)
+    expect(random.consumed()).toBe(true)
+    expect(() => random.read(1)).toThrow('exceeds ephemeral key')
+  })
+
   it.each(file.vectors)('$name matches deterministic handshake and transport outputs', vector => {
     const initiatorRandom = ephemeralPrivateKeyRandom(vector.ephemeralPrivateKeys.initiator)
     const responderRandom = ephemeralPrivateKeyRandom(vector.ephemeralPrivateKeys.responder)
@@ -156,15 +170,16 @@ function ephemeralPrivateKeyRandom(value: string): {
   consumed: () => boolean
 } {
   const key = fromBase64Url(value)
-  let used = false
+  let offset = 0
   return {
     read(length) {
-      if (used || key.byteLength !== length) {
-        throw new Error(`Noise vector RNG request does not match: ${length}`)
+      if (!Number.isSafeInteger(length) || length < 0 || offset + length > key.byteLength) {
+        throw new Error(`Noise vector RNG request exceeds ephemeral key: ${length}`)
       }
-      used = true
-      return Uint8Array.from(key)
+      const result = key.slice(offset, offset + length)
+      offset += length
+      return result
     },
-    consumed: () => used,
+    consumed: () => offset === key.byteLength,
   }
 }
