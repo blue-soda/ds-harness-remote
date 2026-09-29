@@ -37,11 +37,15 @@
 
 无论使用哪台设备，都可以回到同一个 Harness 会话。Harness 始终运行在工作电脑上，原有的工作区、工具和项目配置保持不变。Remote 只是通往这个工作环境的另一个窗口。
 
+Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用固定版本，例如
+`ds-harness-remote@0.4.25`。
+
 ## 主要特性
 
 - 从另一台设备继续活跃会话，查看最新进展
 - 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.2.0-rc.1` 范围内的受支持 Harness 版本中使用图片 Prompt
 - 在支持实时会话控制的客户端中回答问题、处理权限请求
+- 支持 DeepSeek Harness 桌面版，并可使用固定版本的 Remote 插件
 - 打开同一账号下另一台已授权电脑上的 Workspace
 - 复用 Harness 原生界面，不另外维护一套桌面会话 UI
 - 两端 Harness 都安装可选 `dsh-file-viewer` 插件时，可以预览远端文件
@@ -52,7 +56,8 @@
 
 ### 支持 DeepSeek Harness 桌面版
 
-Remote 已支持 DeepSeek Harness 桌面版。通过已有的 DSH profile 安装时，使用下面的固定插件版本。
+Remote 已支持 DeepSeek Harness 桌面版。可以使用 `ds-harness-remote@0.4.25` 这类固定版本；
+命令行安装放在下面安装选项的最后。
 
 ### 方式 B：自动安装
 
