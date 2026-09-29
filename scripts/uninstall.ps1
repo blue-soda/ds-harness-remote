@@ -46,9 +46,11 @@ $remainingPath = ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ine $bi
 [Environment]::SetEnvironmentVariable('Path', $remainingPath, 'User')
 $env:Path = ($env:Path -split ';' | Where-Object { $_.TrimEnd('\') -notin @($binDir.TrimEnd('\'), $nodeHome.TrimEnd('\'), $prefix.TrimEnd('\')) }) -join ';'
 # Delete only installer-owned entries, never the whole configurable install root.
-foreach ($name in @('node', 'packages', 'bin', 'host.exe', 'host.xml', 'host.wrapper.log')) {
+foreach ($name in @('node', 'packages', 'bin', 'host.exe', 'host.xml', 'host.wrapper.log', 'host.out.log', 'host.err.log')) {
   $path = Join-Path $installRoot $name
   if (Test-Path $path) { Remove-Item -Recurse -Force $path }
 }
+# Rolled log archives from <log mode="roll"/>: host.out-<timestamp>.log etc.
+Get-ChildItem -Path $installRoot -Filter 'host.*.log' -File -ErrorAction SilentlyContinue | Remove-Item -Force
 Remove-Item $statePath
 Write-Host "[dsh-install] Removed service, plugins and private runtime. DSH profiles and credentials remain in $($state.dshHome)."

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatItem, MuxStreamFrame, NativeSessionEvent } from '../src/types'
-import { applyMuxFrame, applyMuxFrameToMessages, foldHistory } from '../src/state/event-reducer'
+import { applyMuxFrame, applyMuxFrameToMessages, foldHistory, sessionRunningForMuxFrame } from '../src/state/event-reducer'
 
 function sessionEvent(event: Partial<NativeSessionEvent> & { type: string; data: Record<string, unknown> }): NativeSessionEvent {
   return {
@@ -15,6 +15,28 @@ function frame(rpcId: string, payload: { type: string } & Record<string, unknown
 }
 
 describe('remote mux frame reducer', () => {
+  it('projects Harness turn lifecycle into the session running state', () => {
+    const start = frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({ type: 'turn/start', data: {} }),
+    })
+    const end = frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({ type: 'turn/end', data: {} }),
+    })
+
+    expect(sessionRunningForMuxFrame(start)).toBe(true)
+    expect(sessionRunningForMuxFrame(end)).toBe(false)
+    const step = frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({ type: 'step/start', data: {} }),
+    })
+    expect(sessionRunningForMuxFrame(step)).toBeUndefined()
+  })
+
   it('assembles streaming assistant chunks into a finalized message', () => {
     const chunk: MuxStreamFrame = frame('', {
       type: 'session/event',

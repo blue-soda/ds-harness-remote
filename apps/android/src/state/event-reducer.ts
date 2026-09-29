@@ -38,6 +38,20 @@ export function applyMuxFrame(current: ChatItem[], frame: MuxStreamFrame): ChatI
   return current
 }
 
+/**
+ * Project the Harness turn lifecycle carried by a mux frame into the session
+ * list state. The message reducer intentionally ignores lifecycle events, but
+ * the UI still needs `turn/end` to clear its generating indicator after a
+ * completed or cancelled turn.
+ */
+export function sessionRunningForMuxFrame(frame: MuxStreamFrame): boolean | undefined {
+  const payload = frame.payload
+  if (payload.type !== 'session/event' || payload.event === undefined) return undefined
+  if (payload.event.type === 'turn/start') return true
+  if (payload.event.type === 'turn/end') return false
+  return undefined
+}
+
 /** Route one aggregated mux frame into the message bucket owned by its session. */
 export function applyMuxFrameToMessages(
   current: Record<string, ChatItem[]>,

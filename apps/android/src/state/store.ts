@@ -101,7 +101,7 @@ import type {
   WorkspaceList,
   WorkspaceView,
 } from '../types'
-import { foldHistory, applyMuxFrameToMessages } from './event-reducer'
+import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
 
 type BootPhase = 'loading' | 'ready' | 'error'
@@ -1393,12 +1393,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   handleMuxFrame(frame) {
     set(state => {
       const sessionId = frame.payload.sessionId
+      const running = sessionRunningForMuxFrame(frame)
       const releasePrompt = state.busyAction === 'send-message'
         && sessionId !== undefined
         && state.selectedSession?.sessionId === sessionId
-        && isHarnessPromptStarted(frame)
+        && (isHarnessPromptStarted(frame) || running !== undefined)
+      const updateRunning = (session: RemoteSession): RemoteSession => (
+        sessionId !== undefined && running !== undefined && session.sessionId === sessionId
+          ? { ...session, running }
+          : session
+      )
       return {
         messages: applyMuxFrameToMessages(state.messages, frame),
+        ...(sessionId === undefined || running === undefined ? {} : {
+          sessions: state.sessions.map(updateRunning),
+          selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
+        }),
         ...(releasePrompt ? { busyAction: undefined } : {}),
       }
     })
