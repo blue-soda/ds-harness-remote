@@ -66,7 +66,13 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 Windows PowerShell (Run as administrator):
 
 ```powershell
-irm https://dsh.r2049.cn/app/install.ps1 | iex
+# Download first, then run. Do NOT use "irm ... | iex": on machines where
+# .NET Framework cannot negotiate TLS 1.2, irm fails and pipes $null into iex,
+# which reports a misleading "null-valued expression" error.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
+if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded installer is unexpectedly small.' }
+& "$env:TEMP\install.ps1"
 ```
 
 Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs/installation.md) for configuration, service management, and uninstallation.

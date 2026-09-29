@@ -66,7 +66,13 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 Windows PowerShell（以管理员身份运行）：
 
 ```powershell
-irm https://dsh.r2049.cn/app/install.ps1 | iex
+# 先下载再执行。不要用 "irm ... | iex"：在 .NET Framework 默认不支持
+# TLS 1.2 的机器上 irm 失败后只向管道传 $null，iex 会报出
+# 误导性的 "null-valued expression" 错误，把网络故障伪装成脚本问题。
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
+if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装脚本异常地小。' }
+& "$env:TEMP\install.ps1"
 ```
 
 安装后按[快速开始](#快速开始)登录。目录配置、服务管理和卸载见[安装指南](docs/installation.zh.md)。

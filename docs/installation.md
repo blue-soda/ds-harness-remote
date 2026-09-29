@@ -11,7 +11,13 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 Windows PowerShell (**Run as administrator** under the account that will own the installation):
 
 ```powershell
-irm https://dsh.r2049.cn/app/install.ps1 | iex
+# Download first, then run. Avoid "irm ... | iex": when .NET Framework cannot
+# negotiate TLS 1.2, irm fails and pipes $null into iex, which surfaces a
+# misleading "null-valued expression" error instead of the network failure.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
+if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded installer is unexpectedly small.' }
+& "$env:TEMP\install.ps1"
 ```
 
 On macOS/Linux, the script installs Node.js if missing and registers a Host background
@@ -42,6 +48,6 @@ ds-harness-remote status
 
 Restart DSH and continue with [Quick start](../README.md#quick-start). To uninstall:
 `curl -fsSL https://dsh.r2049.cn/app/uninstall.sh | bash`
-(Windows: `irm https://dsh.r2049.cn/app/uninstall.ps1 | iex`). If the domain is unreachable,
+(Windows: download `uninstall.ps1` the same way and run `& "$env:TEMP\uninstall.ps1"`; avoid `irm ... | iex`). If the domain is unreachable,
 swap `https://dsh.r2049.cn/app` for
 `https://raw.githubusercontent.com/liguobao/ds-harness-remote/main/scripts` and run the same way.
