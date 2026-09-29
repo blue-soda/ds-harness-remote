@@ -6950,6 +6950,9 @@ var AdaptiveTransport = class extends BaseTransport {
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
   connectedAt;
+  heartbeatIntervalMs;
+  lastReceivedAt;
+  lastSentAt;
   lastRtcDiagnostics;
   constructor(url, options) {
     super();
@@ -7026,6 +7029,9 @@ var AdaptiveTransport = class extends BaseTransport {
     return {
       ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
       ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
+      ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
+      ...this.lastReceivedAt === void 0 ? {} : { lastReceivedAt: this.lastReceivedAt },
+      ...this.lastSentAt === void 0 ? {} : { lastSentAt: this.lastSentAt },
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
@@ -7074,10 +7080,12 @@ var AdaptiveTransport = class extends BaseTransport {
       if (typeof raw !== "string")
         throw new Error("Adaptive control frames must be text JSON");
       const frame = decodeControlFrame(raw, this.controlFrameLimits);
+      this.lastReceivedAt = Date.now();
       if (frame.type === "hello.ack") {
         const payload = frame.payload;
         if (payload.protocol !== PROTOCOL_VERSION)
           throw new Error("Server selected an unsupported protocol version");
+        this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
         const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES;
         this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities);
         this.controlFrameLimits = {
@@ -7297,6 +7305,7 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.socket?.readyState !== WebSocket.OPEN)
       throw new Error("adaptive control socket is not open");
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
+    this.lastSentAt = Date.now();
   }
   finishConnection() {
     this.clearHandshake();
