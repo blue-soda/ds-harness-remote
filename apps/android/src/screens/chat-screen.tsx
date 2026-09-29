@@ -18,10 +18,8 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import * as DocumentPicker from 'expo-document-picker'
-import { File } from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, FileText, Folder, Layers, Plus, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, Plus, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
@@ -78,7 +76,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [permissionPickerOpen, setPermissionPickerOpen] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
-  const [pickingFiles, setPickingFiles] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
@@ -278,48 +275,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       Alert.alert(zhCN.chat.imagePickerFailedTitle, zhCN.chat.imagePickerFailedBody)
     } finally {
       setPickingImages(false)
-    }
-  }
-
-  const pickFiles = async () => {
-    const limits = sessionImageLimits(session)
-    const remaining = limits === undefined ? 0 : Math.max(0, limits.maxImagesPerMessage - images.length)
-    if (limits !== undefined && remaining === 0) {
-      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(limits.maxImagesPerMessage))
-      return
-    }
-    setPickingFiles(true)
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*'],
-        multiple: true,
-        copyToCacheDirectory: true,
-      })
-      if (result.canceled) return
-      const picked: PromptImage[] = []
-      for (const asset of result.assets) {
-        const base64 = await new File(asset.uri).base64()
-        const size = await imageSize(asset.uri)
-        picked.push(promptImageFromBase64({
-          uri: asset.uri,
-          base64,
-          ...(typeof asset.mimeType === 'string' ? { mimeType: asset.mimeType } : {}),
-          ...(typeof asset.name === 'string' ? { name: asset.name } : {}),
-          width: size.width,
-          height: size.height,
-        }))
-      }
-      const next = [...images, ...picked]
-      const problem = validatePromptImages(next, limits)
-      if (problem !== undefined) {
-        Alert.alert(zhCN.chat.imageLimitTitle, problem)
-        return
-      }
-      setImages(next)
-    } catch {
-      Alert.alert(zhCN.chat.filePickerFailedTitle, zhCN.chat.filePickerFailedBody)
-    } finally {
-      setPickingFiles(false)
     }
   }
 
@@ -623,10 +578,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.takePhoto}
-                accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                disabled={pickingImages || pickingFiles}
+                accessibilityState={{ disabled: pickingImages }}
+                disabled={pickingImages}
                 onPress={() => { setPlusMenuOpen(false); void takePhoto() }}
-                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
               >
                 <Camera size={22} color={colors.primary} />
                 <Text style={styles.plusCardText}>{zhCN.chat.takePhoto}</Text>
@@ -634,24 +589,13 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.photos}
-                accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                disabled={pickingImages || pickingFiles}
+                accessibilityState={{ disabled: pickingImages }}
+                disabled={pickingImages}
                 onPress={() => { setPlusMenuOpen(false); void pickImages() }}
-                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
               >
                 <Images size={22} color={colors.primary} />
                 <Text style={styles.plusCardText}>{zhCN.chat.photos}</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={zhCN.chat.files}
-                accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                disabled={pickingImages || pickingFiles}
-                onPress={() => { setPlusMenuOpen(false); void pickFiles() }}
-                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
-              >
-                <FileText size={22} color={colors.primary} />
-                <Text style={styles.plusCardText}>{zhCN.chat.files}</Text>
               </Pressable>
             </View>
             <Pressable
