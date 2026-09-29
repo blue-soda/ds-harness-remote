@@ -32,7 +32,7 @@ interface TransportVector {
 interface NoiseVector {
   name: string
   staticKeys: Record<'initiator' | 'responder', { privateKey: string; publicKey: string }>
-  random: Record<'initiator' | 'responder', string[]>
+  ephemeralPrivateKeys: Record<'initiator' | 'responder', string>
   prologue: {
     connectionId: string
     hostDeviceId: string
@@ -69,8 +69,8 @@ describe('Noise IK v1 golden vectors', () => {
   })
 
   it.each(file.vectors)('$name matches deterministic handshake and transport outputs', vector => {
-    const initiatorRandom = vectorRandom(vector.random.initiator)
-    const responderRandom = vectorRandom(vector.random.responder)
+    const initiatorRandom = ephemeralPrivateKeyRandom(vector.ephemeralPrivateKeys.initiator)
+    const responderRandom = ephemeralPrivateKeyRandom(vector.ephemeralPrivateKeys.responder)
     const prologue = createNoisePrologue(
       vector.prologue.connectionId,
       vector.prologue.hostDeviceId,
@@ -88,8 +88,8 @@ describe('Noise IK v1 golden vectors', () => {
     expect(initiator.complete).toBe(true)
     expect(responder.complete).toBe(true)
     expectCounters(initiator, responder, vector.countersAfterHandshake)
-    expect(initiatorRandom.remaining()).toBe(0)
-    expect(responderRandom.remaining()).toBe(0)
+    expect(initiatorRandom.consumed()).toBe(true)
+    expect(responderRandom.consumed()).toBe(true)
 
     for (const transport of vector.transport) {
       const source = transport.sender === 'initiator' ? initiator : responder
@@ -151,19 +151,20 @@ function expectCounters(
   }).toEqual(expected)
 }
 
-function vectorRandom(values: string[]): {
+function ephemeralPrivateKeyRandom(value: string): {
   read: (length: number) => Uint8Array
-  remaining: () => number
+  consumed: () => boolean
 } {
-  const queue = values.map(fromBase64Url)
+  const key = fromBase64Url(value)
+  let used = false
   return {
     read(length) {
-      const next = queue.shift()
-      if (next === undefined || next.byteLength !== length) {
+      if (used || key.byteLength !== length) {
         throw new Error(`Noise vector RNG request does not match: ${length}`)
       }
-      return Uint8Array.from(next)
+      used = true
+      return Uint8Array.from(key)
     },
-    remaining: () => queue.length,
+    consumed: () => used,
   }
 }

@@ -558,8 +558,10 @@ channel 内按 messageId 重组，最多接受 4 MiB 的完整消息和 8 个并
 
 每方向维护独立 nonce/counter。重复、过旧、认证失败、超限或连接不匹配 frame 必须关闭 secure channel。达到 Noise 实现建议的消息/字节阈值时 rekey 或重建 connection。
 
-`fixtures/crypto/v1/noise-ik.json` 固定双方 static key、随机输入、prologue、握手消息、
+`fixtures/crypto/v1/noise-ik.json` 固定双方 static key、ephemeral private key、prologue、握手消息、
 传输密文和 counter。其他实现必须产生相同的无填充 base64url 输出。
+这些输出是 protocol v1 的 compatibility baseline。实现或依赖升级不得直接重写该向量。
+有意改变 wire output 时必须发布新协议版本和新向量。
 
 TLS/WSS 保护到 Server 的链路，但不能替代本节 E2EE。
 

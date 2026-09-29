@@ -17,13 +17,9 @@
           "publicKey": "NYBy1jZYgNGu6jKa35EhODhR7SGijjt16WXQ0s0WYlQ"
         }
       },
-      "random": {
-        "initiator": [
-          "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
-        ],
-        "responder": [
-          "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
-        ]
+      "ephemeralPrivateKeys": {
+        "initiator": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "responder": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
       },
       "prologue": {
         "connectionId": "noise-vector-connection",
