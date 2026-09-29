@@ -244,7 +244,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   languagePreference: 'system',
   language: getActiveLanguage(),
   themePreference: 'system',
-  compactChat: true,
+  // Keep process rows available on a fresh install; their own disclosures
+  // start closed so the conversation still opens at the answer.
+  compactChat: false,
   authPhase: 'idle',
   refreshing: false,
   reauthRequired: false,

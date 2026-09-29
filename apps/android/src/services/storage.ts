@@ -284,7 +284,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function loadCompactChat(): Promise<boolean> {
   const stored = await readJson<{ value: unknown }>(KEYS.compactChat)
-  return stored === undefined ? true : stored.value === true
+  return stored === undefined ? false : stored.value === true
 }
 
 export async function saveCompactChat(value: boolean): Promise<void> {

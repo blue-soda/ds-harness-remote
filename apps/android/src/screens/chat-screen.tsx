@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   AccessibilityInfo,
@@ -529,6 +529,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               accessibilityState={{ disabled: !connected || permissionSelecting }}
               disabled={!connected || permissionSelecting}
               onPress={() => setPlusMenuOpen(true)}
+              hitSlop={8}
               style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, (!connected || permissionSelecting) && styles.plusDisabled]}
             >
               <Plus size={20} color={connected ? colors.ink : colors.disabled} />
@@ -572,8 +573,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       </View>
 
       <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={() => setPlusMenuOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setPlusMenuOpen(false)}>
-          <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+        <ModalSurface onClose={() => setPlusMenuOpen(false)}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={() => setPlusMenuOpen(false)} /></View>
             <View style={styles.plusCardRow}>
               <Pressable
@@ -662,8 +662,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
                 </View>
               </Pressable>
             )}
-          </Pressable>
-        </Pressable>
+        </ModalSurface>
       </Modal>
 
       <ModelPicker
@@ -696,8 +695,7 @@ function ModePicker({ visible, options, current, loading, selecting, onClose, on
   const listMaxHeight = usePickerListMaxHeight()
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
           <ScrollView
             style={{ maxHeight: listMaxHeight }}
@@ -731,8 +729,7 @@ function ModePicker({ visible, options, current, loading, selecting, onClose, on
               )
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
   )
 }
@@ -752,8 +749,7 @@ function PermissionPicker({ visible, permissions, onClose, onPick, loading, erro
   if (permissions === undefined) return null
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
           <ScrollView
             style={{ maxHeight: listMaxHeight }}
@@ -773,8 +769,7 @@ function PermissionPicker({ visible, permissions, onClose, onPick, loading, erro
               )
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
   )
 }
@@ -796,8 +791,7 @@ function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend
   const options = workspaces.filter(workspace => (workspace.backend ?? 'harness') === (sessionBackend ?? 'harness'))
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectWorkspace}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
           <Text style={styles.pickerHint}>{zhCN.chat.moveSessionHint}</Text>
           <ScrollView
@@ -832,8 +826,7 @@ function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend
               )
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
   )
 }
@@ -852,8 +845,7 @@ function ToolAccessPicker({ visible, onClose, onPick }: {
   ]
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
           <ScrollView
             style={{ maxHeight: listMaxHeight }}
@@ -880,8 +872,7 @@ function ToolAccessPicker({ visible, onClose, onPick }: {
               )
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
   )
 }
@@ -908,8 +899,7 @@ function ModelPicker({ visible, models, onClose, onPick }: {
   const showEffortRow = !effortView && efforts.length > 0
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}>
             <View style={styles.modalHeaderCopy}>
               {effortView && (
@@ -999,9 +989,28 @@ function ModelPicker({ visible, models, onClose, onPick }: {
               </View>
             </Pressable>
           )}
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
+  )
+}
+
+/**
+ * Keep the dismiss target behind the sheet instead of nesting Pressables.
+ * Android's responder negotiation can otherwise let the backdrop consume a
+ * child press, which makes every option in a transparent modal look inert.
+ */
+function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View style={styles.modalBackdrop}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={zhCN.common.close}
+        onPress={onClose}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.modalSheet}>{children}</View>
+    </View>
   )
 }
 
