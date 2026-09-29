@@ -10,4 +10,4 @@
 - 两端正文都保持可见，点击分析区即可展开全部推理；工具活动行继续保留在原位置。
 - 发布版本 `0.4.25` 的 Android App（Android `versionCode 36`）。
 
-[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.24...v0.4.25) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.25/README.md)
+[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.24...v0.4.25) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.md)
