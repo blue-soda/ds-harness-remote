@@ -46,6 +46,9 @@ export interface AdaptiveTransportOptions {
 export interface AdaptiveConnectionDetails {
   connectionId?: string
   connectedAt?: number
+  heartbeatIntervalMs?: number
+  lastControlReceivedAt?: number
+  lastControlSentAt?: number
   controlChannelUrl: string
   controlChannelState: 'connecting' | 'open' | 'closing' | 'closed'
   preferredTransports: Array<'lan' | 'p2p' | 'turn' | 'relay'>
@@ -85,6 +88,9 @@ export class AdaptiveTransport extends BaseTransport {
   private negotiatedCapabilities: string[] = ['transport.relay']
   private controlFrameLimits: ControlFrameByteLimits = {}
   private connectedAt?: number
+  private heartbeatIntervalMs?: number
+  private lastControlReceivedAt?: number
+  private lastControlSentAt?: number
   private lastRtcDiagnostics?: RtcConnectionDiagnostics
 
   constructor(
@@ -162,6 +168,9 @@ export class AdaptiveTransport extends BaseTransport {
     return {
       ...(this.connectionId === undefined ? {} : { connectionId: this.connectionId }),
       ...(this.connectedAt === undefined ? {} : { connectedAt: this.connectedAt }),
+      ...(this.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs }),
+      ...(this.lastControlReceivedAt === undefined ? {} : { lastControlReceivedAt: this.lastControlReceivedAt }),
+      ...(this.lastControlSentAt === undefined ? {} : { lastControlSentAt: this.lastControlSentAt }),
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true
@@ -217,9 +226,11 @@ export class AdaptiveTransport extends BaseTransport {
     try {
       if (typeof raw !== 'string') throw new Error('Adaptive control frames must be text JSON')
       const frame = decodeControlFrame(raw, this.controlFrameLimits)
+      this.lastControlReceivedAt = Date.now()
       if (frame.type === 'hello.ack') {
         const payload = frame.payload as Partial<HelloAckPayload>
         if (payload.protocol !== PROTOCOL_VERSION) throw new Error('Server selected an unsupported protocol version')
+        this.heartbeatIntervalMs = payload.heartbeatIntervalMs
         const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES
         this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities)
         this.controlFrameLimits = {
@@ -443,6 +454,7 @@ export class AdaptiveTransport extends BaseTransport {
   private sendControl(type: Parameters<typeof createControlFrame>[0], payload: unknown): void {
     if (this.socket?.readyState !== WebSocket.OPEN) throw new Error('adaptive control socket is not open')
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits))
+    this.lastControlSentAt = Date.now()
   }
 
   private finishConnection(): void {
