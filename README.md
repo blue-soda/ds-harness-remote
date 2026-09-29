@@ -37,8 +37,10 @@ Continue using your DeepSeek Harness instance from a phone, computer, or browser
 
 Return to the same Harness session from whichever device is with you. Harness keeps running on your work computer, with the same workspaces, tools, and project setup. Remote is simply another window into that environment.
 
-The DeepSeek Harness desktop edition is supported. When installing manually, use a pinned plugin
-version such as `ds-harness-remote@0.4.25` through DSH's plugin manager.
+The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
+plugin version through DSH's plugin manager:
+
+`ds-harness-remote@0.4.25`
 
 ## Features
 
@@ -56,8 +58,10 @@ version such as `ds-harness-remote@0.4.25` through DSH's plugin manager.
 
 ### DeepSeek Harness Desktop support
 
-Remote supports the DeepSeek Harness desktop edition. Use a pinned plugin version such as
-`ds-harness-remote@0.4.25` through the command-line installation below.
+Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
+command-line installation below:
+
+`ds-harness-remote@0.4.25`
 
 ### Path B: dsh-TUI Host
 

@@ -37,8 +37,9 @@
 
 无论使用哪台设备，都可以回到同一个 Harness 会话。Harness 始终运行在工作电脑上，原有的工作区、工具和项目配置保持不变。Remote 只是通往这个工作环境的另一个窗口。
 
-Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用固定版本，例如
-`ds-harness-remote@0.4.25`。
+Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
+
+`ds-harness-remote@0.4.25`
 
 ## 主要特性
 
@@ -56,8 +57,9 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 ### 支持 DeepSeek Harness 桌面版
 
-Remote 已支持 DeepSeek Harness 桌面版。可以使用 `ds-harness-remote@0.4.25` 这类固定版本；
-通过下面的命令行安装方式使用该固定版本。
+Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
+
+`ds-harness-remote@0.4.25`
 
 ### 方式 B：dsh-TUI Host
 
