@@ -11,13 +11,6 @@
   &nbsp;·&nbsp;
   <a href="apps/server/README.md">Self-hosting</a>
   &nbsp;·&nbsp;
-  <strong>Download:</strong>
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Windows</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">macOS</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Linux</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
@@ -37,25 +30,60 @@ Continue using your DeepSeek Harness instance from a phone, computer, or browser
 
 Return to the same Harness session from whichever device is with you. Harness keeps running on your work computer, with the same workspaces, tools, and project setup. Remote is simply another window into that environment.
 
+The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
+plugin version through DSH's plugin manager:
+
+`ds-harness-remote@0.4.25`
+
 ## Features
 
 - Continue active sessions and review their latest progress from another device
 - Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.2.0-rc.1`
 - Answer questions and permission requests from clients with live conversation controls
+- Support the DeepSeek Harness desktop edition with pinned Remote plugin releases
 - Open workspaces from another authorized computer on the same account
 - Reuse the native Harness interface instead of maintaining a separate desktop conversation UI
-- Preview remote files between two Harness installations with the optional `dsh-file-viewer` plugin
 - Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host and authorize it with a GitHub or Zhihu QR code
 - The Harness Host does not need a public listening port. Connect securely from anywhere with internet access over a bidirectional end-to-end encrypted channel
+- Native workspace files, read-only previews, terminal access, and authorized local development-service previews are available through the Harness sidebar.
 
 ## Install
 
-### Path A: DSH Desktop
+### DeepSeek Harness Desktop support
 
-Install [DSH Desktop](https://github.com/liguobao/dsh-desktop) on Windows, macOS, or
-Linux. Remote is included and enabled by default, so no separate plugin installation is required.
+Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
+command-line installation below:
 
-### Path B: Automated installation
+`ds-harness-remote@0.4.25`
+
+### dsh-TUI Host
+
+For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
+[dsh-TUI Remote guide](docs/dsh-tui.md).
+
+### Command-line installation
+
+Add the exact package version through DSH's plugin manager for the `web` profile:
+
+```sh
+dsh plugin --profile web add -w ds-harness-remote@0.4.25
+```
+
+`-w` targets the profile's own workspace root. It is required on pnpm below 11, which
+otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
+
+Restart Harness after installation.
+
+Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
+adds the bundle's configuration layer.
+
+### Android client
+
+Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
+
+Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
+
+### Automated installation (background service)
 
 macOS / Linux:
 
@@ -75,57 +103,22 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded insta
 & "$env:TEMP\install.ps1"
 ```
 
-Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs/installation.md) for configuration, service management, and uninstallation.
-
-### Path C: Existing DSH installation
-
-Add the exact package version through DSH's plugin manager for the `web` profile:
-
-```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.23
-```
-
-`-w` targets the profile's own workspace root. It is required on pnpm below 11, which
-otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
-
-Restart Harness after installation.
-
-Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
-adds the bundle's configuration layer.
-
-### Path D: dsh-TUI Host
-
-For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
-[dsh-TUI Remote guide](docs/dsh-tui.md).
+The automated installer installs Remote Host as a background service and keeps it available without a foreground terminal. It also installs the required runtime and plugins; see the [installation guide](docs/installation.md) for platform-specific service management and uninstallation.
 
 ## Quick start
 
 1. Open **Remote** from the Harness sidebar.
 2. Sign in with a GitHub or Zhihu QR code, or use your account and password. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
 3. Enable remote control for the current computer.
-4. On another device, open DSH Desktop, Remote Web, or the Android client and sign in to the same account.
+4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
 
 The public service uses the hosted Remote relay. For a minimal single-account deployment,
 see the [self-hosted Server](apps/server/README.md); its Web page shows device status only.
 
-## Authorization recovery and multiple instances
+## Minimal self-hosted Server
 
-Each running Host needs its own device identity. Profiles sharing the same `DSH_HOME`
-share Remote credentials; use a separate `DSH_HOME` and authorize each instance if
-both must stay online. When another connection replaces this Host (`CONNECTION_REPLACED`),
-automatic reconnect stops to prevent the two instances from repeatedly disconnecting each other.
-
-Expired credentials refresh under a cross-process lock. If the Server rejects a
-handshake, the Host can refresh and retry it once. If refresh is rejected, use
-`/remote login [github|zhihu]` or authorize the Host again in Remote settings.
-The log marks refresh failures with `phase: credential_refresh` without exposing credentials.
-
-`SERVER_CREDENTIALS_BUSY` means another process holds the refresh lock. After an
-abnormal exit, stop **all** instances sharing that `DSH_HOME`, remove only the
-`server-credentials.json.refresh-lock` directory beside the affected credentials
-under `remote/servers/<serverHash>/<role>/`, then authorize again and restart.
-Locks are never taken over based on age: a suspended process could still use the old token.
+Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
 
 ## Screenshots
 
@@ -148,8 +141,6 @@ connection status shown in the header.
 </p>
 
 ### Android
-
-Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
 
 Sign in to the Android client with your existing account, select an available computer,
 open a workspace, and continue the conversation with text or image prompts. The conversation
@@ -208,7 +199,7 @@ Harness business traffic is encrypted on the Client and decrypted only by the se
 the fixed `Noise_IK_25519_ChaChaPoly_SHA256` suite. Account membership and locally pinned device
 identity keys must both authorize a connection. The service can route connections and observe
 network metadata, but it cannot read session messages, prompts, tool output, workspace paths, or
-File Viewer content. See [End-to-end encryption](docs/end-to-end-encryption.md) for the handshake,
+remote file contents. See [End-to-end encryption](docs/end-to-end-encryption.md) for the handshake,
 key lifecycle, visible metadata, replay protection, and security limits.
 
 ## Network and transport
@@ -226,35 +217,9 @@ validation status.
 - Server membership and the Host's locally pinned peer identity must both authorize a connection.
 - Interactive terminals require the Host-local `terminal.enabled` switch (off by default). They run as the Host user, independently of Agent approvals. General tool RPC and remote desktop remain unavailable.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
-- Optional File Viewer access is limited to authenticated, encrypted range reads and continues to enforce provider root and locator authorization.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
 - Codex Remote is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
 - Removing a device revokes its credentials, membership, and active Remote connections.
-
-## Compatibility
-
-**Breaking change notice:** Plugin `0.4.1` removes the earlier experimental
-Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
-`sync.from`). Harness session traffic now only uses the official rc.2
-`ApiProxy` or the v0.1.2 Typert Remote Gateway, and this plugin does not provide
-an adapter or wire-format translation for the old RPC surface.
-
-Plugin `0.4.23` targets DeepSeek Harness `dsh-v0.2.0-rc.1` and retains compatibility with `dsh-v0.1.7-rc.1`, while also supporting `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports `dsh-v0.1.1-rc.2` through the legacy
-official `ApiProxy`, and `dsh-v0.1.2-alpha.1`–`rc.1` through the
-official Typert Remote Gateway. It also supports
-`dsh-v0.1.5-rc.1` and `dsh-v0.1.6-alpha.1` Session V3 through the official Typert Remote
-Gateway; a `0.1.6` Host reports patch `6` and therefore selects the same Session V3
-profile with no wire-format adapter. A `0.4.13` Client running rc.2 remains compatible
-with older rc.2 Hosts through the legacy capability fallback.
-
-Remote Web/Desktop and the Android app also normalize released sessions that
-still report the retired `code` agent preset to `ptc`, so old sessions can
-resume on `dsh-v0.1.5-rc.1` or `dsh-v0.1.6-alpha.1` without changing DeepSeek Harness itself.
-
-Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.23` selects the legacy
-ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop clients can open
-legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
-Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.
 
 ## Documentation
 
@@ -266,6 +231,13 @@ Typert clients still reject Session V3 Hosts before switching the native UI or m
 - [Network and transport](docs/network.md)
 - [Remote Protocol](docs/protocol.md)
 - [Development status and roadmap](TODO.md)
+- Remote compatibility details are maintained in [the compatibility guide](docs/compatibility.md).
+
+## Links
+
+- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
+- Friendly link: [LINUX DO](https://linux.do/)
+- Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
 
 ## Star History
 
@@ -277,12 +249,6 @@ Typert clients still reject Session V3 Hosts before switching the native UI or m
  </picture>
 </a>
 
-## Links
-
-- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
-- Friendly link: [LINUX DO](https://linux.do/)
-- Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
-
 ## Project status and trademarks
 
 This is an independent community project and is not an official DeepSeek product.
@@ -291,26 +257,3 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-## Minimal self-hosted Server
-
-Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
-
-## Native sidebar and development previews
-
-Harness `0.1.6-alpha.2` and later workspace files and read-only previews use the official APIs; the existing dsh-file-viewer bridge remains available. The Remote Host activates on both host generations: the ≤`0.1.6` settings-registry path and the `0.1.7-rc.1` and `0.2.0-rc.1` Volatile entry paths are feature-detected at runtime, so one package covers all supported host generations.
-Reads follow the Host Session filesystem permissions, including authorized files outside cwd; directory listings stay within the workspace.
-These native sidebar features target Harness Sessions, not the CodeX in-memory projection.
-
-On the **Host computer → Remote plugin settings**, toggle **Remote terminal** (it saves and applies immediately), then enter **Remote preview ports** and use the adjacent **Save access settings** button. Both runtime access controls apply without restarting the Host.
-
-Terminal access defaults off and reports how to enable it when attempted. This switch does not fix ordinary login or connection errors.
-Terminals run as the Host user independently of Agent approvals. Only terminals created by the current Remote device are exposed; input is never replayed after disconnect.
-
-In Desktop or a browser connected to Harness on the same computer, choose **Preview service** in the Remote header and enter an authorized port.
-The native browser sidebar opens the Host's IPv4 `127.0.0.1` HTTP service through P2P or Relay, including WebSocket and same-origin hot reload.
-Relative asset paths are preserved. IPv6-only services must also listen on `127.0.0.1`.
-Previews use separate random local origins and close on disconnect or leaving Remote. Remote Web pages, Android and VS Code preview UIs are not included.
-No ports are allowed by default. Authorized services may accept writes: this is not read-only HTTP access.
-Arbitrary network destinations, CONNECT, HTTPS upstreams, cross-origin redirects and hard-coded remote localhost URLs are unsupported.
-Request bodies are capped at 1 MiB and responses at 64 MiB. Access settings can only be changed locally on the Host.

@@ -295,6 +295,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         sessionId: item.sessionId,
         role: item.role,
         text: item.text ?? '',
+        ...(item.nativeRef.turnId === undefined ? {} : { replyGroup: item.nativeRef.turnId }),
         ...(item.images === undefined || item.images.length === 0 ? {} : { images: item.images }),
         ...(item.role === 'assistant' && item.status === 'running' ? { streaming: true as const } : {}),
         createdAt,
@@ -304,6 +305,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
     if (item.kind === 'status' && item.details?.type === 'reasoning') {
       output.push({
         kind: 'message', id: item.id, sessionId: item.sessionId, role: 'assistant', text: '',
+        ...(item.nativeRef.turnId === undefined ? {} : { replyGroup: item.nativeRef.turnId }),
         reasoning: item.text ?? '',
         ...(item.status === 'running' ? { streaming: true as const, streamingPhase: 'reasoning' as const } : {}),
         createdAt,
