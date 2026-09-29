@@ -9,17 +9,17 @@
   &nbsp;·&nbsp;
   <a href="docs/README.md">Documentation</a>
   &nbsp;·&nbsp;
-  <a href="apps/server/README.md">Self-hosting</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
+  <a href="apps/server/README.md">Self-hosting</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote">GitHub</a>
+  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
   &nbsp;·&nbsp;
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
 </p>
@@ -85,25 +85,22 @@ Sign in to the Android client with your existing account, select an available co
 
 ### Automated installation (background service)
 
+Install Remote Host as a background service. For service management, login, directory settings,
+and uninstallation, see the [installation guide](docs/installation.md).
+
 macOS / Linux:
 
 ```sh
 curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ```
 
-Windows PowerShell (Run as administrator):
+Windows PowerShell (run as administrator):
 
 ```powershell
-# Download first, then run. Do NOT use "irm ... | iex": on machines where
-# .NET Framework cannot negotiate TLS 1.2, irm fails and pipes $null into iex,
-# which reports a misleading "null-valued expression" error.
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
-if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded installer is unexpectedly small.' }
-& "$env:TEMP\install.ps1"
+$installer = "$env:TEMP\install.ps1"
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
+& $installer
 ```
-
-The automated installer installs Remote Host as a background service and keeps it available without a foreground terminal. It also installs the required runtime and plugins; see the [installation guide](docs/installation.md) for platform-specific service management and uninstallation.
 
 ## Quick start
 

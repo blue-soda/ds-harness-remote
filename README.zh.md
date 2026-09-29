@@ -9,17 +9,17 @@
   &nbsp;·&nbsp;
   <a href="docs/README.md">文档</a>
   &nbsp;·&nbsp;
-  <a href="apps/server/README.zh.md">自部署</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
+  <a href="apps/server/README.zh.md">自部署</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote">GitHub</a>
+  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
   &nbsp;·&nbsp;
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
 </p>
@@ -82,6 +82,8 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.26
 
 ### 自动安装（后台服务）
 
+将 Remote Host 安装为后台服务。服务管理、登录、目录配置和卸载方式见[安装指南](docs/installation.zh.md)。
+
 macOS / Linux：
 
 ```sh
@@ -91,16 +93,10 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 Windows PowerShell（以管理员身份运行）：
 
 ```powershell
-# 先下载再执行。不要用 "irm ... | iex"：在 .NET Framework 默认不支持
-# TLS 1.2 的机器上 irm 失败后只向管道传 $null，iex 会报出
-# 误导性的 "null-valued expression" 错误，把网络故障伪装成脚本问题。
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
-if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装脚本异常地小。' }
-& "$env:TEMP\install.ps1"
+$installer = "$env:TEMP\install.ps1"
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
+& $installer
 ```
-
-自动安装会将 Remote Host 注册为后台服务，无需保持前台终端即可持续运行，同时安装所需运行环境和插件。不同平台的服务管理与卸载方式见[安装指南](docs/installation.zh.md)。
 
 ## 快速开始
 
