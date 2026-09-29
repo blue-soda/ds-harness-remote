@@ -255,6 +255,35 @@ export class RemoteApiProxy {
     if (execution.result.kind === 'error') throw new ApiProxyError('COMMAND_FAILED', execution.result.text ?? 'The Host rejected the permission preset.')
   }
 
+  /** Read the Host's agent-preset (mode) roster for the mode picker. */
+  async agentPresetList(): Promise<{ presets: Array<{ id: string; isDefault: boolean; name?: string; description?: string; broken?: string }> }> {
+    const result = await this.call<{ presets?: unknown }>('agentPreset.list', {})
+    const rows = Array.isArray(result.presets) ? result.presets : []
+    return {
+      presets: rows.flatMap(row => {
+        if (typeof row !== 'object' || row === null) return []
+        const record = row as Record<string, unknown>
+        if (typeof record.id !== 'string' || record.id.length === 0) return []
+        return [{
+          id: record.id,
+          isDefault: record.isDefault === true,
+          ...(typeof record.name === 'string' ? { name: record.name } : {}),
+          ...(typeof record.description === 'string' ? { description: record.description } : {}),
+          ...(typeof record.broken === 'string' ? { broken: record.broken } : {}),
+        }]
+      }),
+    }
+  }
+
+  /** Select the agent preset (mode) of a session that has not started its first turn. */
+  async agentPresetSelect(sessionId: string, agentPreset: string): Promise<string> {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(agentPreset)) {
+      throw new ApiProxyError('INVALID_MESSAGE', 'Harness returned an invalid agent preset.')
+    }
+    const committed = await this.call<unknown>('agentPreset.select', { agentId: sessionId, agentPreset })
+    return typeof committed === 'string' && committed.length > 0 ? committed : agentPreset
+  }
+
   async sessionHistory(sessionId: string, beforeSeq?: number, maxMessages = 60): Promise<SessionHistoryPage> {
     const result = await this.call<{ events: HistoryEntry[]; hasMore: boolean }>('session.history', {
       sessionId,

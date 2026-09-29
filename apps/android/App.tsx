@@ -318,7 +318,7 @@ function AppNavigator() {
         }}
       />}
       {route.name === 'sessions' && <SessionsScreen onBack={pop} onSession={() => push({ name: 'chat' })} />}
-      {route.name === 'chat' && <ChatScreen onBack={pop} />}
+      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       <HomeActionsMenu
