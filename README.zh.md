@@ -11,13 +11,6 @@
   &nbsp;·&nbsp;
   <a href="apps/server/README.zh.md">自部署</a>
   &nbsp;·&nbsp;
-  <strong>下载：</strong>
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Windows</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">macOS</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Linux</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
@@ -61,12 +54,12 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 
 `ds-harness-remote@0.4.25`
 
-### 方式 B：dsh-TUI Host
+### dsh-TUI Host
 
 将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
 
-### 方式 C：命令行安装
+### 命令行安装
 
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
@@ -81,7 +74,13 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.25
 
 不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
 
-### 方式 D：自动安装
+### Android 客户端
+
+从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 Android APK。
+
+使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
+
+### 自动安装（后台服务）
 
 macOS / Linux：
 
@@ -113,20 +112,9 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装�
 
 公开服务使用托管的 Remote 中继；单账号自建可使用仓库内的[最小 Server](apps/server/README.zh.md)，其 Web 页面仅提供设备状态。
 
-## 授权恢复与多实例
+## 最小自部署 Server
 
-每个同时运行的 Host 都需要独立设备身份。共享 `DSH_HOME` 的 profile 也共享 Remote
-凭据；如果两个实例都需要在线，请分别设置独立的 `DSH_HOME` 并授权。
-当另一连接替换当前 Host（`CONNECTION_REPLACED`）时，自动重连会停止，避免两个实例反复互踢。
-
-过期凭据通过跨进程锁串行刷新。Server 拒绝握手时，Host 可刷新凭据后重试一次。
-若刷新被拒绝，请执行 `/remote login [github|zhihu]`，或在 Remote 设置中重新授权 Host。
-日志以 `phase: credential_refresh` 标记刷新失败，不输出凭据。
-
-`SERVER_CREDENTIALS_BUSY` 表示其他进程持有刷新锁。若此前异常退出，请停止共享该
-`DSH_HOME` 的**所有**实例，仅移除 `remote/servers/<serverHash>/<role>/` 下对应凭据旁的
-`server-credentials.json.refresh-lock` 目录，然后重新授权并启动。
-锁不会按存续时间被强行抢占，以免暂停中的进程恢复后继续使用旧 token。
+仓库内的 [`apps/server`](apps/server/README.zh.md) 提供可独立运行的单账号 Relay Server。通过 `DSH_SERVER_ACCOUNT`、`DSH_SERVER_PASSWORD` 配置账号密码；Web 提供登录和设备状态。Host 与客户端填写同一 Server 地址并使用该账号登录，设备凭据在重启后保留。
 
 ## 界面截图
 
@@ -148,8 +136,6 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 
 ### Android
 
-从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 Android APK。
-
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
 会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 
@@ -164,6 +150,25 @@ Android 文件预览还支持 PNG/JPEG/GIF/WebP 图片和 PDF；Host 提供 `off
   <img src="docs/images/image-msg.jpg" alt="从 Android 客户端发送图片 Prompt" width="30%">
   <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
 </p>
+
+## 原生侧栏与开发服务预览
+
+Harness `0.1.6-alpha.2` 及更新版本的原生工作区文件树与只读预览通过官方 API 接入，旧 dsh-file-viewer 仍可用。Remote Host 同时支持这些宿主代际：≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径在运行时特性检测，同一份包即可覆盖。
+文件读取遵循 Host Session 文件系统权限，可能包含工作区外的已授权文件；目录树仍限于工作区。
+原生侧栏功能面向 Harness Session，CodeX 内存投影不自动获得原生文件/终端能力。
+
+在 **Host 本机 → Remote 插件设置** 中开启「远程终端」（切换即保存并立即生效），填写「远程预览端口」后点右侧「保存访问设置」；两项运行时访问控制都无需重启 Host。
+
+终端默认关闭，尝试使用时会提示在 Host 开启；不要用该开关修复账号登录或普通连接错误。
+终端以 Host 用户身份执行命令，独立于 Agent 审批；只列出本 Remote 设备创建的终端，断线不重放输入。
+
+在 Desktop / 连接本机 Harness 的浏览器中，Remote 顶栏点击「预览服务」，输入已授权端口，
+即可在原生浏览器侧栏访问 Host 的 `127.0.0.1` HTTP 服务。支持 WebSocket 与采用当前 origin 的热更新，
+可使用 P2P 或 Relay；相对资源路径保持不变。仅绑定 IPv6 的服务需要另行监听 `127.0.0.1`。
+预览使用随机独立本机 origin，退出 Remote 或断线即关闭；不适用于远程 Web 页面、Android 或 VS Code 预览 UI。
+Host 未配置端口时默认拒绝。它允许与授权开发服务交互，并非只读 HTTP；不支持任意内网地址、CONNECT、
+HTTPS upstream、跨 origin 重定向或代码中硬编码的远端 localhost URL。请求体最多 1 MiB、响应最多 64 MiB。
+设置须在 Host 本地修改，不能从 Remote 会话开启自身的访问权限。
 
 ## 工作方式
 
@@ -248,6 +253,21 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴�
 打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
 前拒绝 Session V3 Host。
 
+## 授权恢复与多实例
+
+每个同时运行的 Host 都需要独立设备身份。共享 `DSH_HOME` 的 profile 也共享 Remote
+凭据；如果两个实例都需要在线，请分别设置独立的 `DSH_HOME` 并授权。
+当另一连接替换当前 Host（`CONNECTION_REPLACED`）时，自动重连会停止，避免两个实例反复互踢。
+
+过期凭据通过跨进程锁串行刷新。Server 拒绝握手时，Host 可刷新凭据后重试一次。
+若刷新被拒绝，请执行 `/remote login [github|zhihu]`，或在 Remote 设置中重新授权 Host。
+日志以 `phase: credential_refresh` 标记刷新失败，不输出凭据。
+
+`SERVER_CREDENTIALS_BUSY` 表示其他进程持有刷新锁。若此前异常退出，请停止共享该
+`DSH_HOME` 的**所有**实例，仅移除 `remote/servers/<serverHash>/<role>/` 下对应凭据旁的
+`server-credentials.json.refresh-lock` 目录，然后重新授权并启动。
+锁不会按存续时间被强行抢占，以免暂停中的进程恢复后继续使用旧 token。
+
 ## 文档
 
 - [插件说明](packages/plugin/README.md)
@@ -259,6 +279,12 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴�
 - [远程协议](docs/protocol.md)
 - [开发进度与路线图](TODO.md)
 
+## 友情链接
+
+- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（已适配 Remote，参见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)）
+- 友情链接：[LINUX DO 社区](https://linux.do/)
+- 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=liguobao%2Fds-harness-remote&type=date&legend=top-left">
@@ -269,12 +295,6 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴�
  </picture>
 </a>
 
-## 友情链接
-
-- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（已适配 Remote，参见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)）
-- 友情链接：[LINUX DO 社区](https://linux.do/)
-- 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
-
 ## 项目声明与商标
 
 本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
@@ -282,26 +302,3 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.25` 会在 Host 暴�
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-## 最小自部署 Server
-
-仓库内的 [`apps/server`](apps/server/README.zh.md) 提供可独立运行的单账号 Relay Server。通过 `DSH_SERVER_ACCOUNT`、`DSH_SERVER_PASSWORD` 配置账号密码；Web 提供登录和设备状态。Host 与客户端填写同一 Server 地址并使用该账号登录，设备凭据在重启后保留。
-
-## 原生侧栏与开发服务预览
-
-Harness `0.1.6-alpha.2` 及更新版本的原生工作区文件树与只读预览通过官方 API 接入，旧 dsh-file-viewer 仍可用。Remote Host 同时支持这些宿主代际：≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径在运行时特性检测，同一份包即可覆盖。
-文件读取遵循 Host Session 文件系统权限，可能包含工作区外的已授权文件；目录树仍限于工作区。
-原生侧栏功能面向 Harness Session，CodeX 内存投影不自动获得原生文件/终端能力。
-
-在 **Host 本机 → Remote 插件设置** 中开启「远程终端」（切换即保存并立即生效），填写「远程预览端口」后点右侧「保存访问设置」；两项运行时访问控制都无需重启 Host。
-
-终端默认关闭，尝试使用时会提示在 Host 开启；不要用该开关修复账号登录或普通连接错误。
-终端以 Host 用户身份执行命令，独立于 Agent 审批；只列出本 Remote 设备创建的终端，断线不重放输入。
-
-在 Desktop / 连接本机 Harness 的浏览器中，Remote 顶栏点击「预览服务」，输入已授权端口，
-即可在原生浏览器侧栏访问 Host 的 `127.0.0.1` HTTP 服务。支持 WebSocket 与采用当前 origin 的热更新，
-可使用 P2P 或 Relay；相对资源路径保持不变。仅绑定 IPv6 的服务需要另行监听 `127.0.0.1`。
-预览使用随机独立本机 origin，退出 Remote 或断线即关闭；不适用于远程 Web 页面、Android 或 VS Code 预览 UI。
-Host 未配置端口时默认拒绝。它允许与授权开发服务交互，并非只读 HTTP；不支持任意内网地址、CONNECT、
-HTTPS upstream、跨 origin 重定向或代码中硬编码的远端 localhost URL。请求体最多 1 MiB、响应最多 64 MiB。
-设置须在 Host 本地修改，不能从 Remote 会话开启自身的访问权限。

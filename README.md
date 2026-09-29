@@ -11,13 +11,6 @@
   &nbsp;·&nbsp;
   <a href="apps/server/README.md">Self-hosting</a>
   &nbsp;·&nbsp;
-  <strong>Download:</strong>
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Windows</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">macOS</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Linux</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
@@ -63,12 +56,12 @@ command-line installation below:
 
 `ds-harness-remote@0.4.25`
 
-### Path B: dsh-TUI Host
+### dsh-TUI Host
 
 For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
 [dsh-TUI Remote guide](docs/dsh-tui.md).
 
-### Path C: Command-line installation
+### Command-line installation
 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
@@ -84,7 +77,13 @@ Restart Harness after installation.
 Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
 adds the bundle's configuration layer.
 
-### Path D: Automated installation
+### Android client
+
+Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
+
+Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
+
+### Automated installation (background service)
 
 macOS / Linux:
 
@@ -117,23 +116,9 @@ The automated installer installs Remote Host as a background service and keeps i
 The public service uses the hosted Remote relay. For a minimal single-account deployment,
 see the [self-hosted Server](apps/server/README.md); its Web page shows device status only.
 
-## Authorization recovery and multiple instances
+## Minimal self-hosted Server
 
-Each running Host needs its own device identity. Profiles sharing the same `DSH_HOME`
-share Remote credentials; use a separate `DSH_HOME` and authorize each instance if
-both must stay online. When another connection replaces this Host (`CONNECTION_REPLACED`),
-automatic reconnect stops to prevent the two instances from repeatedly disconnecting each other.
-
-Expired credentials refresh under a cross-process lock. If the Server rejects a
-handshake, the Host can refresh and retry it once. If refresh is rejected, use
-`/remote login [github|zhihu]` or authorize the Host again in Remote settings.
-The log marks refresh failures with `phase: credential_refresh` without exposing credentials.
-
-`SERVER_CREDENTIALS_BUSY` means another process holds the refresh lock. After an
-abnormal exit, stop **all** instances sharing that `DSH_HOME`, remove only the
-`server-credentials.json.refresh-lock` directory beside the affected credentials
-under `remote/servers/<serverHash>/<role>/`, then authorize again and restart.
-Locks are never taken over based on age: a suspended process could still use the old token.
+Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
 
 ## Screenshots
 
@@ -157,8 +142,6 @@ connection status shown in the header.
 
 ### Android
 
-Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
-
 Sign in to the Android client with your existing account, select an available computer,
 open a workspace, and continue the conversation with text or image prompts. The conversation
 toolbar also lets you switch the active model and choose any reasoning effort declared by it.
@@ -174,6 +157,25 @@ Android Files also previews PNG/JPEG/GIF/WebP images and PDF documents, plus DOC
   <img src="docs/images/image-msg.jpg" alt="Sending an image prompt from the Android client" width="30%">
   <img src="docs/images/image-result.jpg" alt="Viewing the image response in the Android client" width="30%">
 </p>
+
+## Native sidebar and development previews
+
+Harness `0.1.6-alpha.2` and later workspace files and read-only previews use the official APIs; the existing dsh-file-viewer bridge remains available. The Remote Host activates on both host generations: the ≤`0.1.6` settings-registry path and the `0.1.7-rc.1` and `0.2.0-rc.1` Volatile entry paths are feature-detected at runtime, so one package covers all supported host generations.
+Reads follow the Host Session filesystem permissions, including authorized files outside cwd; directory listings stay within the workspace.
+These native sidebar features target Harness Sessions, not the CodeX in-memory projection.
+
+On the **Host computer → Remote plugin settings**, toggle **Remote terminal** (it saves and applies immediately), then enter **Remote preview ports** and use the adjacent **Save access settings** button. Both runtime access controls apply without restarting the Host.
+
+Terminal access defaults off and reports how to enable it when attempted. This switch does not fix ordinary login or connection errors.
+Terminals run as the Host user independently of Agent approvals. Only terminals created by the current Remote device are exposed; input is never replayed after disconnect.
+
+In Desktop or a browser connected to Harness on the same computer, choose **Preview service** in the Remote header and enter an authorized port.
+The native browser sidebar opens the Host's IPv4 `127.0.0.1` HTTP service through P2P or Relay, including WebSocket and same-origin hot reload.
+Relative asset paths are preserved. IPv6-only services must also listen on `127.0.0.1`.
+Previews use separate random local origins and close on disconnect or leaving Remote. Remote Web pages, Android and VS Code preview UIs are not included.
+No ports are allowed by default. Authorized services may accept writes: this is not read-only HTTP access.
+Arbitrary network destinations, CONNECT, HTTPS upstreams, cross-origin redirects and hard-coded remote localhost URLs are unsupported.
+Request bodies are capped at 1 MiB and responses at 64 MiB. Access settings can only be changed locally on the Host.
 
 ## How it works
 
@@ -268,6 +270,24 @@ ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop c
 legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
 Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.
 
+## Authorization recovery and multiple instances
+
+Each running Host needs its own device identity. Profiles sharing the same `DSH_HOME`
+share Remote credentials; use a separate `DSH_HOME` and authorize each instance if
+both must stay online. When another connection replaces this Host (`CONNECTION_REPLACED`),
+automatic reconnect stops to prevent the two instances from repeatedly disconnecting each other.
+
+Expired credentials refresh under a cross-process lock. If the Server rejects a
+handshake, the Host can refresh and retry it once. If refresh is rejected, use
+`/remote login [github|zhihu]` or authorize the Host again in Remote settings.
+The log marks refresh failures with `phase: credential_refresh` without exposing credentials.
+
+`SERVER_CREDENTIALS_BUSY` means another process holds the refresh lock. After an
+abnormal exit, stop **all** instances sharing that `DSH_HOME`, remove only the
+`server-credentials.json.refresh-lock` directory beside the affected credentials
+under `remote/servers/<serverHash>/<role>/`, then authorize again and restart.
+Locks are never taken over based on age: a suspended process could still use the old token.
+
 ## Documentation
 
 - [Plugin guide](packages/plugin/README.md)
@@ -279,6 +299,12 @@ Typert clients still reject Session V3 Hosts before switching the native UI or m
 - [Remote Protocol](docs/protocol.md)
 - [Development status and roadmap](TODO.md)
 
+## Links
+
+- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
+- Friendly link: [LINUX DO](https://linux.do/)
+- Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=liguobao%2Fds-harness-remote&type=date&legend=top-left">
@@ -289,12 +315,6 @@ Typert clients still reject Session V3 Hosts before switching the native UI or m
  </picture>
 </a>
 
-## Links
-
-- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
-- Friendly link: [LINUX DO](https://linux.do/)
-- Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
-
 ## Project status and trademarks
 
 This is an independent community project and is not an official DeepSeek product.
@@ -303,26 +323,3 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-## Minimal self-hosted Server
-
-Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
-
-## Native sidebar and development previews
-
-Harness `0.1.6-alpha.2` and later workspace files and read-only previews use the official APIs; the existing dsh-file-viewer bridge remains available. The Remote Host activates on both host generations: the ≤`0.1.6` settings-registry path and the `0.1.7-rc.1` and `0.2.0-rc.1` Volatile entry paths are feature-detected at runtime, so one package covers all supported host generations.
-Reads follow the Host Session filesystem permissions, including authorized files outside cwd; directory listings stay within the workspace.
-These native sidebar features target Harness Sessions, not the CodeX in-memory projection.
-
-On the **Host computer → Remote plugin settings**, toggle **Remote terminal** (it saves and applies immediately), then enter **Remote preview ports** and use the adjacent **Save access settings** button. Both runtime access controls apply without restarting the Host.
-
-Terminal access defaults off and reports how to enable it when attempted. This switch does not fix ordinary login or connection errors.
-Terminals run as the Host user independently of Agent approvals. Only terminals created by the current Remote device are exposed; input is never replayed after disconnect.
-
-In Desktop or a browser connected to Harness on the same computer, choose **Preview service** in the Remote header and enter an authorized port.
-The native browser sidebar opens the Host's IPv4 `127.0.0.1` HTTP service through P2P or Relay, including WebSocket and same-origin hot reload.
-Relative asset paths are preserved. IPv6-only services must also listen on `127.0.0.1`.
-Previews use separate random local origins and close on disconnect or leaving Remote. Remote Web pages, Android and VS Code preview UIs are not included.
-No ports are allowed by default. Authorized services may accept writes: this is not read-only HTTP access.
-Arbitrary network destinations, CONNECT, HTTPS upstreams, cross-origin redirects and hard-coded remote localhost URLs are unsupported.
-Request bodies are capped at 1 MiB and responses at 64 MiB. Access settings can only be changed locally on the Host.
