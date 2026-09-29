@@ -200,8 +200,8 @@ describe('AdaptiveTransport capability negotiation', () => {
     })
     await expect(transport.connectionDetails()).resolves.toMatchObject({
       heartbeatIntervalMs: 25_000,
-      lastReceivedAt: Date.parse('2026-09-29T01:00:05.000Z'),
-      lastSentAt: Date.parse('2026-09-29T01:00:05.000Z'),
+      lastControlReceivedAt: Date.parse('2026-09-29T01:00:05.000Z'),
+      lastControlSentAt: Date.parse('2026-09-29T01:00:05.000Z'),
     })
   })
 
@@ -227,8 +227,8 @@ describe('AdaptiveTransport capability negotiation', () => {
     }))
 
     await expect(transport.connectionDetails()).resolves.toMatchObject({
-      lastReceivedAt: Date.parse('2026-09-29T02:00:07.000Z'),
-      lastSentAt: before.lastSentAt,
+      lastControlReceivedAt: Date.parse('2026-09-29T02:00:07.000Z'),
+      lastControlSentAt: before.lastControlSentAt,
     })
   })
 
