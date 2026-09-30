@@ -70,6 +70,13 @@ const REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16] as const
 const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
 const DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
 const DIRECT_LAN_PROGRESS_DISPLAY_MS = 1_400
+const HOST_AUTHORIZATION_ERRORS = new Set([
+  'ACCOUNT_AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'DEVICE_OWNERSHIP_REQUIRED',
+  'DEVICE_REVOKED',
+  'TOKEN_EXPIRED',
+])
 
 type TransportAttempt = 'direct' | 'turn' | 'relay'
 
@@ -276,6 +283,7 @@ export class ClientModeRuntime {
   }
 
   async devices(): Promise<RemoteDeviceView[]> {
+    this.assertHostAuthorizationForDeviceDiscovery()
     this.requireIdentity()
     const serverDevices = await this.server.listDevices()
     const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
@@ -284,6 +292,23 @@ export class ClientModeRuntime {
       const presence = await this.server.presenceFor(device.deviceId).catch(() => ({ online: false }))
       return { ...device, ...presence }
     }))
+  }
+
+  /**
+   * Device discovery is exposed through the local app control route. When this
+   * installation also runs a Host, keep that route closed after the Host's
+   * Server credential has become terminally invalid. The Client credential can
+   * remain usable for a short time after a revoke, so checking only
+   * `ClientServerApi.listDevices()` would otherwise leak the device directory
+   * from a Host that the user has already been told to re-authorize.
+   */
+  private assertHostAuthorizationForDeviceDiscovery(): void {
+    const status = this.host?.hostStatus()
+    if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return
+    const message = status.error === 'DEVICE_REVOKED'
+      ? 'The local Host was revoked on the Server. Sign out and authorize this Host again.'
+      : 'The local Host authorization is no longer valid. Sign out and authorize this Host again.'
+    throw new ClientModeError(status.error, message)
   }
 
   async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {

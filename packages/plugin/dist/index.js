@@ -20061,6 +20061,13 @@ var REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16];
 var REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17];
 var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
+var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
+  "ACCOUNT_AUTH_REQUIRED",
+  "AUTH_INVALID",
+  "DEVICE_OWNERSHIP_REQUIRED",
+  "DEVICE_REVOKED",
+  "TOKEN_EXPIRED"
+]);
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory) {
     this.config = config;
@@ -20152,6 +20159,7 @@ var ClientModeRuntime = class {
     };
   }
   async devices() {
+    this.assertHostAuthorizationForDeviceDiscovery();
     this.requireIdentity();
     const serverDevices = await this.server.listDevices();
     const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
@@ -20160,6 +20168,20 @@ var ClientModeRuntime = class {
       const presence = await this.server.presenceFor(device.deviceId).catch(() => ({ online: false }));
       return { ...device, ...presence };
     }));
+  }
+  /**
+   * Device discovery is exposed through the local app control route. When this
+   * installation also runs a Host, keep that route closed after the Host's
+   * Server credential has become terminally invalid. The Client credential can
+   * remain usable for a short time after a revoke, so checking only
+   * `ClientServerApi.listDevices()` would otherwise leak the device directory
+   * from a Host that the user has already been told to re-authorize.
+   */
+  assertHostAuthorizationForDeviceDiscovery() {
+    const status = this.host?.hostStatus();
+    if (status === void 0 || status.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return;
+    const message = status.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
+    throw new ClientModeError(status.error, message);
   }
   async authorizeClientWithAccount(email, password) {
     let authorization;
