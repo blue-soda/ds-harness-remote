@@ -11,7 +11,7 @@ DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插�
 | `dsh-v0.1.2-alpha.1`–`rc.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Typert Remote Gateway |
 | `dsh-v0.1.5-rc.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway |
 | `dsh-v0.1.6-alpha.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway（与 v0.1.5 rc.1 同一个 Session V3 profile） |
-| `dsh-v0.2.0-rc.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway（沿用同一 carrier） |
+| `dsh-v0.2.0-rc.2` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway（沿用同一 carrier） |
 
 ## 1. 安装插件
 
@@ -19,7 +19,7 @@ DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插�
 安装到同一个 profile：
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.26
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.27
 ```
 
 ## 2. 启动前挂载 Remote carrier
@@ -31,7 +31,7 @@ dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.26
 - 使用 `dsh-v0.1.2-alpha.1`–`rc.1` 时，挂载官方 Typert Remote Gateway。
 - 使用 `dsh-v0.1.5-rc.1` 时，挂载同版本官方 Typert Remote Gateway；两端 Desktop 必须都是 Session V3。
 - 使用 `dsh-v0.1.6-alpha.1` 时，同样挂载同版本官方 Typert Remote Gateway；它沿用 v0.1.5 的 Session V3 profile。
-- 使用 `dsh-v0.2.0-rc.1` 时，挂载 `0.2.0-rc.1` 官方 Typert Remote Gateway；Remote 仍使用 Session V3 carrier。
+- 使用 `dsh-v0.2.0-rc.2` 时，挂载 `0.2.0-rc.2` 官方 Typert Remote Gateway；Remote 仍使用 Session V3 carrier。
 
 如果没有挂载对应组件，扫码登录和状态查询仍然可用，但远程客户端无法进入 Workspace。
 
@@ -134,7 +134,7 @@ TUI 会显示二维码，并在二维码下方显示可点击的授权 URL：
 如果希望先在普通终端中完成登录，可以使用配套 CLI：
 
 ```sh
-npm install -g ds-harness-remote@0.4.26
+npm install -g ds-harness-remote@0.4.27
 ds-harness-remote login github
 ds-harness-remote status
 dsh-tui

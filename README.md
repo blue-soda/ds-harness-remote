@@ -33,12 +33,12 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`ds-harness-remote@0.4.26`
+`ds-harness-remote@0.4.27`
 
 ## Features
 
 - Continue active sessions and review their latest progress from another device
-- Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.2.0-rc.1`
+- Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.2.0-rc.2`
 - Answer questions and permission requests from clients with live conversation controls
 - Support the DeepSeek Harness desktop edition with pinned Remote plugin releases
 - Open workspaces from another authorized computer on the same account
@@ -54,7 +54,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`ds-harness-remote@0.4.26`
+`ds-harness-remote@0.4.27`
 
 ### dsh-TUI Host
 
@@ -66,7 +66,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.26
+dsh plugin --profile web add -w ds-harness-remote@0.4.27
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -143,7 +143,7 @@ Sign in to the Android client with your existing account, select an available co
 open a workspace, and continue the conversation with text or image prompts. The conversation
 toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
-Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.1`) and an updated Remote Host plugin. Remote terminal access is enabled by default and can be turned off in the Host's detailed Remote settings. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
+Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.2`) and an updated Remote Host plugin. Remote terminal access is enabled by default and can be turned off in the Host's detailed Remote settings. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
 
 The permission selector supports both older inline options and the separate `permissionPresets/catalog` used by newer DSH 0.1.6 builds. Update the Host Remote plugin too; unsupported Hosts show an actionable error instead of fabricated permission options.
 

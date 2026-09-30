@@ -32,12 +32,12 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`ds-harness-remote@0.4.26`
+`ds-harness-remote@0.4.27`
 
 ## 主要特性
 
 - 从另一台设备继续活跃会话，查看最新进展
-- 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.2.0-rc.1` 范围内的受支持 Harness 版本中使用图片 Prompt
+- 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.2.0-rc.2` 范围内的受支持 Harness 版本中使用图片 Prompt
 - 在支持实时会话控制的客户端中回答问题、处理权限请求
 - 支持 DeepSeek Harness 桌面版，并可使用固定版本的 Remote 插件
 - 打开同一账号下另一台已授权电脑上的 Workspace
@@ -52,7 +52,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`ds-harness-remote@0.4.26`
+`ds-harness-remote@0.4.27`
 
 ### dsh-TUI Host
 
@@ -64,7 +64,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.26
+dsh plugin --profile web add -w ds-harness-remote@0.4.27
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -135,7 +135,7 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
 会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 
-Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.1`）的原生接口及更新后的 Remote Host 插件。远程终端默认开启，可在 Host 的详细 Remote 设置中关闭。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
+Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.2`）的原生接口及更新后的 Remote Host 插件。远程终端默认开启，可在 Host 的详细 Remote 设置中关闭。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
 
 权限选择器兼容旧版会话内选项与新版 DSH 0.1.6 的独立 `permissionPresets/catalog`。Host Remote 插件也需要更新；不支持的 Host 会显示更新提示，不会凭空补出权限选项。
 

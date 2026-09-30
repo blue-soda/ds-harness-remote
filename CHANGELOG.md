@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.27 - 2026-09-30
+
+- Fixes Harness version discovery for globally installed DSH CLI symlinks, so Hosts running `dsh 0.2.0-rc.2` report their Harness version again.
+- Keeps the DeepSeek Harness 0.2.0 Desktop shell lookup and its version-gated workspace compatibility paths intact.
+- Adds regression coverage for npm CLI symlinks and the `0.2.0-rc.2` Session V3 profile.
+- Advances the Android app to `0.4.27` (`versionCode 38`) alongside the Plugin release.
+
 ## 0.4.26 - 2026-09-30
 
 - Improves the Android conversation composer and adds more actions to the conversation menu.

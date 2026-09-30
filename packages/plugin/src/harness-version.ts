@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath as realpathEntrypoint } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join } from 'node:path'
 
@@ -66,7 +66,18 @@ export async function readHarnessDistributionVersion(
   entrypoint: string | undefined = process.argv[1],
 ): Promise<string | undefined> {
   if (entrypoint === undefined || !isAbsolute(entrypoint)) return undefined
-  let directory = dirname(entrypoint)
+  // Global npm installs expose the CLI through a bin symlink. Resolve it before
+  // walking ancestors; otherwise `.../bin/dsh` never reaches the
+  // `@deepseek-ai/dsh` package manifest and the CLI Host reports no version.
+  let resolvedEntrypoint = entrypoint
+  try {
+    resolvedEntrypoint = await realpathEntrypoint(entrypoint)
+  } catch {
+    // Keep the original path for Desktop/app.asar and other virtual entries
+    // where the filesystem cannot resolve a real path.
+  }
+  if (!isAbsolute(resolvedEntrypoint)) return undefined
+  let directory = dirname(resolvedEntrypoint)
   for (let depth = 0; depth < 8; depth += 1) {
     const version = await readHarnessManifestVersion(join(directory, 'package.json'))
     if (version !== undefined) return version
@@ -75,7 +86,7 @@ export async function readHarnessDistributionVersion(
     directory = parent
   }
   try {
-    return await readHarnessManifestVersion(createRequire(entrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`))
+    return await readHarnessManifestVersion(createRequire(resolvedEntrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`))
   } catch {
     // The entrypoint may not be a module path that can reach the Harness CLI package.
     return undefined

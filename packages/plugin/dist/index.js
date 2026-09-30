@@ -6950,6 +6950,9 @@ var AdaptiveTransport = class extends BaseTransport {
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
   connectedAt;
+  heartbeatIntervalMs;
+  lastControlReceivedAt;
+  lastControlSentAt;
   lastRtcDiagnostics;
   constructor(url, options) {
     super();
@@ -7026,6 +7029,9 @@ var AdaptiveTransport = class extends BaseTransport {
     return {
       ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
       ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
+      ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
+      ...this.lastControlReceivedAt === void 0 ? {} : { lastControlReceivedAt: this.lastControlReceivedAt },
+      ...this.lastControlSentAt === void 0 ? {} : { lastControlSentAt: this.lastControlSentAt },
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
@@ -7074,10 +7080,12 @@ var AdaptiveTransport = class extends BaseTransport {
       if (typeof raw !== "string")
         throw new Error("Adaptive control frames must be text JSON");
       const frame = decodeControlFrame(raw, this.controlFrameLimits);
+      this.lastControlReceivedAt = Date.now();
       if (frame.type === "hello.ack") {
         const payload = frame.payload;
         if (payload.protocol !== PROTOCOL_VERSION)
           throw new Error("Server selected an unsupported protocol version");
+        this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
         const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES;
         this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities);
         this.controlFrameLimits = {
@@ -7297,6 +7305,7 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.socket?.readyState !== WebSocket.OPEN)
       throw new Error("adaptive control socket is not open");
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
+    this.lastControlSentAt = Date.now();
   }
   finishConnection() {
     this.clearHandshake();
@@ -14736,7 +14745,7 @@ function uuidV7(now = Date.now()) {
 }
 
 // src/harness-version.ts
-import { readFile } from "node:fs/promises";
+import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join } from "node:path";
 var LEGACY_PLACEHOLDER_VERSION = "0.0.1";
@@ -14771,7 +14780,13 @@ async function readHarnessManifestVersion(manifestPath) {
 }
 async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
-  let directory = dirname(entrypoint);
+  let resolvedEntrypoint = entrypoint;
+  try {
+    resolvedEntrypoint = await realpathEntrypoint(entrypoint);
+  } catch {
+  }
+  if (!isAbsolute(resolvedEntrypoint)) return void 0;
+  let directory = dirname(resolvedEntrypoint);
   for (let depth = 0; depth < 8; depth += 1) {
     const version = await readHarnessManifestVersion(join(directory, "package.json"));
     if (version !== void 0) return version;
@@ -14780,7 +14795,7 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
     directory = parent;
   }
   try {
-    return await readHarnessManifestVersion(createRequire(entrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+    return await readHarnessManifestVersion(createRequire(resolvedEntrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
   } catch {
     return void 0;
   }
@@ -18381,7 +18396,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.26";
+var PLUGIN_VERSION = "0.4.27";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
