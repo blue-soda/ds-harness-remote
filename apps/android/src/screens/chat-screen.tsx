@@ -4,8 +4,10 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
+  BackHandler,
   FlatList,
   Image,
+  InteractionManager,
   Keyboard,
   Modal,
   type NativeScrollEvent,
@@ -109,6 +111,9 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const listRef = useRef<FlatList<ChatItem>>(null)
   const lastStreamingScrollAt = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
+  const scrollAnimatedRef = useRef(false)
+  const laidOutSessionRef = useRef<string | undefined>(undefined)
   /** Keep the viewport on the latest turn until the user scrolls away. */
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
@@ -131,11 +136,44 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     listRef.current?.scrollToEnd({ animated })
   }, [])
 
+  // FlatList can report several content-size changes while markdown rows are
+  // measuring. Coalesce those reports into one native scroll command so the
+  // initial render does not monopolize the JS responder queue.
+  const scheduleScrollToBottom = useCallback((animated: boolean) => {
+    scrollAnimatedRef.current = scrollAnimatedRef.current || animated
+    if (scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const shouldAnimate = scrollAnimatedRef.current
+      scrollAnimatedRef.current = false
+      scrollToBottom(shouldAnimate)
+    })
+  }, [scrollToBottom])
+
   // Entering a session (or switching sessions) should land on the latest turn.
   useEffect(() => {
     pinToBottomRef.current = true
     initialPinRef.current = true
+    laidOutSessionRef.current = undefined
   }, [sessionId])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = null
+    scrollAnimatedRef.current = false
+  }, [])
+
+  // Let the first interaction/layout pass finish before jumping to the end.
+  // This keeps the top bar and Android back dispatch responsive while a large
+  // history page is being mounted.
+  useEffect(() => {
+    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (!pinToBottomRef.current && !initialPinRef.current) return
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom(false)
+    })
+    return () => task.cancel()
+  }, [historyLoadingOlder, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   // Loading older history prepends above the viewport — do not yank to the end.
   useEffect(() => {
@@ -147,10 +185,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   // Scroll when a brand-new item is appended. Streaming deltas keep the same
   // item id, so this fires once per assistant step instead of once per chunk.
   useEffect(() => {
-    if (visibleMessages.length === 0 || historyLoadingOlder) return
+    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
-    requestAnimationFrame(() => scrollToBottom(initialPinRef.current ? false : true))
-  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    scheduleScrollToBottom(initialPinRef.current ? false : true)
+  }, [visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom, sessionId])
 
   // While an assistant message is streaming, its text grows on every chunk.
   // Following it with animated scrolls piles up animation frames on the JS
@@ -162,32 +200,32 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     const now = Date.now()
     if (now - lastStreamingScrollAt.current < 100) return
     lastStreamingScrollAt.current = now
-    requestAnimationFrame(() => scrollToBottom(false))
-  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    scheduleScrollToBottom(false)
+  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom])
 
   const onListContentSizeChange = useCallback(() => {
     // FlatList often mounts before variable-height markdown finishes laying
     // out; scroll again whenever content grows while we still want the bottom.
     if (visibleMessages.length === 0 || historyLoadingOlder) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
-    scrollToBottom(false)
-  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    scheduleScrollToBottom(false)
+  }, [visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom])
 
   const onListLayout = useCallback(() => {
     // A session switch can render the list before its viewport and markdown
     // rows have measured. Defer one extra frame so the initial jump reaches
     // the actual end rather than the pre-layout content height.
-    if (visibleMessages.length === 0 || historyLoadingOlder) return
-    if (!pinToBottomRef.current && !initialPinRef.current) return
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom(false)))
-  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (laidOutSessionRef.current === sessionId) return
+    laidOutSessionRef.current = sessionId
+    scheduleScrollToBottom(false)
+  }, [historyLoadingOlder, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     const atBottom = distanceFromEnd <= 80
     pinToBottomRef.current = atBottom
-    if (!atBottom) initialPinRef.current = false
   }, [])
 
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
@@ -195,6 +233,49 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const renderChatItem = useCallback(({ item }: { item: ChatItem }) => (
     <ChatItemView item={item} busyAction={busy} compact={compactChat} onApproval={respondApproval} onQuestion={respondQuestion} />
   ), [busy, compactChat, respondApproval, respondQuestion])
+
+  // Keep chat's back action at the top of the Android responder stack. The
+  // navigator also handles back globally, but a freshly mounted FlatList can
+  // otherwise win the first dispatch while its cells are being measured.
+  const onBackRef = useRef(onBack)
+  onBackRef.current = onBack
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (plusMenuOpen) {
+        Keyboard.dismiss()
+        setPlusMenuOpen(false)
+        return true
+      }
+      if (modelPickerOpen) {
+        setModelPickerOpen(false)
+        return true
+      }
+      if (modePickerOpen) {
+        setModePickerOpen(false)
+        return true
+      }
+      if (permissionPickerOpen) {
+        setPermissionPickerOpen(false)
+        return true
+      }
+      if (workspacePickerOpen) {
+        setWorkspacePickerOpen(false)
+        return true
+      }
+      if (toolPickerOpen) {
+        setToolPickerOpen(false)
+        return true
+      }
+      if (toolsMode !== undefined) {
+        setToolsMode(undefined)
+        return true
+      }
+      Keyboard.dismiss()
+      onBackRef.current()
+      return true
+    })
+    return () => subscription.remove()
+  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen])
 
   if (session === undefined) return null
 
@@ -443,6 +524,11 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         data={visibleMessages}
         keyExtractor={item => item.id}
         renderItem={renderChatItem}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={16}
+        windowSize={7}
+        removeClippedSubviews
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         onLayout={onListLayout}
