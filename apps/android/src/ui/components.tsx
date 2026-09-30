@@ -68,7 +68,7 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
     <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle]}>
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
-          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} />
+          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} hitSlop={12} />
         )}
       </View>
       <View style={styles.topBarTitles}>
@@ -107,7 +107,7 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
   )
 }
 
-export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false }: {
+export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop }: {
   label: string
   icon: LucideIcon
   onPress: () => void
@@ -123,6 +123,8 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
   fill?: string
   /** Tighter 40dp box for rows with several trailing actions; hitSlop keeps a 48dp target. */
   dense?: boolean
+  /** Optional larger touch expansion for controls placed at screen edges. */
+  hitSlop?: number
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -131,7 +133,7 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      hitSlop={dense ? 4 : 8}
+      hitSlop={hitSlop ?? (dense ? 4 : 8)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.iconButton,

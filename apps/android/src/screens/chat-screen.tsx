@@ -6,6 +6,7 @@ import {
   Animated,
   FlatList,
   Image,
+  Keyboard,
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -281,6 +282,25 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   const runQuickPrompt = (prompt: string) => void sendMessage(prompt)
 
+  const openPlusMenu = () => {
+    // The composer TextInput often still owns focus when the user taps +.
+    // Dismissing the IME first gives the transparent Modal the full window and
+    // keeps its sheet (including the close target) out of the keyboard's touch
+    // region on Android.
+    Keyboard.dismiss()
+    setPlusMenuOpen(true)
+  }
+
+  const closePlusMenu = () => {
+    Keyboard.dismiss()
+    setPlusMenuOpen(false)
+  }
+
+  const handleBack = () => {
+    Keyboard.dismiss()
+    onBack()
+  }
+
   const pickModel = async (group: ModelProviderGroup, model: ModelCatalogModel, reasoningEffort?: string) => {
     setModelPickerOpen(false)
     await selectModel({
@@ -403,7 +423,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       <TopBar
         title={sessionTitle(session)}
         titleLines={2}
-        onBack={onBack}
+        onBack={handleBack}
         action={<>
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
@@ -528,7 +548,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               accessibilityLabel={zhCN.chat.moreActions}
               accessibilityState={{ disabled: !connected || permissionSelecting }}
               disabled={!connected || permissionSelecting}
-              onPress={() => setPlusMenuOpen(true)}
+              onPress={openPlusMenu}
               hitSlop={8}
               style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, (!connected || permissionSelecting) && styles.plusDisabled]}
             >
@@ -572,16 +592,16 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         </Text>
       </View>
 
-      <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={() => setPlusMenuOpen(false)}>
-        <ModalSurface onClose={() => setPlusMenuOpen(false)}>
-            <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={() => setPlusMenuOpen(false)} /></View>
+      <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu}>
+        <ModalSurface onClose={closePlusMenu}>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={closePlusMenu} /></View>
             <View style={styles.plusCardRow}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.takePhoto}
                 accessibilityState={{ disabled: pickingImages }}
                 disabled={pickingImages}
-                onPress={() => { setPlusMenuOpen(false); void takePhoto() }}
+                onPress={() => { closePlusMenu(); void takePhoto() }}
                 style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
               >
                 <Camera size={22} color={colors.primary} />
@@ -592,7 +612,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
                 accessibilityLabel={zhCN.chat.photos}
                 accessibilityState={{ disabled: pickingImages }}
                 disabled={pickingImages}
-                onPress={() => { setPlusMenuOpen(false); void pickImages() }}
+                onPress={() => { closePlusMenu(); void pickImages() }}
                 style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
               >
                 <Images size={22} color={colors.primary} />
@@ -602,7 +622,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={zhCN.chat.openWorkspaces}
-              onPress={() => { setPlusMenuOpen(false); setWorkspacePickerOpen(true) }}
+              onPress={() => { closePlusMenu(); setWorkspacePickerOpen(true) }}
               style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
             >
               <Folder size={20} color={colors.primary} />
@@ -618,7 +638,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
                 accessibilityLabel={zhCN.chat.selectMode}
                 accessibilityState={{ disabled: agentPresetSelecting }}
                 disabled={agentPresetSelecting}
-                onPress={() => { setPlusMenuOpen(false); setModePickerOpen(true) }}
+                onPress={() => { closePlusMenu(); setModePickerOpen(true) }}
                 style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, agentPresetSelecting && styles.plusMenuOptionDisabled]}
               >
                 <Layers size={20} color={colors.primary} />
@@ -635,7 +655,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.toolAccess}
-                onPress={() => { setPlusMenuOpen(false); setToolPickerOpen(true) }}
+                onPress={() => { closePlusMenu(); setToolPickerOpen(true) }}
                 style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
               >
                 <Terminal size={20} color={colors.primary} />
@@ -649,7 +669,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
                 accessibilityLabel={zhCN.chat.approvalMode}
                 accessibilityState={{ disabled: permissionSelecting || canStop }}
                 disabled={permissionSelecting || canStop}
-                onPress={() => { setPlusMenuOpen(false); setPermissionPickerOpen(true) }}
+                onPress={() => { closePlusMenu(); setPermissionPickerOpen(true) }}
                 style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, (permissionSelecting || canStop) && styles.plusMenuOptionDisabled]}
               >
                 <ShieldAlert size={20} color={colors.primary} />
@@ -1002,14 +1022,15 @@ function ModelPicker({ visible, models, onClose, onPick }: {
 function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const styles = useThemedStyles(createStyles)
   return (
-    <View style={styles.modalBackdrop}>
+    <View style={styles.modalBackdrop} pointerEvents="box-none">
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.common.close}
         onPress={onClose}
+        pointerEvents="box-only"
         style={StyleSheet.absoluteFill}
       />
-      <View style={styles.modalSheet}>{children}</View>
+      <View style={styles.modalSheet} pointerEvents="box-none">{children}</View>
     </View>
   )
 }
@@ -1486,7 +1507,10 @@ function createStyles(colors: ThemeColors) {
   olderButton: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   olderText: { ...type.smallStrong, color: colors.primary },
   modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
-  modalSheet: { maxHeight: '70%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
+  // Keep the sheet above the full-screen dismiss target on Android. Without an
+  // explicit stacking order, the transparent backdrop can win hit testing on
+  // some RN/Android combinations even though it is rendered first.
+  modalSheet: { zIndex: 1, elevation: 1, maxHeight: '70%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
   modalHeaderCopy: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   modalTitle: { ...type.heading, color: colors.ink, flexShrink: 1 },
@@ -1597,7 +1621,9 @@ function createStyles(colors: ThemeColors) {
   composerCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: colors.background, paddingHorizontal: spacing.xs, paddingTop: spacing.xxs, paddingBottom: spacing.xs, gap: spacing.xxs },
   composerControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: 2 },
   composerSpacer: { flex: 1 },
-  plusButton: { width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
+  // Keep the actual target at the Android 48dp minimum. hitSlop is not
+  // reliable when a control sits inside a clipped/native text-input surface.
+  plusButton: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
   plusPressed: { opacity: 0.7 },
   plusDisabled: { opacity: 0.52 },
   plusMenuOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, marginBottom: spacing.xs },
