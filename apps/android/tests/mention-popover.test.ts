@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { detectMention, filterByQuery, fileMentionText, maskPersonalPath, splitDraftSegments } from '../src/ui/mention-helpers'
+import { detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments } from '../src/ui/mention-helpers'
 
 describe('mention trigger detection', () => {
+  it('continues quoted path completion across whitespace', () => {
+    const draft = 'see @"my folder/f'
+    expect(detectMention(draft, draft.length)).toEqual({ type: 'context', query: 'my folder/f', start: 4 })
+    expect(detectMention('@"my file.ts" ', 14)).toBeUndefined()
+  })
+  it('encodes lossless canonical session references rather than bare display titles', () => {
+    const id = '会话/opaque+id'
+    const mention = sessionMentionText(id, 'title]with\\escape')
+    const uri = `dsh-session:${Buffer.from(JSON.stringify(id), 'utf8').toString('base64url')}`
+    expect(mention).toBe(`@[title\\]with\\\\escape](${uri}) `)
+    expect(splitDraftSegments(`use ${mention}now`)).toEqual([{ text: 'use ', token: false }, { text: mention.trim(), token: true }, { text: ' now', token: false }])
+  })
   it('detects / at the start of input', () => {
     expect(detectMention('/', 1)).toEqual({ type: 'command', query: '', start: 0 })
     expect(detectMention('/compact', 8)).toEqual({ type: 'command', query: 'compact', start: 0 })
@@ -67,14 +79,16 @@ describe('mention fuzzy query filtering', () => {
 })
 
 describe('file mention formatting', () => {
-  it('formats files with @file:`path` convention', () => {
-    expect(fileMentionText('README.md')).toBe('@file:`README.md` ')
-    expect(fileMentionText('src/components/button.tsx')).toBe('@file:`src/components/button.tsx` ')
+  it('formats files with the official path convention', () => {
+    expect(fileMentionText('README.md')).toBe('@README.md ')
+    expect(fileMentionText('src/components/button.tsx')).toBe('@src/components/button.tsx ')
+    expect(fileMentionText('my file.ts')).toBe('@"my file.ts" ')
+    expect(fileMentionText('a"b.ts')).toBeUndefined()
   })
 
-  it('formats directories with a trailing slash inside backticks', () => {
-    expect(fileMentionText('src', true)).toBe('@file:`src/` ')
-    expect(fileMentionText('src/', true)).toBe('@file:`src/` ')
+  it('formats directories using the official plain path grammar', () => {
+    expect(fileMentionText('src', true)).toBe('@src/ ')
+    expect(fileMentionText('src/', true)).toBe('@src/ ')
   })
 })
 

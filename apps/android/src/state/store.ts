@@ -25,8 +25,9 @@ import {
   githubOAuthLoginChannel,
   type LoginOutcome,
 } from '../services/login'
-import type { RedirectLoginMethod } from '../types'
+import type { ChatMessage, RedirectLoginMethod } from '../types'
 import { createNativeRpcId } from '../services/api-proxy'
+import { forkMessage } from '../services/message-actions'
 import {
   codexItemsToChat,
   codexPermissionPreset,
@@ -104,6 +105,11 @@ import type {
 import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
 
+function applyFeedback(items: ChatItem[], ratings?: Map<string, ChatMessage['feedback']>): ChatItem[] {
+  return ratings === undefined ? items : items.map(item => item.kind === 'message'
+    ? { ...item, feedback: ratings.get(item.id) } : item)
+}
+
 type BootPhase = 'loading' | 'ready' | 'error'
 type AuthPhase = 'idle' | 'authenticating' | 'complete' | 'error'
 
@@ -128,6 +134,7 @@ interface AppState {
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   messages: Record<string, ChatItem[]>
+  feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels
   modelSelecting: boolean
   permissionSelecting: boolean
@@ -148,6 +155,7 @@ interface AppState {
   refreshing: boolean
   busyAction?: string
   error?: string
+  commandResult?: { sessionId: string; text: string }
   /** Remembered host from the last successful connect (persisted). */
   lastConnectedDeviceId?: string
   /**
@@ -175,6 +183,8 @@ interface AppState {
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
   sendMessage(text: string, images?: PromptImage[]): Promise<boolean>
+  forkChatMessage(message: ChatMessage): Promise<boolean>
+  rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>): Promise<void>
@@ -233,6 +243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   archivedSessionIds: [],
   sessions: [],
   messages: {},
+  feedbackBySession: {},
   modelSelecting: false,
   permissionSelecting: false,
   agentPresetOptions: undefined,
@@ -652,7 +663,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
         )
         activeCodexStream = stream
-        const items = foldHistory(history.events, session.sessionId)
+        const items = foldHistory(history.events, session.sessionId, true)
         const nextSession = {
           ...sessionWithPermission,
           ...read.session,
@@ -673,13 +684,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         return
       }
       await closeActiveCodexStream()
-      const history = await connection.requireProxy().sessionHistory(session.sessionId)
-      const items = foldHistory(history.events, session.sessionId)
+      const [history, feedback] = await Promise.all([
+        connection.requireProxy().sessionHistory(session.sessionId),
+        // Older carriers may not expose feedback; history must remain usable.
+        connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
+      ])
+      const ratings = feedback === undefined ? undefined : new Map(feedback.map(row => [row.messageId, row.rating]))
+      const items = foldHistory(history.events, session.sessionId, true)
       set(state => ({
         selectedSession: session,
+        historyLoadingOlder: false,
+        feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
         messages: {
           ...state.messages,
-          [session.sessionId]: mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
+          [session.sessionId]: applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []), ratings),
         },
         historyHasMore: history.hasMore,
         oldestLoadedSeq: oldestSeq(history.events),
@@ -711,6 +729,39 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ busyAction: undefined })
         return false
       }
+      set({ busyAction: undefined, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async forkChatMessage(message) {
+    if (get().connection.phase !== 'connected' || get().busyAction !== undefined || get().selectedSession?.backend === 'codex') return false
+    set({ busyAction: `fork:${message.id}`, error: undefined })
+    try {
+      const result = await forkMessage(message, connection.requireProxy())
+      set({ sessions: result.sessions, workspaces: result.workspaces, busyAction: undefined })
+      return await get().openSession(result.session)
+    } catch (error) {
+      set({ busyAction: undefined, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async rateMessage(message, rating) {
+    if (get().connection.phase !== 'connected' || get().busyAction !== undefined || get().selectedSession?.backend === 'codex' || message.streaming) return false
+    set({ busyAction: `feedback:${message.id}`, error: undefined })
+    try {
+      const saved = await connection.requireProxy().messageFeedbackPut(message.sessionId, message.id, rating)
+      set(state => ({ busyAction: undefined,
+        feedbackBySession: state.feedbackBySession[message.sessionId] === undefined ? state.feedbackBySession : {
+          ...state.feedbackBySession,
+          [message.sessionId]: new Map(state.feedbackBySession[message.sessionId]).set(message.id, saved.rating),
+        },
+        messages: { ...state.messages,
+        [message.sessionId]: (state.messages[message.sessionId] ?? []).map(item => item.id === message.id && item.kind === 'message' ? { ...item, feedback: saved.rating } : item),
+      } }))
+      return true
+    } catch (error) {
       set({ busyAction: undefined, error: friendlyError(error) })
       return false
     }
@@ -1052,19 +1103,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       const page = session.backend === 'codex'
         ? await readCodexHistoryPage(connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
         : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60)
-      const items = foldHistory(page.events, session.sessionId)
+      const items = foldHistory(page.events, session.sessionId, true)
       const older = oldestSeq(page.events)
       set(state => ({
         messages: {
           ...state.messages,
-          [session.sessionId]: prependHistory(items, state.messages[session.sessionId] ?? []),
+          [session.sessionId]: applyFeedback(prependHistory(items, state.messages[session.sessionId] ?? []), session.backend === 'codex' ? undefined : state.feedbackBySession[session.sessionId]),
         },
-        historyHasMore: page.hasMore,
-        oldestLoadedSeq: older ?? state.oldestLoadedSeq,
-        historyLoadingOlder: false,
+        ...(state.selectedSession?.sessionId === session.sessionId ? {
+          historyHasMore: page.hasMore,
+          oldestLoadedSeq: older ?? state.oldestLoadedSeq,
+          historyLoadingOlder: false,
+        } : {}),
       }))
     } catch (error) {
-      set({ historyLoadingOlder: false, error: friendlyError(error) })
+      set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { historyLoadingOlder: false, error: friendlyError(error) } : {})
     }
   },
 
@@ -1094,9 +1148,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async sendMessage(input, images = []) {
+    set({ commandResult: undefined })
     const session = get().selectedSession
     const text = input.trim()
     if (session === undefined || (text.length === 0 && images.length === 0)) return false
+    if (session.backend !== 'codex' && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
+      set({ busyAction: 'command', error: undefined })
+      try {
+        // Commands are not prompts: never fabricate an optimistic user turn.
+        if (images.length > 0) throw new Error(zhCN.messageActions.unavailable)
+        const result = await connection.requireProxy().sessionExecuteCommand(session.sessionId, text)
+        if (result.kind === 'error') throw new Error(result.text ?? zhCN.messageActions.failed)
+        set({ busyAction: undefined, commandResult: result.text?.trim()
+          ? { sessionId: session.sessionId, text: result.text } : undefined })
+        return true
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    }
     const requestRpcId = createNativeRpcId()
     const optimistic: ChatItem = {
       kind: 'message',
@@ -1633,7 +1703,7 @@ function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
-  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired'> {
+  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult'> {
   return {
     config: undefined,
     account: undefined,
@@ -1651,6 +1721,8 @@ function initialData(): Pick<AppState,
     sessions: [],
     selectedSession: undefined,
     messages: {},
+    feedbackBySession: {},
+    commandResult: undefined,
     sessionModels: undefined,
     modelSelecting: false,
     permissionSelecting: false,

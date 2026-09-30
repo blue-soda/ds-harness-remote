@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
-import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, Keyboard, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { radius, spacing, type } from './theme'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
@@ -44,10 +44,20 @@ export function MentionPopover({ groups, onDismiss, emptyText }: {
   }, [onDismiss])
 
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)
+  const { height } = useWindowDimensions()
+  const [keyboardTop, setKeyboardTop] = useState<number>()
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', event => setKeyboardTop(event.endCoordinates.screenY))
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardTop(undefined))
+    setKeyboardTop(Keyboard.metrics()?.screenY)
+    return () => { shown.remove(); hidden.remove() }
+  }, [])
+  const availableHeight = Math.min(height, keyboardTop ?? height)
+  const maxHeight = Math.max(80, Math.min(240, availableHeight * 0.32))
   return (
-    <View style={styles.popover} accessibilityRole="list">
+    <View style={[styles.popover, { maxHeight }]} accessibilityRole="list">
       <ScrollView
-        style={styles.scroll}
+        style={[styles.scroll, { maxHeight }]}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
@@ -94,10 +104,9 @@ export function MentionPopover({ groups, onDismiss, emptyText }: {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     popover: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: '100%',
+      // Keep the native hit rectangle inside its parent. An absolute child
+      // above the short composer is visible but not touchable on Android.
+      position: 'relative',
       marginBottom: spacing.xs,
       maxHeight: 260,
       borderRadius: radius.sm,

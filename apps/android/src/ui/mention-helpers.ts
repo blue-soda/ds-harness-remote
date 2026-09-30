@@ -18,6 +18,8 @@ export interface MentionToken {
  */
 export function detectMention(text: string, cursor: number): MentionToken | undefined {
   if (cursor <= 0) return undefined
+  const quoted = /(?:^|\s)(@"([^"\n]*))$/u.exec(text.slice(0, cursor))
+  if (quoted?.[1] !== undefined && quoted[2] !== undefined) return { type: 'context', query: quoted[2], start: cursor - quoted[1].length }
   let index = cursor
   while (index > 0 && !/\s/.test(text.charAt(index - 1))) index -= 1
   if (index >= cursor) return undefined
@@ -58,10 +60,18 @@ export function filterByQuery<T>(items: T[], query: string, textOf: (item: T) =>
   return scored.map(entry => entry.item)
 }
 
-/** Web `@file:`path`` mention grammar. */
-export function fileMentionText(path: string, isDirectory?: boolean): string {
+/** Official dsh-file-reference path grammar; chips close quoted directories. */
+export function fileMentionText(path: string, isDirectory?: boolean): string | undefined {
   const norm = isDirectory && !path.endsWith('/') ? `${path}/` : path
-  return `@file:\`${norm}\` `
+  if (/[\u0000-\u001f\u007f-\u009f"]/u.test(norm)) return undefined
+  return /\s/u.test(norm) ? `@"${norm}" ` : `@${norm} `
+}
+
+/** Mirrors dsh-session-reference/uri: JSON string, UTF-8, canonical base64url. */
+export function sessionMentionText(sessionId: string, label: string): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(sessionId))
+  const payload = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return `@[${label.replace(/[\\\]]/gu, match => `\\${match}`)}](dsh-session:${payload}) `
 }
 
 export interface DraftSegment {
@@ -88,7 +98,10 @@ export function splitDraftSegments(text: string): DraftSegment[] {
     let end = -1
     const head = text.slice(index, index + 7)
     const next = text.charAt(index + 1)
-    if (head.startsWith('@file:`')) {
+    const sessionReference = char === '@' ? /^@\[((?:\\.|[^\\\]])*)\]\(dsh-session:[A-Za-z0-9_-]+\)/u.exec(text.slice(index)) : null
+    if (sessionReference !== null) {
+      end = index + sessionReference[0].length
+    } else if (head.startsWith('@file:`')) {
       const closing = text.indexOf('`', index + 7)
       const lineEnd = text.indexOf('\n', index + 7)
       const bounded = closing >= 0 ? closing + 1 : lineEnd >= 0 ? lineEnd : text.length
