@@ -194,6 +194,56 @@ describe('HostPluginRuntime multi-Client routing', () => {
       await runtime.close()
     }
   })
+
+  it('revokes preview ports for every connected Client while retaining allowed sockets', async () => {
+    const servers = [createServer(), createServer()]
+    const upstreams = servers.map(server => new WebSocketServer({ server }))
+    const runtime = new HostPluginRuntime(config(), identities(), apiProxy({}), logger())
+    try {
+      const ports = await Promise.all(servers.map(async server => {
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+        return (server.address() as { port: number }).port
+      }))
+      runtime.setLoopbackPorts(ports)
+      await runtime.start()
+      const phone = fakeChannel('connection-phone', 'client-phone')
+      const desktop = fakeChannel('connection-desktop', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(phone)
+      await runtime.acceptAuthenticatedPeer(desktop)
+      const call = async (channel: typeof phone, params: unknown): Promise<unknown> => {
+        const request = createRpcRequest('loopback.call', params)
+        channel.push(request)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = channel.sent().find(message => (message.type === 'rpc.response' || message.type === 'rpc.error')
+            && (message.payload as RpcResponsePayload | RpcErrorPayload).requestId === request.id)
+          expect(response).toBeDefined()
+        })
+        if (response!.type === 'rpc.error') throw response!.payload
+        return (response!.payload as RpcResponsePayload).result
+      }
+      const open = { op: 'ws.open', path: '/', headers: [], protocols: [] }
+      const revokedIds = [randomUUID(), randomUUID()]; const keptId = randomUUID()
+      await call(phone, { ...open, id: revokedIds[0], port: ports[0] })
+      await call(desktop, { ...open, id: revokedIds[1], port: ports[0] })
+      await call(desktop, { ...open, id: keptId, port: ports[1] })
+      expect(upstreams[0]!.clients.size).toBe(2)
+      runtime.setLoopbackPorts([ports[1]!])
+      await vi.waitFor(() => expect(upstreams[0]!.clients.size).toBe(0))
+      expect(upstreams[1]!.clients.size).toBe(1)
+      for (const [index, channel] of [phone, desktop].entries()) {
+        await expect(call(channel, { op: 'ws.send', id: revokedIds[index], data: '', binary: false }))
+          .rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+        await expect(call(channel, { ...open, id: randomUUID(), port: ports[0] }))
+          .rejects.toMatchObject({ code: 'LOOPBACK_PORT_DENIED' })
+      }
+      await expect(call(desktop, { op: 'ws.send', id: keptId, data: '', binary: false })).resolves.toEqual({ sent: true })
+    } finally {
+      await runtime.close()
+      for (const upstream of upstreams) { for (const socket of upstream.clients) socket.terminate(); upstream.close() }
+      await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+    }
+  })
 })
 
 async function peerRpc<T = unknown>(channel: ReturnType<typeof fakeChannel>, params: unknown): Promise<T> {

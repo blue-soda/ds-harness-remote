@@ -984,7 +984,9 @@ Host 访问设置禁止由 Remote `settings/update|replace|mutate` 修改（命�
 
 Capability `loopback.http-ws.v1`，唯一方法 `loopback.call`，schema 和共享类型在
 `packages/protocol/src/loopback.ts`。所有请求必须经已有 membership + trusted identity + Noise 通道。
-Host `loopback.ports` 是本地配置的端口白名单，默认空，最多 16 个，范围 1024–65535；改变配置需重启。
+Host `loopback.ports` 是本地配置的端口白名单，默认空，最多 16 个，范围 1024–65535；在 Host 本地保存后立即生效，无需重启。
+撤销端口时 Host 必须关闭所有连接中该端口已有的 HTTP/WebSocket 句柄，包括等待响应或握手的请求，
+结束挂起的读取并丢弃该句柄缓存的数据；仍被允许的端口不受影响。重新允许端口后必须新建句柄，不能恢复已撤销的句柄。
 目标固定 IPv4 `127.0.0.1`，不接受 hostname、URL、DNS、CONNECT、TLS 或任意 TCP 通道。
 请求 HTTP body 允许 POST/PUT 等开发服务操作；这不是只读文件通道，授权端口意味着允许与该服务交互。
 

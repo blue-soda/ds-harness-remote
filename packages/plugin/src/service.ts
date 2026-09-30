@@ -60,6 +60,7 @@ export interface HostRemoteStatus {
 export class HostPluginRuntime {
   readonly connections: ConnectionController
   private readonly terminalOwners = new Map<string, string>()
+  private readonly loopbackHosts = new Set<LoopbackHost>()
   private terminalEnabled: boolean
   private loopbackPorts: readonly number[]
   private identity?: HostIdentity
@@ -131,7 +132,7 @@ export class HostPluginRuntime {
         codex,
         acp,
         // Handles and their lifetime belong to this connection; only policy is shared.
-        new LoopbackHost(() => this.loopbackPorts),
+        this.createLoopbackHost(),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -145,6 +146,14 @@ export class HostPluginRuntime {
 
   setLoopbackPorts(ports: readonly number[]): void {
     this.loopbackPorts = [...ports]
+    for (const loopback of this.loopbackHosts) loopback.setPorts(this.loopbackPorts)
+  }
+
+  private createLoopbackHost(): LoopbackHost {
+    let loopback: LoopbackHost
+    loopback = new LoopbackHost(() => this.loopbackPorts, () => this.loopbackHosts.delete(loopback))
+    this.loopbackHosts.add(loopback)
+    return loopback
   }
 
   async start(): Promise<void> {
