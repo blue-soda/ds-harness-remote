@@ -165,3 +165,12 @@ describe('control authorization and encrypted relay', () => {
     expect((await request('/devices', 'GET', undefined, second.accessToken)).status).toBe(401)
   })
 })
+describe('health and readiness endpoints', () => {
+  it('serves health, healthz, and ready without authentication or rate limiting', async () => {
+    for (const path of ['/health', '/healthz', '/ready']) {
+      const response = await fetch(`${base}${path}`)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: 'ok' })
+    }
+  })
+})

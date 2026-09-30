@@ -92,7 +92,7 @@ export function createRemoteServer(config: Config) {
       res.setHeader('Content-Type', contentType)
       res.end(asset); return
     }
-    if (method === 'GET' && path === '/healthz') { json(res, 200, { status: 'ok' }); return }
+    if (method === 'GET' && (path === '/health' || path === '/healthz' || path === '/ready')) { json(res, 200, { status: 'ok' }); return }
     rate(`api:${req.socket.remoteAddress ?? ''}`, 240)
     if (method === 'POST' && path === '/api/v1/auth/login') {
       rate(`login:${req.socket.remoteAddress ?? ''}`, 20)
