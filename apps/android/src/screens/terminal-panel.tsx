@@ -155,7 +155,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
       onBack={onClose}
       action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
     />
-    <ScrollView horizontal style={styles.controls} contentContainerStyle={styles.row}>
+    <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
       {items.map(item => <Button key={item.id} label={terminalLabel(item)} variant={active === item.id ? 'primary' : 'quiet'} onPress={() => setActive(item.id)} disabled={busy} />)}
       {active && <Button label={t.tools.closeTerminal} variant="danger" disabled={busy} onPress={close} />}
     </ScrollView>

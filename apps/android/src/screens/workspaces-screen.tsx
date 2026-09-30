@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MessageSquareText, MoreVertical, Pencil, Search, Star, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
@@ -237,9 +237,9 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
         onBack={onBack}
         action={(
           <View style={styles.topBarActions}>
-            <IconButton label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />
+            <IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />
             {onMore !== undefined && (
-              <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
+              <IconButton dense label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
             )}
           </View>
         )}
@@ -472,8 +472,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
   const styles = useThemedStyles(createStyles)
   return (
     <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.workspaceActionHeading}>
               <Text style={styles.sheetTitle}>{zhCN.workspaces.options}</Text>
@@ -490,8 +489,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
             </View>
             <Button label={zhCN.workspaces.delete} icon={Trash2} variant="danger" onPress={onDelete} disabled={busy} />
           </View>
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
   )
 }
@@ -568,11 +566,16 @@ function CreateWorkspaceModal({ visible, codexAvailable, initialBackend, busy, o
     onCreated(workspace)
   }
 
+  const openBrowser = () => {
+    // Do not leave the path editor's IME covering the directory picker Modal.
+    Keyboard.dismiss()
+    setBrowseOpen(true)
+  }
+
   return (
     <>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+        <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{zhCN.workspaces.create}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -626,12 +629,11 @@ function CreateWorkspaceModal({ visible, codexAvailable, initialBackend, busy, o
                 autoCorrect={false}
                 editable={!busy}
               />
-              <Button label={zhCN.workspaces.browse} variant="secondary" onPress={() => setBrowseOpen(true)} disabled={busy} />
+              <Button label={zhCN.workspaces.browse} variant="secondary" onPress={openBrowser} disabled={busy} />
             </View>
             <Text style={styles.fieldHint}>{backend === 'codex' ? zhCN.workspaces.codexDirectoryHint : zhCN.workspaces.directoryHint}</Text>
             <Button label={zhCN.workspaces.create} onPress={() => void create()} loading={busy} disabled={path.trim().length === 0} />
-          </Pressable>
-        </Pressable>
+        </WorkspaceModalSurface>
       </Modal>
       <DirectoryBrowserModal
         visible={browseOpen}
@@ -664,8 +666,7 @@ function RenameWorkspaceModal({ target, busy, onClose, onRename }: {
 
   return (
     <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.renameTitle}</Text>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -680,8 +681,7 @@ function RenameWorkspaceModal({ target, busy, onClose, onRename }: {
             editable={!busy}
           />
           <Button label={zhCN.workspaces.saveName} onPress={() => void rename()} loading={busy} disabled={title.trim().length === 0} />
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
   )
 }
@@ -725,8 +725,7 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.browserSheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.browserSheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.chooseFolder}</Text>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -744,7 +743,7 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
             ))}
           </View>
           {error !== undefined && <Text style={styles.errorText}>{error}</Text>}
-          <ScrollView style={styles.browserList}>
+          <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList}>
             {loading
               ? <Text style={styles.loadingText}>{zhCN.workspaces.loadingDirectory}</Text>
               : entries.length === 0
@@ -775,16 +774,40 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
               onPress={() => { if (listing !== undefined) onChoose(listing.path) }}
             />
           </View>
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
+  )
+}
+
+/**
+ * Keep the outside dismiss target separate from the sheet content. Nested
+ * Pressables negotiate the Android responder between the backdrop and the
+ * first child, which can make rows and close buttons intermittently inert.
+ */
+function WorkspaceModalSurface({ onClose, backdropStyle, sheetStyle, children }: {
+  onClose: () => void
+  backdropStyle: StyleProp<ViewStyle>
+  sheetStyle: StyleProp<ViewStyle>
+  children: ReactNode
+}) {
+  return (
+    <View style={backdropStyle} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={zhCN.common.close}
+        onPress={onClose}
+        pointerEvents="box-only"
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[sheetStyle, { zIndex: 1, elevation: 1 }]} pointerEvents="box-none">{children}</View>
+    </View>
   )
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  topBarActions: { flexDirection: 'row', alignItems: 'center' },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   contentTop: { marginTop: spacing.md },
   backendTabs: { flexDirection: 'row', padding: spacing.xxs, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, marginBottom: spacing.md },
   backendTab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs },
@@ -795,7 +818,7 @@ function createStyles(colors: ThemeColors) {
   searchInput: { flex: 1, ...type.body, color: colors.ink, paddingVertical: spacing.sm },
   clearSearch: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
   workspaceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  workspaceRowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  workspaceRowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   workspaceRowPressed: { opacity: 0.7 },
   disabled: { opacity: 0.55 },

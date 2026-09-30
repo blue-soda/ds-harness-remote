@@ -502,7 +502,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
           </ScrollView>
         )}
         {images.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageTray}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
               <View key={`${image.uri}:${index}`} style={styles.imagePreviewWrap}>
                 <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" />
