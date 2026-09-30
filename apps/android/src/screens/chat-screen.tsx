@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   AccessibilityInfo,
@@ -21,7 +21,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, Plus, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Box, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, CircleStop, ClipboardList, Code2, Download, FileText, Folder, Layers, MessageSquare, Paperclip, Plus, Send, Shield, Target, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
@@ -29,6 +29,7 @@ import { mergeReplyReasoning } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
+import { MentionPopover, detectMention, filterByQuery, fileMentionText, maskPersonalPath, type ComposerMentionChip, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -36,6 +37,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { sessionPermissions } from '../services/session-permissions'
+import type { SkillEntry } from '../services/session-tools'
 import { SessionToolsPanel } from './session-tools-panel'
 import { resolveSessionDisplayTitle } from './session-title'
 import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
@@ -67,6 +69,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const createSession = useAppStore(state => state.createSession)
   const archiveSession = useAppStore(state => state.archiveSession)
   const workspaces = useAppStore(state => state.workspaces)
+  const sessions = useAppStore(state => state.sessions)
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
@@ -80,9 +83,25 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  // `/` command and `@` reference popover state anchored to the composer cursor.
+  const [mentionType, setMentionType] = useState<MentionType | null>(null)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [selection, setSelection] = useState({ start: 0, end: 0 })
+  const composerInputRef = useRef<TextInput>(null)
+  const draftRef = useRef('')
+  const selectionRef = useRef({ start: 0, end: 0 })
+  /** Start index of the active `/` / `@` trigger inside the draft. */
+  const mentionSpanRef = useRef(0)
+  const [skillCatalog, setSkillCatalog] = useState<SkillEntry[]>()
+  const [skillCatalogFailed, setSkillCatalogFailed] = useState(false)
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState<WorkspaceFileRef[]>()
+  const [fileListFailed, setFileListFailed] = useState(false)
+  const skillRequestedRef = useRef<string | undefined>(undefined)
+  const filesRequestedRef = useRef<string | undefined>(undefined)
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
   const [permissionRevision, setPermissionRevision] = useState(0)
+  const [mentionChips, setMentionChips] = useState<ComposerMentionChip[]>([])
   const [permissionLoading, setPermissionLoading] = useState(false)
   const inlinePermissionOptions = session?.projections?.values?.permissions
   useEffect(() => {
@@ -107,6 +126,34 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     if (useAppStore.getState().agentPresetOptions !== undefined) return
     void loadAgentPresets()
   }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
+  // `/` 技能目录与 `@` 文件树按会话懒加载一次；未拉取成功时技能分组回落到内置技能。
+  useEffect(() => {
+    setSkillCatalog(undefined)
+    setSkillCatalogFailed(false)
+    setWorkspaceFileRefs(undefined)
+    setFileListFailed(false)
+    skillRequestedRef.current = undefined
+    filesRequestedRef.current = undefined
+    setMentionType(null)
+    setMentionChips([])
+  }, [session?.sessionId])
+  useEffect(() => {
+    const sessionId = session?.sessionId
+    if (mentionType === null || sessionId === undefined) return
+    if (session?.backend === 'codex' || connection.phase !== 'connected') return
+    if (mentionType === 'command' && skillCatalog === undefined && skillRequestedRef.current !== sessionId) {
+      skillRequestedRef.current = sessionId
+      void Promise.resolve().then(() => requireSessionTools().listSkills(sessionId))
+        .then(rows => setSkillCatalog(rows))
+        .catch(() => setSkillCatalogFailed(true))
+    }
+    if (mentionType === 'context' && workspaceFileRefs === undefined && filesRequestedRef.current !== sessionId) {
+      filesRequestedRef.current = sessionId
+      void loadWorkspaceFileRefs(sessionId)
+        .then(rows => setWorkspaceFileRefs(rows))
+        .catch(() => setFileListFailed(true))
+    }
+  }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const listRef = useRef<FlatList<ChatItem>>(null)
   const lastStreamingScrollAt = useRef(0)
@@ -279,13 +326,19 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   if (session === undefined) return null
 
   const submit = async () => {
-    const text = draft.trim()
+    if (!connected || permissionSelecting) return
+    const prefix = mentionChips.map(chip => chip.text).join('')
+    const text = (prefix.length > 0 ? `${prefix}${draft}` : draft).trim()
     if (text.length === 0 && images.length === 0) return
     const submittedImages = images
-    setDraft('')
+    applyDraft('')
+    setMentionChips([])
     setImages([])
+    setMentionType(null)
+    selectionRef.current = { start: 0, end: 0 }
+    setSelection({ start: 0, end: 0 })
     if (!await sendMessage(text, submittedImages)) {
-      setDraft(text)
+      applyDraft(draft)
       setImages(submittedImages)
     }
   }
@@ -498,6 +551,171 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       )
     } else apply()
   }
+
+  const applyDraft = (next: string) => {
+    draftRef.current = next
+    setDraft(next)
+  }
+
+  const closeMention = () => setMentionType(null)
+
+  const updateMention = (text: string, cursor: number) => {
+    const detected = detectMention(text, cursor)
+    if (detected === undefined) {
+      setMentionType(null)
+      return
+    }
+    mentionSpanRef.current = detected.start
+    setMentionQuery(detected.query)
+    setMentionType(detected.type)
+  }
+
+  /** Pick an item from the mention popover: replace the trigger query, add a blue reference chip, and clear the typed trigger. */
+  const pickMention = (item: {
+    id: string
+    icon: ComponentType<{ size?: number; color?: string }>
+    label: string
+    text: string
+  }) => {
+    const start = mentionSpanRef.current
+    const end = selectionRef.current.end
+    const current = draftRef.current
+    const next = current.slice(0, start) + current.slice(end)
+    applyDraft(next)
+    selectionRef.current = { start, end: start }
+    setSelection({ start, end: start })
+    setMentionType(null)
+    setMentionChips(existing => {
+      if (existing.some(c => c.id === item.id)) return existing
+      return [...existing, { id: item.id, icon: item.icon, label: item.label, text: item.text }]
+    })
+    composerInputRef.current?.focus()
+  }
+
+  /** Replace the active trigger span (trigger → cursor) with the picked text and keep the caret behind it. */
+  const insertMentionText = (text: string) => {
+    const start = mentionSpanRef.current
+    const end = selectionRef.current.end
+    const current = draftRef.current
+    const next = current.slice(0, start) + text + current.slice(end)
+    const cursor = start + text.length
+    applyDraft(next)
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    setMentionType(null)
+    composerInputRef.current?.focus()
+  }
+
+  const onChangeText = (next: string) => {
+    // Keep the tracked caret in step with the edit so the controlled selection
+    // never yanks the cursor; onSelectionChange refines it right afterwards.
+    const delta = next.length - draftRef.current.length
+    applyDraft(next)
+    const cursor = Math.max(0, Math.min(next.length, selectionRef.current.end + delta))
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    updateMention(next, cursor)
+  }
+
+  const onSelectionChange = (event: { nativeEvent: { selection: { start: number; end: number } } }) => {
+    const next = event.nativeEvent.selection
+    selectionRef.current = next
+    setSelection(next)
+    if (next.start === next.end) updateMention(draftRef.current, next.end)
+  }
+
+  const runSessionExport = () => {
+    setMentionType(null)
+    const sessionId = session.sessionId
+    void Promise.resolve().then(() => requireSessionTools().executeCommand(sessionId, '/export'))
+      .then(result => {
+        Alert.alert(zhCN.mention.exportTitle, result.text ?? (result.kind === 'success' ? zhCN.mention.exportTriggered : zhCN.mention.exportFailed))
+      })
+      .catch((error: unknown) => {
+        Alert.alert(zhCN.mention.exportTitle, error instanceof Error && error.message.length > 0 ? error.message : zhCN.mention.exportFailed)
+      })
+  }
+
+  // 「/」菜单：添加 / 指令 / 技能 三组，动作按 DeepSeek Harness Web 端绑定。
+  const commandAddItems: MentionItem[] = [
+    { id: 'file', icon: Paperclip, title: zhCN.mention.file, description: zhCN.mention.fileDescription, onPress: () => pickMention({ id: 'cmd:file', icon: Paperclip, label: '/file', text: '/file ' }) },
+    { id: 'goal', icon: Target, title: zhCN.mention.goal, description: zhCN.mention.goalDescription, onPress: () => pickMention({ id: 'cmd:goal', icon: Target, label: '/goal', text: '/goal ' }) },
+    { id: 'plan', icon: ClipboardList, title: zhCN.mention.plan, description: zhCN.mention.planDescription, onPress: () => pickMention({ id: 'cmd:plan', icon: ClipboardList, label: '/plan', text: '/plan ' }) },
+    { id: 'feedback', icon: Send, title: zhCN.mention.feedback, description: zhCN.mention.feedbackDescription, onPress: () => pickMention({ id: 'cmd:feedback', icon: Send, label: '/feedback', text: '/feedback ' }) },
+  ]
+  const commandControlItems: MentionItem[] = [
+    { id: 'compact', icon: CircleMinus, title: zhCN.mention.compact, description: zhCN.mention.compactDescription, onPress: () => pickMention({ id: 'cmd:compact', icon: CircleMinus, label: '/compact', text: '/compact' }) },
+    { id: 'permission', icon: Shield, title: zhCN.mention.permission, description: zhCN.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
+    { id: 'model', icon: Box, title: zhCN.mention.model, description: zhCN.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
+    { id: 'export', icon: Download, title: zhCN.mention.export, description: zhCN.mention.exportDescription, onPress: runSessionExport },
+  ]
+  const skillRows: SkillEntry[] = skillCatalog ?? [
+    { name: 'office-docx', description: zhCN.mention.builtinOfficeDocx, modelInvocable: true },
+    { name: 'office-pptx', description: zhCN.mention.builtinOfficePptx, modelInvocable: true },
+    { name: 'office-xlsx', description: zhCN.mention.builtinOfficeXlsx, modelInvocable: true },
+    { name: 'dsh-badge', description: zhCN.mention.builtinDshBadge, modelInvocable: true },
+  ]
+  const skillItems: MentionItem[] = skillRows.map(row => ({
+    id: `skill:${row.name}`,
+    icon: Sparkles,
+    title: row.name,
+    description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
+    onPress: () => pickMention({ id: `skill:${row.name}`, icon: Sparkles, label: `/${row.name}`, text: `/${row.name} ` }),
+  }))
+  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
+  const sessionItems: MentionItem[] = [...sessions]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(item => {
+      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
+      return {
+        id: item.sessionId,
+        icon: MessageSquare,
+        title,
+        description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
+        meta: relativeTime(item.updatedAt),
+        onPress: () => pickMention({ id: `session:${item.sessionId}`, icon: MessageSquare, label: title, text: `@“${title}” ` }),
+      }
+    })
+  const fileItems: MentionItem[] = (workspaceFileRefs ?? []).map(ref => {
+    const isDir = ref.kind === 'directory'
+    const displayPath = isDir && !ref.path.endsWith('/') ? `${ref.path}/` : ref.path
+    const Icon = isDir ? Folder : fileIconFor(ref.path)
+    return {
+      id: ref.path,
+      icon: Icon,
+      title: ref.path,
+      onPress: () => pickMention({
+        id: `file:${ref.path}`,
+        icon: Icon,
+        label: `@file:\`${displayPath}\``,
+        text: fileMentionText(ref.path, isDir),
+      }),
+    }
+  })
+  const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
+  const mentionGroups: MentionGroup[] = mentionType === 'command'
+    ? [
+        { key: 'add', title: zhCN.mention.addSection, items: filterByQuery(commandAddItems, mentionQuery, mentionTexts).slice(0, 20) },
+        { key: 'commands', title: zhCN.mention.commandSection, items: filterByQuery(commandControlItems, mentionQuery, mentionTexts).slice(0, 20) },
+        {
+          key: 'skills',
+          title: zhCN.mention.skillSection,
+          items: skillCatalog === undefined && skillCatalogFailed
+            ? []
+            : filterByQuery(skillItems, mentionQuery, mentionTexts).slice(0, 20),
+        },
+      ]
+    : mentionType === 'context'
+      ? [
+          { key: 'sessions', title: zhCN.mention.sessionSection, items: filterByQuery(sessionItems, mentionQuery, mentionTexts).slice(0, 20) },
+          {
+            key: 'files',
+            title: zhCN.mention.fileSection,
+            items: fileListFailed ? [] : filterByQuery(fileItems, mentionQuery, mentionTexts).slice(0, 30),
+          },
+        ]
+      : []
   return (
     <KeyboardInset>
       <TopBar
@@ -554,6 +772,14 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         ListFooterComponent={showGenerating ? <GeneratingIndicator /> : undefined}
       />
 
+      {mentionType !== null && (
+        <Pressable
+          style={styles.mentionBackdrop}
+          onPress={closeMention}
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.common.close}
+        />
+      )}
       <View style={styles.composerWrap}>
         {!replyActive && (
           <ScrollView
@@ -614,12 +840,48 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
             {!stopping && <ReplyStatusDots />}
           </View>
         )}
+        <View>
+          {mentionType !== null && (
+            <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={zhCN.mention.noMatches} />
+          )}
         <View style={styles.composerCard}>
+          {mentionChips.length > 0 && (
+            <View style={styles.composerMentionTray}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerMentionTrayContent}>
+                {mentionChips.map(chip => {
+                  const ChipIcon = chip.icon
+                  return (
+                    <View key={chip.id} style={styles.composerMentionChip}>
+                      <ChipIcon size={13} color={colors.primary} />
+                      <Text style={styles.composerMentionChipText} numberOfLines={1}>{chip.label}</Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={zhCN.common.close}
+                        onPress={() => setMentionChips(chips => chips.filter(c => c.id !== chip.id))}
+                        hitSlop={6}
+                        style={styles.composerMentionChipClose}
+                      >
+                        <X size={12} color={colors.primary} />
+                      </Pressable>
+                    </View>
+                  )
+                })}
+              </ScrollView>
+            </View>
+          )}
           <TextInput
+            ref={composerInputRef}
             accessibilityLabel={session.backend === 'codex' ? zhCN.chat.codexMessageLabel : zhCN.chat.messageLabel}
             style={styles.composerInput}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={onChangeText}
+            onSelectionChange={onSelectionChange}
+            onKeyPress={({ nativeEvent }) => {
+              if (nativeEvent.key === 'Backspace' && draft.length === 0 && mentionChips.length > 0) {
+                setMentionChips(chips => chips.slice(0, -1))
+              }
+            }}
+            selection={selection}
             placeholder={session.backend === 'codex' ? zhCN.chat.codexPlaceholder : zhCN.chat.placeholder}
             placeholderTextColor={colors.muted}
             multiline
@@ -663,14 +925,15 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               : <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
-                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
-                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
+                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0) }}
+                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0)}
                   onPress={() => void submit()}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>}
           </View>
+        </View>
         </View>
         <Text style={styles.composerHint}>
           {session.backend === 'codex' ? zhCN.chat.codexPolicyHint : zhCN.chat.policyHint}
@@ -1124,6 +1387,50 @@ function ModalSurface({ onClose, children }: { onClose: () => void; children: Re
 function usePickerListMaxHeight(): number {
   const { height } = useWindowDimensions()
   return Math.max(180, Math.round(height * 0.7) - 96)
+}
+
+interface WorkspaceFileRef {
+  path: string
+  kind: 'file' | 'directory'
+}
+
+/** Shallow workspace tree for the `@` file menu: root entries plus one directory level. */
+async function loadWorkspaceFileRefs(sessionId: string): Promise<WorkspaceFileRef[]> {
+  const tools = requireSessionTools()
+  const refs: WorkspaceFileRef[] = []
+  const root = await tools.listFiles(sessionId, '')
+  const directories = root.entries.filter(entry => entry.type === 'directory' && !entry.name.startsWith('.'))
+  for (const entry of root.entries) {
+    if (entry.name.startsWith('.')) continue
+    refs.push({ path: entry.name, kind: entry.type === 'directory' ? 'directory' : 'file' })
+  }
+  await Promise.all(directories.slice(0, 12).map(async directory => {
+    try {
+      const listing = await tools.listFiles(sessionId, directory.name)
+      for (const entry of listing.entries) {
+        if (entry.name.startsWith('.')) continue
+        refs.push({ path: `${directory.name}/${entry.name}`, kind: entry.type === 'directory' ? 'directory' : 'file' })
+      }
+    } catch {
+      // Unreadable directories are simply absent from the menu.
+    }
+  }))
+  return refs
+}
+
+function fileIconFor(path: string) {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return Images
+  if (['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'rs', 'go', 'java', 'kt', 'c', 'cpp', 'h', 'css', 'html', 'md', 'sh', 'yml', 'yaml', 'toml', 'sql', 'vue', 'svelte'].includes(ext)) return Code2
+  return FileText
+}
+
+function relativeTime(timestamp: number): string {
+  const delta = Math.max(0, Date.now() - timestamp)
+  if (delta < 60_000) return zhCN.time.justNow
+  if (delta < 3_600_000) return zhCN.time.minutesAgo(Math.floor(delta / 60_000))
+  if (delta < 86_400_000) return zhCN.time.hoursAgo(Math.floor(delta / 3_600_000))
+  return new Date(timestamp).toLocaleDateString(zhCN.time.locale)
 }
 
 /** Resolve image dimensions for files that arrive without picker metadata (document picker). */
@@ -1689,6 +1996,7 @@ function createStyles(colors: ThemeColors) {
   welcomeSlogan: { ...type.heading, color: colors.ink },
   welcomeBadge: { borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, paddingHorizontal: spacing.sm, paddingVertical: 3, marginTop: 2 },
   welcomeBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
+  mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
   composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
   quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
   quickAction: { minHeight: 32, justifyContent: 'center' },
@@ -1724,6 +2032,21 @@ function createStyles(colors: ThemeColors) {
   effortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginTop: spacing.xs },
   effortRowLabel: { ...type.smallStrong, color: colors.ink },
   effortRowValue: { ...type.small, color: colors.muted, flexShrink: 1 },
+  composerMentionTray: { paddingHorizontal: spacing.sm, paddingTop: spacing.xs, paddingBottom: 2 },
+  composerMentionTrayContent: { gap: spacing.xs, flexDirection: 'row', alignItems: 'center' },
+  composerMentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.xs + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  composerMentionChipText: { ...type.caption, color: colors.primary, fontWeight: '600', maxWidth: 220 },
+  composerMentionChipClose: { marginLeft: 2, padding: 2 },
   composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm },
   sendButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendPressed: { backgroundColor: colors.primaryPressed },
