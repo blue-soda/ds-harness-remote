@@ -269,7 +269,7 @@ describe('HostServerConnection', () => {
     await server.stop()
   })
 
-  it.each(['recover', 'reject-again', 'refresh-rejected', 'revoked', 'replaced', 'replaced-before-ack', 'stopped'] as const)(
+  it.each(['recover', 'reject-again', 'refresh-rejected', 'revoked', 'revoked-frame', 'replaced', 'replaced-before-ack', 'stopped'] as const)(
     'handles control authentication recovery: %s', async scenario => {
       const keys = generateKeyPair(new Uint8Array(32).fill(24))
       const sockets: FakeWebSocket[] = []
@@ -279,6 +279,7 @@ describe('HostServerConnection', () => {
         refreshCredentials: vi.fn(async () => {
           if (scenario === 'refresh-rejected') throw new ServerApiError('AUTH_INVALID', 'refresh rejected', false, 401, 'credential_refresh')
         }),
+        clearAuthorization: vi.fn(async () => undefined),
       } as unknown as HostServerApi
       const logs = logger()
       const server = new HostServerConnection(
@@ -297,7 +298,17 @@ describe('HostServerConnection', () => {
           await flush()
         }
         if (scenario === 'stopped') await server.stop()
-        else sockets[0]!.close(scenario.startsWith('replaced') ? 4003 : scenario === 'revoked' ? 4004 : 4002)
+        else if (scenario === 'revoked-frame') {
+          sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-revoked')))
+          await flush()
+          sockets[0]!.receive(createControlFrame('error', {
+            code: 'DEVICE_REVOKED',
+            message: 'device revoked',
+            retryable: false,
+          }))
+        } else {
+          sockets[0]!.close(scenario.startsWith('replaced') ? 4003 : scenario === 'revoked' ? 4004 : 4002)
+        }
         await flush()
         if (scenario === 'recover' || scenario === 'reject-again') {
           expect(sockets).toHaveLength(2)
@@ -322,8 +333,9 @@ describe('HostServerConnection', () => {
           expect(sockets).toHaveLength(1)
           expect(server.isReconnecting()).toBe(false)
           expect(api.refreshCredentials).toHaveBeenCalledTimes(scenario === 'refresh-rejected' ? 1 : 0)
+          expect(api.clearAuthorization).toHaveBeenCalledTimes(scenario.startsWith('revoked') ? 1 : 0)
           if (scenario !== 'stopped') expect(server.lastError()).toBe(
-            scenario.startsWith('replaced') ? 'CONNECTION_REPLACED' : scenario === 'revoked' ? 'DEVICE_REVOKED' : 'AUTH_INVALID',
+            scenario.startsWith('replaced') ? 'CONNECTION_REPLACED' : scenario.startsWith('revoked') ? 'DEVICE_REVOKED' : 'AUTH_INVALID',
           )
           if (scenario === 'refresh-rejected') expect(logs.warn).toHaveBeenCalledWith(
             'server control connection failed', { code: 'AUTH_INVALID', retryable: false, phase: 'credential_refresh' },
