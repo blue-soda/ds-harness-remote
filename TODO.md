@@ -169,7 +169,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 ## 不在本仓库实现
 
 - 完整多账号 Server、Remote Web、Admin runtime 及其数据库、队列和部署代码（`apps/server` 最小自部署版本除外）
-- 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的默认关闭原生 terminal 和受限 loopback 预览除外
+- 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的原生 terminal 和受限 loopback 预览除外
 - 绕过 ApiProxy allowlist 的 Cordis service 反射
 
 ## 第一版完成标准
@@ -190,7 +190,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 ## 原生侧栏与开发预览（2026-09-20）
 
-- [x] alpha.2 官方只读文件树/预览 API allowlist、默认关闭的原生终端开关与 Host 开启提示
+- [x] alpha.2 官方只读文件树/预览 API allowlist、默认开启且可在详细 Remote 设置中关闭的原生终端开关
 - [x] 终端按设备归属、连接 attachment 校验；禁止 Remote 修改插件自身访问设置
 - [x] 白名单 IPv4 loopback HTTP/WebSocket 通道与独立本机预览 origin
 - [x] Relay 背压、串行加密发送、有界 stream 消费队列

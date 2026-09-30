@@ -102,7 +102,7 @@ Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
 2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
-3. 为当前机器启用远端控制。
+3. Host 启动后默认允许控制当前机器，远程终端也默认开启；需要时可在详细 Remote 设置中关闭远程终端。
 4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
@@ -116,7 +116,7 @@ Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile
 
 ### 桌面端
 
-在 Remote 设置中启用**允许控制当前设备**，即可将当前电脑作为 Host。
+Host 启动后默认允许控制当前设备，当前电脑即可作为 Host。远程终端默认开启，也可在详细 Remote 设置中关闭。
 
 在另一台电脑上选择在线 Host，然后打开它的 Workspace。
 
@@ -135,7 +135,7 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
 会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 
-Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.1`）的原生接口及更新后的 Remote Host 插件。使用终端前，在 Host 本地 Remote 设置中开启「远程终端」。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
+Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.1`）的原生接口及更新后的 Remote Host 插件。远程终端默认开启，可在 Host 的详细 Remote 设置中关闭。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
 
 权限选择器兼容旧版会话内选项与新版 DSH 0.1.6 的独立 `permissionPresets/catalog`。Host Remote 插件也需要更新；不支持的 Host 会显示更新提示，不会凭空补出权限选项。
 
@@ -196,7 +196,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 
 - 会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
 - Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
-- 交互终端需在 Host 本地开启 `terminal.enabled`（默认关闭），以 Host 用户身份运行，独立于 Agent 审批；不开放通用工具 RPC 或远程桌面。
+- 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote 是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。

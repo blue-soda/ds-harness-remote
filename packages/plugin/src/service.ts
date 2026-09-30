@@ -193,6 +193,10 @@ export class HostPluginRuntime {
     }
   }
 
+  async hasStoredAuthorization(): Promise<boolean> {
+    return this.serverApi?.hasStoredAuthorization() ?? false
+  }
+
   private listConnectedClients(): HostConnectedClient[] {
     return this.connections.connectedPeers().map(peer => {
       const trusted = this.identities.trustedPeer(peer.deviceId)

@@ -11,6 +11,7 @@ export interface Config {
   serverUrl?: string
   deviceName?: string
   terminal?: { enabled?: boolean }
+  hostControl?: { enabled?: boolean }
   loopback?: { ports?: number[] }
   forceRelay?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
@@ -46,6 +47,7 @@ export interface ResolvedConfig {
     jitter: number
   }
   terminal: { enabled: boolean }
+  hostControl?: { enabled: boolean }
   loopback: { ports: number[] }
   codex: ResolvedCodexConfig
   acp?: { enabled: boolean; backends: Array<{ id:string; enabled:boolean; command:string; args:string[]; cwd?:string }> }
@@ -71,6 +73,7 @@ const entryConfigSchema = s.object({
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
+  hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
@@ -119,6 +122,7 @@ const configSchema = z.object({
   serverUrl: z.string().url().optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+  hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -145,7 +149,8 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
     deviceName: parsed.deviceName ?? hostname(),
-    terminal: { enabled: parsed.terminal?.enabled ?? env.DSH_REMOTE_TERMINAL_ENABLED === 'true' },
+    hostControl: { enabled: parsed.hostControl?.enabled ?? true },
+    terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     logLevel: parsed.logLevel ?? 'info',

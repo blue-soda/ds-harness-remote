@@ -106,7 +106,7 @@ Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile
 
 1. Open **Remote** from the Harness sidebar.
 2. Sign in with a GitHub or Zhihu QR code, or use your account and password. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
-3. Enable remote control for the current computer.
+3. The Host starts with control of the current computer enabled. Remote terminal access is also enabled by default; you can turn it off in the detailed Remote settings.
 4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
 
@@ -121,8 +121,8 @@ Run the optional single-account Relay Server in [`apps/server`](apps/server/READ
 
 ### Desktop
 
-Enable **Allow control of this device** in Remote settings to make the current computer
-available as a Host.
+The current computer starts with **Allow control of this device** enabled and is available
+as a Host.
 
 On another computer, select an online Host and open one of its workspaces.
 
@@ -143,7 +143,7 @@ Sign in to the Android client with your existing account, select an available co
 open a workspace, and continue the conversation with text or image prompts. The conversation
 toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
-Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.1`) and an updated Remote Host plugin. Enable **Remote terminal** in the Host's local Remote settings before opening a shell. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
+Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.1`) and an updated Remote Host plugin. Remote terminal access is enabled by default and can be turned off in the Host's detailed Remote settings. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
 
 The permission selector supports both older inline options and the separate `permissionPresets/catalog` used by newer DSH 0.1.6 builds. Update the Host Remote plugin too; unsupported Hosts show an actionable error instead of fabricated permission options.
 
@@ -212,7 +212,7 @@ validation status.
 
 - Session traffic is end-to-end encrypted. The service relays ciphertext without storing session plaintext or device private keys.
 - Server membership and the Host's locally pinned peer identity must both authorize a connection.
-- Interactive terminals require the Host-local `terminal.enabled` switch (off by default). They run as the Host user, independently of Agent approvals. General tool RPC and remote desktop remain unavailable.
+- Interactive terminals use the Host-local `terminal.enabled` switch (on by default). They run as the Host user, independently of Agent approvals. General tool RPC and remote desktop remain unavailable.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
 - Codex Remote is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.

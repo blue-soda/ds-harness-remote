@@ -9,7 +9,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
-// ../../node_modules/zod/v3/external.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -121,7 +121,7 @@ __export(external_exports, {
   void: () => voidType
 });
 
-// ../../node_modules/zod/v3/helpers/util.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {
@@ -255,7 +255,7 @@ var getParsedType = (data2) => {
   }
 };
 
-// ../../node_modules/zod/v3/ZodError.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -373,7 +373,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../../node_modules/zod/v3/locales/en.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -476,7 +476,7 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../../node_modules/zod/v3/errors.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -485,7 +485,7 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../../node_modules/zod/v3/helpers/parseUtil.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data: data2, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -595,14 +595,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../node_modules/zod/v3/helpers/errorUtil.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../../node_modules/zod/v3/types.js
+// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -6950,9 +6950,6 @@ var AdaptiveTransport = class extends BaseTransport {
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
   connectedAt;
-  heartbeatIntervalMs;
-  lastControlReceivedAt;
-  lastControlSentAt;
   lastRtcDiagnostics;
   constructor(url, options) {
     super();
@@ -7029,9 +7026,6 @@ var AdaptiveTransport = class extends BaseTransport {
     return {
       ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
       ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
-      ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
-      ...this.lastControlReceivedAt === void 0 ? {} : { lastControlReceivedAt: this.lastControlReceivedAt },
-      ...this.lastControlSentAt === void 0 ? {} : { lastControlSentAt: this.lastControlSentAt },
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
@@ -7080,12 +7074,10 @@ var AdaptiveTransport = class extends BaseTransport {
       if (typeof raw !== "string")
         throw new Error("Adaptive control frames must be text JSON");
       const frame = decodeControlFrame(raw, this.controlFrameLimits);
-      this.lastControlReceivedAt = Date.now();
       if (frame.type === "hello.ack") {
         const payload = frame.payload;
         if (payload.protocol !== PROTOCOL_VERSION)
           throw new Error("Server selected an unsupported protocol version");
-        this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
         const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES;
         this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities);
         this.controlFrameLimits = {
@@ -7305,7 +7297,6 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.socket?.readyState !== WebSocket.OPEN)
       throw new Error("adaptive control socket is not open");
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
-    this.lastControlSentAt = Date.now();
   }
   finishConnection() {
     this.clearHandshake();
@@ -7475,11 +7466,11 @@ var ApiProxySwitch = class {
   }
 };
 
-// ../crypto/node_modules/@noble/ciphers/esm/cryptoNode.js
+// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../crypto/node_modules/@noble/ciphers/esm/webcrypto.js
+// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/webcrypto.js
 function randomBytes2(bytesLength = 32) {
   if (crypto && typeof crypto.getRandomValues === "function") {
     return crypto.getRandomValues(new Uint8Array(bytesLength));
@@ -7490,11 +7481,11 @@ function randomBytes2(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc2 from "node:crypto";
 var crypto2 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
 
-// ../../node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -7621,7 +7612,7 @@ function randomBytes3(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE3) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE3);
@@ -7743,7 +7734,7 @@ var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../node_modules/@noble/hashes/esm/_u64.js
+// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -7778,7 +7769,7 @@ var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0
 var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../node_modules/@noble/hashes/esm/sha2.js
+// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
 var K512 = /* @__PURE__ */ (() => split([
   "0x428a2f98d728ae22",
   "0x7137449123ef65cd",
@@ -7978,7 +7969,7 @@ var SHA512 = class extends HashMD {
 };
 var sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
 
-// ../../node_modules/@noble/curves/esm/utils.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/utils.js
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
 function _abool2(value, title = "") {
@@ -8091,7 +8082,7 @@ function memoized(fn) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/modular.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/modular.js
 var _0n2 = BigInt(0);
 var _1n2 = BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -8417,7 +8408,7 @@ function Field(ORDER, bitLenOrOpts, isLE3 = false, opts = {}) {
   return Object.freeze(f);
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/curve.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/curve.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 function negateCt(condition, item) {
@@ -8680,7 +8671,7 @@ function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
   return { CURVE, Fp: Fp2, Fn: Fn2 };
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/edwards.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/edwards.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 var _2n2 = BigInt(2);
@@ -9231,7 +9222,7 @@ function twistedEdwards(c) {
   return _eddsa_new_output_to_legacy(c, EDDSA);
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/montgomery.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/montgomery.js
 var _0n5 = BigInt(0);
 var _1n5 = BigInt(1);
 var _2n3 = BigInt(2);
@@ -9351,7 +9342,7 @@ function montgomery(curveDef) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/ed25519.js
+// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/ed25519.js
 var _0n6 = /* @__PURE__ */ BigInt(0);
 var _1n6 = BigInt(1);
 var _2n4 = BigInt(2);
@@ -9586,7 +9577,7 @@ _RistrettoPoint.ZERO = /* @__PURE__ */ (() => new _RistrettoPoint(ed25519.Point.
 _RistrettoPoint.Fp = /* @__PURE__ */ (() => Fp)();
 _RistrettoPoint.Fn = /* @__PURE__ */ (() => Fn)();
 
-// ../../node_modules/@lukeburns/clatterjs/dist/constants.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/constants.js
 var MAX_KEY_LEN = 32;
 var MAX_TAG_LEN = 16;
 var MAX_MESSAGE_LEN = 65535;
@@ -9596,7 +9587,7 @@ var MAX_TOKENS_PER_HS_MESSAGE = 8;
 var MAX_HS_MESSAGES_PER_ROLE = 8;
 var HYBRID_DUAL_LAYER = new TextEncoder().encode("clatter.hybrid_dual_layer.outer");
 
-// ../../node_modules/@lukeburns/clatterjs/dist/errors.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/errors.js
 var CipherError = class extends Error {
   code;
   constructor(code, message) {
@@ -9632,7 +9623,7 @@ var TransportError = class extends Error {
   }
 };
 
-// ../../node_modules/@lukeburns/clatterjs/dist/handshakePattern.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/handshakePattern.js
 function checkMsgLens(initiator, responder) {
   for (const g of initiator) {
     if (g.length > MAX_TOKENS_PER_HS_MESSAGE) {
@@ -9801,7 +9792,7 @@ var HandshakePattern = class _HandshakePattern {
   }
 };
 
-// ../../node_modules/@lukeburns/clatterjs/dist/cipherState.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/cipherState.js
 var U64_MAX = 0xfffffffffffffffn;
 var CipherState = class {
   C;
@@ -9873,7 +9864,7 @@ var CipherStates = class {
   }
 };
 
-// ../../node_modules/@lukeburns/clatterjs/dist/symmetricState.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/symmetricState.js
 function deriveCipherKey(temp, C) {
   return temp.slice(0, C.keyLen);
 }
@@ -9960,7 +9951,7 @@ function concat(a, b) {
   return o;
 }
 
-// ../../node_modules/@lukeburns/clatterjs/dist/transportState.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/transportState.js
 function mapCipher(e) {
   if (e instanceof TransportError)
     return e;
@@ -10122,7 +10113,7 @@ var TransportState = class {
   }
 };
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/_u64.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_u64.js
 var U32_MASK642 = /* @__PURE__ */ (() => BigInt(2 ** 32 - 1))();
 var _32n2 = /* @__PURE__ */ BigInt(32);
 function fromBig2(n, le = false) {
@@ -10167,7 +10158,7 @@ var add4H2 = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 
 var add5L2 = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H2 = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/utils.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -10342,7 +10333,7 @@ var oidNist = (suffix) => ({
   oid: Uint8Array.from([6, 9, 96, 134, 72, 1, 101, 3, 4, 2, suffix])
 });
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/_md.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_md.js
 function Chi2(a, b, c) {
   return a & b ^ ~a & c;
 }
@@ -10473,7 +10464,7 @@ var SHA512_IV2 = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/sha2.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -10870,7 +10861,7 @@ var sha5122 = /* @__PURE__ */ createHasher2(
   /* @__PURE__ */ oidNist(3)
 );
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/utils.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/utils.js
 function aarray(item, title, inner = () => {
 }) {
   if (!Array.isArray(item))
@@ -10989,7 +10980,7 @@ function validateObject2(object, fields = {}, optFields = {}, title = "object") 
   iter(optFields, true);
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/abstract/modular.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/modular.js
 var _0n8 = /* @__PURE__ */ BigInt(0);
 var _1n8 = /* @__PURE__ */ BigInt(1);
 var _2n5 = /* @__PURE__ */ BigInt(2);
@@ -11418,7 +11409,7 @@ function Field2(ORDER, opts = {}) {
   return new _Field(ORDER, opts);
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/abstract/curve.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/curve.js
 var _0n9 = /* @__PURE__ */ BigInt(0);
 var _1n9 = /* @__PURE__ */ BigInt(1);
 var _4n3 = /* @__PURE__ */ BigInt(4);
@@ -11805,7 +11796,7 @@ function createKeygen(randomSecretKey, getPublicKey) {
   };
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/abstract/edwards.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/edwards.js
 var _0n10 = /* @__PURE__ */ BigInt(0);
 var _1n10 = /* @__PURE__ */ BigInt(1);
 var _2n6 = /* @__PURE__ */ BigInt(2);
@@ -12099,7 +12090,7 @@ function edwards2(params, extraOpts = {}) {
   return Point;
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/abstract/montgomery.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/montgomery.js
 var _0n11 = /* @__PURE__ */ BigInt(0);
 var _1n11 = /* @__PURE__ */ BigInt(1);
 var _2n7 = /* @__PURE__ */ BigInt(2);
@@ -12246,7 +12237,7 @@ function montgomery2(curveDef) {
   });
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/curves/ed25519.js
+// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/ed25519.js
 var _0n12 = /* @__PURE__ */ BigInt(0);
 var _1n12 = /* @__PURE__ */ BigInt(1);
 var _2n8 = /* @__PURE__ */ BigInt(2);
@@ -12332,7 +12323,7 @@ var x255192 = /* @__PURE__ */ (() => {
   });
 })();
 
-// ../../node_modules/@lukeburns/clatterjs/dist/dhX25519.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/dhX25519.js
 var PK = 32;
 var X25519_NAME = "25519";
 function x25519Keygen(rng) {
@@ -12346,12 +12337,12 @@ function dhPubKeyLen() {
   return PK;
 }
 
-// ../../node_modules/@lukeburns/clatterjs/dist/protocolNames.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/protocolNames.js
 function nqProtocolName(patternName, cipher, hash) {
   return `Noise_${patternName}_${X25519_NAME}_${cipher.name}_${hash.name}`;
 }
 
-// ../../node_modules/@lukeburns/clatterjs/dist/nqHandshake.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/nqHandshake.js
 var PK2 = () => dhPubKeyLen();
 var NqHandshake = class {
   pattern;
@@ -12724,7 +12715,7 @@ function raiseInv() {
   throw new HandshakeError("InvalidState");
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/_blake.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_blake.js
 var BSIGMA = /* @__PURE__ */ Uint8Array.from([
   0,
   1,
@@ -12999,7 +12990,7 @@ function G2s(a, b, c, d, x) {
   return { a, b, c, d };
 }
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/blake2.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/blake2.js
 var B2B_IV = /* @__PURE__ */ Uint32Array.from([
   4089235720,
   1779033703,
@@ -13432,7 +13423,7 @@ var _BLAKE2s = class extends _BLAKE2 {
 };
 var blake2s = /* @__PURE__ */ createHasher2((opts) => new _BLAKE2s(opts));
 
-// ../../node_modules/@lukeburns/clatterjs/node_modules/@noble/hashes/hmac.js
+// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/hmac.js
 var _HMAC = class {
   oHash;
   iHash;
@@ -13509,7 +13500,7 @@ var hmac = /* @__PURE__ */ (() => {
   return hmac_;
 })();
 
-// ../../node_modules/@lukeburns/clatterjs/dist/crypto/hash.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/crypto/hash.js
 function makeHash(name2, hash, hashLen, blockLen) {
   const doHash = (data2) => hash.create().update(data2).digest();
   const hmac1 = (key, data2) => hmac(hash, key, data2);
@@ -13544,7 +13535,7 @@ var sha512H = makeHash("SHA512", sha5122, 64, 128);
 var blake2bH = makeHash("BLAKE2b", blake2b, 64, 128);
 var blake2sH = makeHash("BLAKE2s", blake2s, 32, 64);
 
-// ../../node_modules/@noble/ciphers/utils.js
+// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/utils.js
 function isBytes4(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -13711,7 +13702,7 @@ function copyBytes4(bytes) {
   return Uint8Array.from(abytes4(bytes));
 }
 
-// ../../node_modules/@noble/ciphers/_arx.js
+// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/_arx.js
 var encodeStr = (str) => Uint8Array.from(str.split(""), (c) => c.charCodeAt(0));
 var sigma16_32 = /* @__PURE__ */ (() => swap32IfBE2(u322(encodeStr("expand 16-byte k"))))();
 var sigma32_32 = /* @__PURE__ */ (() => swap32IfBE2(u322(encodeStr("expand 32-byte k"))))();
@@ -13838,7 +13829,7 @@ function createCipher(core, opts) {
   };
 }
 
-// ../../node_modules/@noble/ciphers/_poly1305.js
+// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/_poly1305.js
 function u8to16(a, i) {
   return a[i++] & 255 | (a[i++] & 255) << 8;
 }
@@ -14089,7 +14080,7 @@ var Poly1305 = class {
 };
 var poly1305 = /* @__PURE__ */ wrapMacConstructor(32, (key) => new Poly1305(key));
 
-// ../../node_modules/@noble/ciphers/chacha.js
+// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/chacha.js
 function chachaCore(s2, k, n, out, cnt, rounds = 20) {
   let y00 = s2[0], y01 = s2[1], y02 = s2[2], y03 = s2[3], y04 = k[0], y05 = k[1], y06 = k[2], y07 = k[3], y08 = k[4], y09 = k[5], y10 = k[6], y11 = k[7], y12 = cnt, y13 = n[0], y14 = n[1], y15 = n[2];
   let x00 = y00, x01 = y01, x02 = y02, x03 = y03, x04 = y04, x05 = y05, x06 = y06, x07 = y07, x08 = y08, x09 = y09, x10 = y10, x11 = y11, x12 = y12, x13 = y13, x14 = y14, x15 = y15;
@@ -14239,7 +14230,7 @@ var chacha20poly1305 = /* @__PURE__ */ wrapCipher(
   /* @__PURE__ */ _poly1305_aead(chacha20)
 );
 
-// ../../node_modules/@lukeburns/clatterjs/dist/crypto/cipher.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/crypto/cipher.js
 var U64_MAX2 = 0xfffffffffffffffn;
 function chachaNonce(n) {
   const b = new Uint8Array(12);
@@ -14301,7 +14292,7 @@ var chachaPoly = /* @__PURE__ */ (() => {
   };
 })();
 
-// ../../node_modules/@lukeburns/clatterjs/dist/noiseNq.js
+// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/noiseNq.js
 function noiseIk() {
   return new HandshakePattern("IK", [], [
     1
@@ -18286,6 +18277,7 @@ var entryConfigSchema = s.object({
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
+  hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
   logLevel: s.union(["debug", "info", "warn", "error"]),
@@ -18322,6 +18314,7 @@ var configSchema = external_exports.object({
   serverUrl: external_exports.string().url().optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
+  hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
@@ -18347,7 +18340,8 @@ function resolveConfig(input2 = {}, env = process.env) {
     role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
     deviceName: parsed.deviceName ?? hostname(),
-    terminal: { enabled: parsed.terminal?.enabled ?? env.DSH_REMOTE_TERMINAL_ENABLED === "true" },
+    hostControl: { enabled: parsed.hostControl?.enabled ?? true },
+    terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     logLevel: parsed.logLevel ?? "info",
@@ -18415,6 +18409,11 @@ var HostServerApi = class {
       method: this.credentials.authorizationMethod,
       ...this.credentials.account === void 0 ? {} : { account: this.credentials.account }
     };
+  }
+  /** Check the persisted device credential without issuing or refreshing one. */
+  async hasStoredAuthorization() {
+    const identity = this.requireIdentity();
+    return await this.store.load(this.baseUrl, identity.deviceId) !== void 0;
   }
   async clearAuthorization() {
     this.credentials = void 0;
@@ -20100,6 +20099,27 @@ var ClientModeRuntime = class {
       deviceId: shortId(this.identity.deviceId),
       fingerprint: this.identity.fingerprint
     });
+    if (this.config.hostControl?.enabled !== false && this.host !== void 0 && this.server.hasStoredAuthorization !== void 0) {
+      try {
+        if (await this.server.hasStoredAuthorization() && (this.host.hasStoredAuthorization === void 0 || !await this.host.hasStoredAuthorization())) {
+          await this.authorizeHostByDefault();
+        }
+      } catch (error) {
+        this.logger.warn("automatic Host authorization failed", { code: safeErrorCode(error) });
+      }
+    }
+  }
+  async authorizeHostByDefault() {
+    try {
+      if (this.host === void 0) return;
+      if (this.config.hostControl?.enabled === false) return;
+      if (this.host.hostStatus().authorized) return;
+      if (this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
+      const credentials = await this.server.authenticate(this.requireIdentity());
+      await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
+    } catch (error) {
+      this.logger.warn("automatic Host authorization failed", { code: safeErrorCode(error) });
+    }
   }
   registerControl(connection, webServer) {
     return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer);
@@ -20178,10 +20198,10 @@ var ClientModeRuntime = class {
    * from a Host that the user has already been told to re-authorize.
    */
   assertHostAuthorizationForDeviceDiscovery() {
-    const status = this.host?.hostStatus();
-    if (status === void 0 || status.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return;
-    const message = status.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
-    throw new ClientModeError(status.error, message);
+    const status2 = this.host?.hostStatus();
+    if (status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error)) return;
+    const message = status2.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
+    throw new ClientModeError(status2.error, message);
   }
   async authorizeClientWithAccount(email, password) {
     let authorization;
@@ -20193,6 +20213,7 @@ var ClientModeRuntime = class {
       this.server.bindIdentity(this.identity);
       authorization = await this.server.authorizeWithAccount(this.identity, email, password);
     }
+    await this.authorizeHostByDefault();
     this.logger.info("Client account authorized");
     return authorization;
   }
@@ -20207,6 +20228,7 @@ var ClientModeRuntime = class {
       return this.identity;
     });
     if (result.status === "complete") this.logger.info("Client account authorized with QR login");
+    if (result.status === "complete") await this.authorizeHostByDefault();
     return result;
   }
   async clearClientAuthorization() {
@@ -21540,6 +21562,16 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.add") return ok3(await this.addAcp(payload));
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
+      if (endpoint === "host.authorization.set" && this.client !== void 0) {
+        const value = record5(payload);
+        if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
+        const status2 = await this.client.setHostAuthorization(value.enabled);
+        if (this.settings !== void 0) {
+          const current = resolveConfig(this.settings.get());
+          await this.settings.replace(editableConfig({ ...current, hostControl: { enabled: value.enabled } }));
+        }
+        return ok3(status2);
+      }
       if (endpoint === "host.reconnect") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
         this.host.reconnectHost();
@@ -21597,6 +21629,9 @@ var PluginControlRuntime = class {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password);
     }
+    if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
+      await this.client?.authorizeHostByDefault();
+    }
     await this.settings.replace(editableConfig(next));
     return {
       status: "authorized",
@@ -21643,7 +21678,7 @@ var PluginControlRuntime = class {
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
-      terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? false : value.terminalEnabled },
+      terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? true : value.terminalEnabled },
       loopback: { ports: value.ports === void 0 ? current.loopback?.ports ?? [] : value.ports }
     });
     await this.settings.replace(editableConfig(next));
@@ -21791,6 +21826,7 @@ function editableConfig(config) {
     role: config.role,
     ...config.serverUrl === void 0 ? {} : { serverUrl: config.serverUrl },
     terminal: config.terminal,
+    hostControl: config.hostControl ?? { enabled: true },
     loopback: config.loopback,
     forceRelay: config.forceRelay,
     logLevel: config.logLevel,
@@ -24688,7 +24724,7 @@ function isRecord10(value) {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { accessSync as codexAccessSync, constants as fsConstants, existsSync as codexExistsSync, readFileSync as codexReadFileSync } from "node:fs";
+import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
@@ -26143,13 +26179,13 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ].flatMap((chatGptApp) => {
     const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(codexReadFileSync(join5(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
       const candidate = join5(codexCli, manifest.entrypoint);
-      if (!codexExistsSync(candidate)) return [];
-      codexAccessSync(candidate, fsConstants.X_OK);
+      if (!existsSync2(candidate)) return [];
+      accessSync(candidate, constants.X_OK);
       return [candidate];
     } catch {
       return [];
@@ -27086,6 +27122,9 @@ var HostPluginRuntime = class {
       accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED",
       connectedClients: this.listConnectedClients()
     };
+  }
+  async hasStoredAuthorization() {
+    return this.serverApi?.hasStoredAuthorization() ?? false;
   }
   listConnectedClients() {
     return this.connections.connectedPeers().map((peer) => {

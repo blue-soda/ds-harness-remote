@@ -87,6 +87,12 @@ export class HostServerApi {
     }
   }
 
+  /** Check the persisted device credential without issuing or refreshing one. */
+  async hasStoredAuthorization(): Promise<boolean> {
+    const identity = this.requireIdentity()
+    return await this.store.load(this.baseUrl, identity.deviceId) !== undefined
+  }
+
   async clearAuthorization(): Promise<void> {
     this.credentials = undefined
     this.credentialsPromise = undefined

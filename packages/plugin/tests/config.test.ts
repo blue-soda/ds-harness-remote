@@ -6,10 +6,13 @@ describe('plugin config', () => {
     expect(resolveConfig({}, {})).toMatchObject({
       enabled: true,
       role: 'host',
+      hostControl: { enabled: true },
+      terminal: { enabled: true },
       forceRelay: false,
       reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
       codex: { enabled: true, binary: 'codex' },
     })
+    expect(resolveConfig({}, { DSH_REMOTE_TERMINAL_ENABLED: 'false' }).terminal.enabled).toBe(false)
   })
 
   it('allows the default-on Codex domain to be disabled and rejects obsolete workspace filters', () => {

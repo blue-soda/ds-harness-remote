@@ -88,6 +88,16 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
       if (endpoint === 'settings.logout') return ok(await this.logout())
+      if (endpoint === 'host.authorization.set' && this.client !== undefined) {
+        const value = record(payload)
+        if (typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
+        const status = await this.client.setHostAuthorization(value.enabled)
+        if (this.settings !== undefined) {
+          const current = resolveConfig(this.settings.get())
+          await this.settings.replace(editableConfig({ ...current, hostControl: { enabled: value.enabled } }))
+        }
+        return ok(status)
+      }
       if (endpoint === 'host.reconnect') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         this.host.reconnectHost()
@@ -150,6 +160,9 @@ export class PluginControlRuntime {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password)
     }
+    if (value.role === 'client' && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
+      await this.client?.authorizeHostByDefault()
+    }
     await this.settings.replace(editableConfig(next))
     return {
       status: 'authorized',
@@ -199,7 +212,7 @@ export class PluginControlRuntime {
     if (value.terminalEnabled === undefined && value.ports === undefined) throw new ClientModeError('INVALID_MESSAGE', 'A terminal switch or loopback ports are required.')
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({ ...current,
-      terminal: { enabled: value.terminalEnabled === undefined ? (current.terminal?.enabled ?? false) : value.terminalEnabled },
+      terminal: { enabled: value.terminalEnabled === undefined ? (current.terminal?.enabled ?? true) : value.terminalEnabled },
       loopback: { ports: value.ports === undefined ? (current.loopback?.ports ?? []) : value.ports },
     })
     await this.settings.replace(editableConfig(next))
@@ -363,6 +376,7 @@ function editableConfig(config: ResolvedConfig): Config {
     role: config.role,
     ...(config.serverUrl === undefined ? {} : { serverUrl: config.serverUrl }),
     terminal: config.terminal,
+    hostControl: config.hostControl ?? { enabled: true },
     loopback: config.loopback,
     forceRelay: config.forceRelay,
     logLevel: config.logLevel,

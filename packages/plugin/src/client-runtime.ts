@@ -36,6 +36,7 @@ import {
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { RemoteFileViewerEndpoint } from './file-viewer-contract.js'
 import { loadNodeRtcFactory, type WeriftFactoryOptions } from './werift-rtc.js'
+import { safeErrorCode } from './safe-error.js'
 
 interface ConnectedRemote {
   client: RemoteClientCore
@@ -160,6 +161,7 @@ export interface HostAuthorizationControl {
       mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
     }>
   }
+  hasStoredAuthorization?(): Promise<boolean>
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>
   localHarnessVersion?(): string | undefined
@@ -214,6 +216,34 @@ export class ClientModeRuntime {
       deviceId: shortId(this.identity.deviceId),
       fingerprint: this.identity.fingerprint,
     })
+    // A previously authorized Client should make the local Host controllable
+    // on startup as well. Do not register an anonymous Client just to probe:
+    // only persisted Client credentials opt into this default.
+    if (this.config.hostControl?.enabled !== false
+      && this.host !== undefined
+      && this.server.hasStoredAuthorization !== undefined) {
+      try {
+        if (await this.server.hasStoredAuthorization()
+          && (this.host.hasStoredAuthorization === undefined || !await this.host.hasStoredAuthorization())) {
+          await this.authorizeHostByDefault()
+        }
+      } catch (error) {
+        this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
+      }
+    }
+  }
+
+  async authorizeHostByDefault(): Promise<void> {
+    try {
+      if (this.host === undefined) return
+      if (this.config.hostControl?.enabled === false) return
+      if (this.host.hostStatus().authorized) return
+      if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
+      const credentials = await this.server.authenticate(this.requireIdentity())
+      await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
+    } catch (error) {
+      this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
+    }
   }
 
   registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -321,6 +351,7 @@ export class ClientModeRuntime {
       this.server.bindIdentity(this.identity)
       authorization = await this.server.authorizeWithAccount(this.identity, email, password)
     }
+    await this.authorizeHostByDefault()
     this.logger.info('Client account authorized')
     return authorization
   }
@@ -337,6 +368,7 @@ export class ClientModeRuntime {
       return this.identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
+    if (result.status === 'complete') await this.authorizeHostByDefault()
     return result
   }
 

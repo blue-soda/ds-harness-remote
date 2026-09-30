@@ -952,7 +952,7 @@ permission id、decision enum 或额外响应状态机。
 Host 固定 allowlist 仅增加该只读 endpoint；预设切换继续使用官方 `commands/execute`。
 旧版投影自带 `options` 时继续使用原选项。catalog 不可用时不得猜测选项或提升权限。
 
-### Native sidebar: read-only files and opt-in terminal
+### Native sidebar: read-only files and Host-configurable terminal
 
 Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传输；不新增 Harness wire format。
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
@@ -962,7 +962,7 @@ Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传�
 对 `codex:<threadId>` scope，Host 使用 CodeX thread 当前 `cwd` 作为独立根目录，并额外拒绝根目录之外的路径；
 该映射不改变 Harness Session 的既有工作区权限。CodeX 终端同样按 thread 建立独立 context。
 
-`terminal.enabled` 默认 false。Host 本地开关切换即保存并更新拦截，在后续加密 capability 探测中宣告 `harness.terminal.v1`。
+`terminal.enabled` 默认 true。Host 本地开关切换即保存并更新拦截，在后续加密 capability 探测中宣告 `harness.terminal.v1`。
 只允许 unary `terminal/environment|shells|list|create|write|resize|rename|close` 与 stream
 `terminal/follow|retain`；不允许 wildcard、exec、spawn 或改变官方终端语义。
 关闭时，任何终端调用都返回 `TERMINAL_DISABLED`，提示用户在 Host 本地开启开关后重试。
