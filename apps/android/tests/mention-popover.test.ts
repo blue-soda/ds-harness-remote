@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectMention, filterByQuery, fileMentionText, maskPersonalPath } from '../src/ui/mention-helpers'
+import { detectMention, filterByQuery, fileMentionText, maskPersonalPath, splitDraftSegments } from '../src/ui/mention-helpers'
 
 describe('mention trigger detection', () => {
   it('detects / at the start of input', () => {
@@ -95,6 +95,36 @@ describe('privacy path masking', () => {
   })
 
   it('preserves clean workspace paths', () => {
-    expect(maskPersonalPath('D:\\projects\\repo')).toBe('D:\\projects\\repo')
+    expect(maskPersonalPath('/opt/projects/repo')).toBe('/opt/projects/repo')
+  })
+})
+
+describe('draft blue-mark segmentation', () => {
+  it('marks / commands and keeps the trailing prose plain', () => {
+    expect(splitDraftSegments('/goal make it fast')).toEqual([
+      { text: '/goal', token: true },
+      { text: ' make it fast', token: false },
+    ])
+  })
+
+  it('marks @file:`path` including spaces inside backticks', () => {
+    expect(splitDraftSegments('see @file:`src/my file.ts` ok')).toEqual([
+      { text: 'see ', token: false },
+      { text: '@file:`src/my file.ts`', token: true },
+      { text: ' ok', token: false },
+    ])
+  })
+
+  it('marks quoted session references', () => {
+    expect(splitDraftSegments('@“Basic addition question” plus')).toEqual([
+      { text: '@“Basic addition question”', token: true },
+      { text: ' plus', token: false },
+    ])
+  })
+
+  it('does not mark words embedding the trigger mid-token', () => {
+    expect(splitDraftSegments('mailto:a@b.com and x/y')).toEqual([
+      { text: 'mailto:a@b.com and x/y', token: false },
+    ])
   })
 })

@@ -36,16 +36,11 @@ export function MentionPopover({ groups, onDismiss, emptyText }: {
 
   // Android Back closes the popover first instead of leaving the chat screen.
   useEffect(() => {
-    console.log('[mention] popover mounted')
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      console.log('[mention] hardwareBackPress consumed')
       onDismiss()
       return true
     })
-    return () => {
-      console.log('[mention] popover unmounted')
-      subscription.remove()
-    }
+    return () => subscription.remove()
   }, [onDismiss])
 
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)

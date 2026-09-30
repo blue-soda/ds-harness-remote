@@ -1,5 +1,3 @@
-import type { ComponentType } from 'react'
-
 /** Which suggestion surface is active: `/` commands or `@` references. */
 export type MentionType = 'command' | 'context'
 
@@ -10,13 +8,6 @@ export interface MentionToken {
   query: string
   /** Index of the trigger character inside the draft; the pick replaces from here. */
   start: number
-}
-
-export interface ComposerMentionChip {
-  id: string
-  icon: ComponentType<{ size?: number; color?: string }>
-  label: string
-  text: string
 }
 
 /**
@@ -71,6 +62,58 @@ export function filterByQuery<T>(items: T[], query: string, textOf: (item: T) =>
 export function fileMentionText(path: string, isDirectory?: boolean): string {
   const norm = isDirectory && !path.endsWith('/') ? `${path}/` : path
   return `@file:\`${norm}\` `
+}
+
+export interface DraftSegment {
+  text: string
+  /** True for `/` commands and `@` references — rendered with the blue mark. */
+  token: boolean
+}
+
+/**
+ * Split a composer draft into plain/token segments. The web composer renders
+ * inserted references with a blue mark (`.q44v1G_reference`), so `/commands`,
+ * `@file:`path`` and `@“session title”` runs get the same treatment here.
+ */
+export function splitDraftSegments(text: string): DraftSegment[] {
+  const segments: DraftSegment[] = []
+  let plainStart = 0
+  let index = 0
+  while (index < text.length) {
+    const char = text.charAt(index)
+    if ((char !== '/' && char !== '@') || (index > 0 && !/\s/.test(text.charAt(index - 1)))) {
+      index += 1
+      continue
+    }
+    let end = -1
+    const head = text.slice(index, index + 7)
+    const next = text.charAt(index + 1)
+    if (head.startsWith('@file:`')) {
+      const closing = text.indexOf('`', index + 7)
+      const lineEnd = text.indexOf('\n', index + 7)
+      const bounded = closing >= 0 ? closing + 1 : lineEnd >= 0 ? lineEnd : text.length
+      end = bounded
+    } else if (char === '@' && (next === '“' || next === '"')) {
+      const closing = next === '“' ? '”' : '"'
+      const quoteEnd = text.indexOf(closing, index + 2)
+      const lineEnd = text.indexOf('\n', index + 2)
+      end = quoteEnd >= 0 ? quoteEnd + 1 : lineEnd >= 0 ? lineEnd : text.length
+    } else {
+      let cursor = index + 1
+      while (cursor < text.length && !/\s/.test(text.charAt(cursor))) cursor += 1
+      end = cursor
+    }
+    if (end <= index + 1) {
+      index += 1
+      continue
+    }
+    if (index > plainStart) segments.push({ text: text.slice(plainStart, index), token: false })
+    segments.push({ text: text.slice(index, end), token: true })
+    plainStart = end
+    index = end
+  }
+  if (plainStart < text.length) segments.push({ text: text.slice(plainStart), token: false })
+  return segments
 }
 
 /** Redact Windows / Unix user paths (e.g. C:\Users\<user>\...) to protect personal information. */

@@ -29,7 +29,7 @@ import { mergeReplyReasoning } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
-import { MentionPopover, detectMention, filterByQuery, fileMentionText, maskPersonalPath, type ComposerMentionChip, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
+import { MentionPopover, detectMention, filterByQuery, fileMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -74,6 +74,9 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const [draft, setDraft] = useState('')
+  const [inputScrollY, setInputScrollY] = useState(0)
+  // Web-style blue marks: `/` commands and `@` references render in accent blue.
+  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const [images, setImages] = useState<PromptImage[]>([])
   const [pickingImages, setPickingImages] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
@@ -101,7 +104,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
   const [permissionRevision, setPermissionRevision] = useState(0)
-  const [mentionChips, setMentionChips] = useState<ComposerMentionChip[]>([])
   const [permissionLoading, setPermissionLoading] = useState(false)
   const inlinePermissionOptions = session?.projections?.values?.permissions
   useEffect(() => {
@@ -135,7 +137,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     skillRequestedRef.current = undefined
     filesRequestedRef.current = undefined
     setMentionType(null)
-    setMentionChips([])
   }, [session?.sessionId])
   useEffect(() => {
     const sessionId = session?.sessionId
@@ -327,12 +328,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   const submit = async () => {
     if (!connected || permissionSelecting) return
-    const prefix = mentionChips.map(chip => chip.text).join('')
-    const text = (prefix.length > 0 ? `${prefix}${draft}` : draft).trim()
+    const text = draft.trim()
     if (text.length === 0 && images.length === 0) return
     const submittedImages = images
     applyDraft('')
-    setMentionChips([])
     setImages([])
     setMentionType(null)
     selectionRef.current = { start: 0, end: 0 }
@@ -570,29 +569,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     setMentionType(detected.type)
   }
 
-  /** Pick an item from the mention popover: replace the trigger query, add a blue reference chip, and clear the typed trigger. */
-  const pickMention = (item: {
-    id: string
-    icon: ComponentType<{ size?: number; color?: string }>
-    label: string
-    text: string
-  }) => {
-    const start = mentionSpanRef.current
-    const end = selectionRef.current.end
-    const current = draftRef.current
-    const next = current.slice(0, start) + current.slice(end)
-    applyDraft(next)
-    selectionRef.current = { start, end: start }
-    setSelection({ start, end: start })
-    setMentionType(null)
-    setMentionChips(existing => {
-      if (existing.some(c => c.id === item.id)) return existing
-      return [...existing, { id: item.id, icon: item.icon, label: item.label, text: item.text }]
-    })
-    composerInputRef.current?.focus()
-  }
-
-  /** Replace the active trigger span (trigger → cursor) with the picked text and keep the caret behind it. */
+  /** Insert the picked command or reference text at the trigger span, keeping the caret behind it (web composer grammar). */
   const insertMentionText = (text: string) => {
     const start = mentionSpanRef.current
     const end = selectionRef.current.end
@@ -638,13 +615,13 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   // 「/」菜单：添加 / 指令 / 技能 三组，动作按 DeepSeek Harness Web 端绑定。
   const commandAddItems: MentionItem[] = [
-    { id: 'file', icon: Paperclip, title: zhCN.mention.file, description: zhCN.mention.fileDescription, onPress: () => pickMention({ id: 'cmd:file', icon: Paperclip, label: '/file', text: '/file ' }) },
-    { id: 'goal', icon: Target, title: zhCN.mention.goal, description: zhCN.mention.goalDescription, onPress: () => pickMention({ id: 'cmd:goal', icon: Target, label: '/goal', text: '/goal ' }) },
-    { id: 'plan', icon: ClipboardList, title: zhCN.mention.plan, description: zhCN.mention.planDescription, onPress: () => pickMention({ id: 'cmd:plan', icon: ClipboardList, label: '/plan', text: '/plan ' }) },
-    { id: 'feedback', icon: Send, title: zhCN.mention.feedback, description: zhCN.mention.feedbackDescription, onPress: () => pickMention({ id: 'cmd:feedback', icon: Send, label: '/feedback', text: '/feedback ' }) },
+    { id: 'file', icon: Paperclip, title: zhCN.mention.file, description: zhCN.mention.fileDescription, onPress: () => insertMentionText('/file ') },
+    { id: 'goal', icon: Target, title: zhCN.mention.goal, description: zhCN.mention.goalDescription, onPress: () => insertMentionText('/goal ') },
+    { id: 'plan', icon: ClipboardList, title: zhCN.mention.plan, description: zhCN.mention.planDescription, onPress: () => insertMentionText('/plan ') },
+    { id: 'feedback', icon: Send, title: zhCN.mention.feedback, description: zhCN.mention.feedbackDescription, onPress: () => insertMentionText('/feedback ') },
   ]
   const commandControlItems: MentionItem[] = [
-    { id: 'compact', icon: CircleMinus, title: zhCN.mention.compact, description: zhCN.mention.compactDescription, onPress: () => pickMention({ id: 'cmd:compact', icon: CircleMinus, label: '/compact', text: '/compact' }) },
+    { id: 'compact', icon: CircleMinus, title: zhCN.mention.compact, description: zhCN.mention.compactDescription, onPress: () => insertMentionText('/compact') },
     { id: 'permission', icon: Shield, title: zhCN.mention.permission, description: zhCN.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
     { id: 'model', icon: Box, title: zhCN.mention.model, description: zhCN.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
     { id: 'export', icon: Download, title: zhCN.mention.export, description: zhCN.mention.exportDescription, onPress: runSessionExport },
@@ -660,7 +637,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     icon: Sparkles,
     title: row.name,
     description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
-    onPress: () => pickMention({ id: `skill:${row.name}`, icon: Sparkles, label: `/${row.name}`, text: `/${row.name} ` }),
+    onPress: () => insertMentionText(`/${row.name} `),
   }))
   // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
   const sessionItems: MentionItem[] = [...sessions]
@@ -674,23 +651,17 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         title,
         description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
         meta: relativeTime(item.updatedAt),
-        onPress: () => pickMention({ id: `session:${item.sessionId}`, icon: MessageSquare, label: title, text: `@“${title}” ` }),
+        onPress: () => insertMentionText(`@“${title}” `),
       }
     })
   const fileItems: MentionItem[] = (workspaceFileRefs ?? []).map(ref => {
     const isDir = ref.kind === 'directory'
-    const displayPath = isDir && !ref.path.endsWith('/') ? `${ref.path}/` : ref.path
     const Icon = isDir ? Folder : fileIconFor(ref.path)
     return {
       id: ref.path,
       icon: Icon,
       title: ref.path,
-      onPress: () => pickMention({
-        id: `file:${ref.path}`,
-        icon: Icon,
-        label: `@file:\`${displayPath}\``,
-        text: fileMentionText(ref.path, isDir),
-      }),
+      onPress: () => insertMentionText(fileMentionText(ref.path, isDir)),
     }
   })
   const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
@@ -845,50 +816,33 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
             <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={zhCN.mention.noMatches} />
           )}
         <View style={styles.composerCard}>
-          {mentionChips.length > 0 && (
-            <View style={styles.composerMentionTray}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerMentionTrayContent}>
-                {mentionChips.map(chip => {
-                  const ChipIcon = chip.icon
-                  return (
-                    <View key={chip.id} style={styles.composerMentionChip}>
-                      <ChipIcon size={13} color={colors.primary} />
-                      <Text style={styles.composerMentionChipText} numberOfLines={1}>{chip.label}</Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={zhCN.common.close}
-                        onPress={() => setMentionChips(chips => chips.filter(c => c.id !== chip.id))}
-                        hitSlop={6}
-                        style={styles.composerMentionChipClose}
-                      >
-                        <X size={12} color={colors.primary} />
-                      </Pressable>
-                    </View>
-                  )
-                })}
-              </ScrollView>
+          <View style={styles.composerInputWrap}>
+            {/* Transparent TextInput above a styled text layer: `/` commands and `@` references keep the web's blue mark. */}
+            <View pointerEvents="none" style={styles.composerInputHighlight}>
+              <Text style={[styles.composerInputLayer, { transform: [{ translateY: -inputScrollY }] }]}>
+                {draftSegments.map((segment, index) => segment.token
+                  ? <Text key={index} style={styles.composerDraftToken}>{segment.text}</Text>
+                  : <Text key={index}>{segment.text}</Text>)}
+              </Text>
             </View>
-          )}
-          <TextInput
-            ref={composerInputRef}
-            accessibilityLabel={session.backend === 'codex' ? zhCN.chat.codexMessageLabel : zhCN.chat.messageLabel}
-            style={styles.composerInput}
-            value={draft}
-            onChangeText={onChangeText}
-            onSelectionChange={onSelectionChange}
-            onKeyPress={({ nativeEvent }) => {
-              if (nativeEvent.key === 'Backspace' && draft.length === 0 && mentionChips.length > 0) {
-                setMentionChips(chips => chips.slice(0, -1))
-              }
-            }}
-            selection={selection}
-            placeholder={session.backend === 'codex' ? zhCN.chat.codexPlaceholder : zhCN.chat.placeholder}
-            placeholderTextColor={colors.muted}
-            multiline
-            maxLength={12_000}
-            editable={connected && !permissionSelecting}
-            selectionColor={colors.accent}
-          />
+            <TextInput
+              ref={composerInputRef}
+              accessibilityLabel={session.backend === 'codex' ? zhCN.chat.codexMessageLabel : zhCN.chat.messageLabel}
+              style={[styles.composerInput, styles.composerInputEditable]}
+              value={draft}
+              onChangeText={onChangeText}
+              onSelectionChange={onSelectionChange}
+              onScroll={event => setInputScrollY(event.nativeEvent.contentOffset.y)}
+              selection={selection}
+              placeholder={session.backend === 'codex' ? zhCN.chat.codexPlaceholder : zhCN.chat.placeholder}
+              placeholderTextColor={colors.muted}
+              multiline
+              maxLength={12_000}
+              editable={connected && !permissionSelecting}
+              selectionColor={colors.accent}
+              cursorColor={colors.accent}
+            />
+          </View>
           <View style={styles.composerControls}>
             <Pressable
               accessibilityRole="button"
@@ -925,10 +879,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               : <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
-                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0) }}
-                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0)}
+                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
+                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
                   onPress={() => void submit()}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && mentionChips.length === 0)) && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>}
@@ -2032,22 +1986,12 @@ function createStyles(colors: ThemeColors) {
   effortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginTop: spacing.xs },
   effortRowLabel: { ...type.smallStrong, color: colors.ink },
   effortRowValue: { ...type.small, color: colors.muted, flexShrink: 1 },
-  composerMentionTray: { paddingHorizontal: spacing.sm, paddingTop: spacing.xs, paddingBottom: 2 },
-  composerMentionTrayContent: { gap: spacing.xs, flexDirection: 'row', alignItems: 'center' },
-  composerMentionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 3,
-    paddingHorizontal: spacing.xs + 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primarySoft,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  composerMentionChipText: { ...type.caption, color: colors.primary, fontWeight: '600', maxWidth: 220 },
-  composerMentionChipClose: { marginLeft: 2, padding: 2 },
-  composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm },
+  composerInputWrap: { position: 'relative' },
+  composerInputHighlight: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, overflow: 'hidden' },
+  composerInputLayer: { ...type.body, color: colors.ink, paddingVertical: 8, paddingHorizontal: spacing.sm, textAlignVertical: 'top' },
+  composerDraftToken: { color: colors.primary },
+  composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm, textAlignVertical: 'top' },
+  composerInputEditable: { color: 'transparent' },
   sendButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendPressed: { backgroundColor: colors.primaryPressed },
   stopButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
