@@ -1,6 +1,10 @@
+import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
+import { createServer } from 'node:http'
 import { RpcId, type ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { createRpcRequest, type RemoteMessage } from '@dsh-remote/protocol'
+import { createRpcRequest, type LoopbackRead, type LoopbackWsRead, type RemoteMessage, type RpcErrorPayload, type RpcResponsePayload } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
+import { WebSocketServer } from 'ws'
 import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
@@ -82,7 +86,131 @@ describe('HostPluginRuntime multi-Client routing', () => {
     await runtime.close()
     expect(streamSignals.every(signal => signal.aborted)).toBe(true)
   })
+
+  it('isolates HTTP preview handles and keeps previews working after another Client disconnects or reconnects', async () => {
+    const server = createServer((request, response) => {
+      response.writeHead(200)
+      response.write(request.url!)
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const settings = config()
+    settings.loopback.ports = [port]
+    const runtime = new HostPluginRuntime(settings, identities(), apiProxy({}), logger())
+    try {
+      await runtime.start()
+      const phone = fakeChannel('connection-phone', 'client-phone')
+      const desktop = fakeChannel('connection-desktop', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(phone)
+      await runtime.acceptAuthenticatedPeer(desktop)
+      const id = randomUUID()
+      const open = { op: 'http.open', id, port, path: '/phone', method: 'GET', headers: [] }
+      await peerRpc(phone, open)
+      await expect(peerRpc(desktop, { op: 'http.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+      // Identical ids must be usable independently on different connections.
+      await peerRpc(desktop, { ...open, path: '/desktop' })
+      expect(await runtime.connections.closeConnection('connection-desktop')).toBe(true)
+      const phoneRead = await peerRpc<LoopbackRead>(phone, { op: 'http.read', id })
+      expect(Buffer.from(phoneRead.data, 'base64').toString()).toBe('/phone')
+
+      const reconnected = fakeChannel('connection-desktop-2', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(reconnected)
+      await expect(peerRpc(reconnected, { op: 'http.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+      await peerRpc(reconnected, { ...open, path: '/reconnected' })
+      const reconnectRead = await peerRpc<LoopbackRead>(reconnected, { op: 'http.read', id })
+      expect(Buffer.from(reconnectRead.data, 'base64').toString()).toBe('/reconnected')
+      expect(await peerRpc(phone, { op: 'describe' })).toEqual({ ports: [port] })
+    } finally {
+      await runtime.close()
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  it('keeps another Client WebSocket preview alive during connection replacement and closes sockets on Host shutdown', async () => {
+    const server = createServer()
+    const upstream = new WebSocketServer({ server })
+    upstream.on('connection', socket => socket.on('message', (data, binary) => socket.send(data, { binary })))
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const settings = config()
+    settings.loopback.ports = [port]
+    const runtime = new HostPluginRuntime(settings, identities(), apiProxy({}), logger())
+    try {
+      await runtime.start()
+      const phone = fakeChannel('connection-phone', 'client-phone')
+      const desktop = fakeChannel('connection-desktop', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(phone)
+      await runtime.acceptAuthenticatedPeer(desktop)
+      const id = randomUUID()
+      const open = { op: 'ws.open', id, port, path: '/', headers: [], protocols: [] }
+      await peerRpc(phone, open)
+      await peerRpc(desktop, open)
+      const replacement = fakeChannel('connection-desktop-2', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(replacement)
+      await vi.waitFor(() => expect(upstream.clients.size).toBe(1))
+      await peerRpc(phone, { op: 'ws.send', id, data: Buffer.from('phone still connected').toString('base64'), binary: false })
+      const echo = await peerRpc<LoopbackWsRead>(phone, { op: 'ws.read', id })
+      expect(echo.closed).toBe(false)
+      expect(echo.messages.map(message => Buffer.from(message.data, 'base64').toString())).toEqual(['phone still connected'])
+      await peerRpc(replacement, open)
+      await runtime.close()
+      await vi.waitFor(() => expect(upstream.clients.size).toBe(0))
+    } finally {
+      await runtime.close()
+      for (const socket of upstream.clients) socket.terminate()
+      upstream.close()
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  it('applies changed preview ports to current and reconnected Clients', async () => {
+    const settings = config()
+    settings.loopback.ports = [5173]
+    const runtime = new HostPluginRuntime(settings, identities(), apiProxy({}), logger())
+    try {
+      await runtime.start()
+      const phone = fakeChannel('connection-phone', 'client-phone')
+      const desktop = fakeChannel('connection-desktop', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(phone)
+      await runtime.acceptAuthenticatedPeer(desktop)
+      runtime.setLoopbackPorts([8080])
+      for (const client of [phone, desktop]) {
+        expect(await peerRpc(client, { op: 'describe' })).toEqual({ ports: [8080] })
+        await expect(peerRpc(client, { op: 'http.open', id: randomUUID(), port: 5173, path: '/', method: 'GET', headers: [] }))
+          .rejects.toMatchObject({ code: 'LOOPBACK_PORT_DENIED' })
+      }
+      const replacement = fakeChannel('connection-desktop-2', 'client-desktop')
+      await runtime.acceptAuthenticatedPeer(replacement)
+      expect(await peerRpc(replacement, { op: 'describe' })).toEqual({ ports: [8080] })
+      runtime.setLoopbackPorts([])
+      expect(runtime.diagnostics().capabilities).not.toContain('loopback.http-ws.v1')
+      expect(await peerRpc(phone, { op: 'describe' })).toEqual({ ports: [] })
+      expect(await peerRpc(replacement, { op: 'describe' })).toEqual({ ports: [] })
+    } finally {
+      await runtime.close()
+    }
+  })
 })
+
+async function peerRpc<T = unknown>(channel: ReturnType<typeof fakeChannel>, params: unknown): Promise<T> {
+  const request = createRpcRequest('loopback.call', params)
+  channel.push(request)
+  let response: RemoteMessage | undefined
+  await vi.waitFor(() => {
+    response = channel.sent().find(message => (message.type === 'rpc.response' || message.type === 'rpc.error')
+      && (message.payload as RpcResponsePayload | RpcErrorPayload).requestId === request.id)
+    expect(response).toBeDefined()
+  })
+  if (response!.type === 'rpc.error') {
+    const error = response!.payload as RpcErrorPayload
+    throw Object.assign(new Error(error.message), { code: error.code })
+  }
+  return (response!.payload as RpcResponsePayload).result as T
+}
 
 function streamRequest(rpcId: string): RemoteMessage {
   return createRpcRequest('harness.api.stream.open', {

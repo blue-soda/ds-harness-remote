@@ -31,30 +31,22 @@ export function headerPairs(headers: IncomingHttpHeaders): Array<[string, string
 /** Per-peer HTTP/WS proxy to explicit IPv4 loopback ports; never a general TCP tunnel. */
 export class LoopbackHost {
   private readonly handles = new Map<string, Handle>()
-  private ports: readonly number[]
   private closed = false
   private readonly timer: ReturnType<typeof setInterval>
-  constructor(ports: readonly number[]) {
-    this.ports = [...ports]
+  constructor(private readonly getPorts: () => readonly number[]) {
     this.timer = setInterval(() => {
       for (const [id, handle] of this.handles) if (Date.now() - handle.touched > 60_000) this.close(id)
     }, 10_000)
     this.timer.unref()
   }
 
-  setPorts(ports: readonly number[]): void {
-    this.ports = [...ports]
-  }
-
-  hasPorts(): boolean { return this.ports.length > 0 }
-
   async call(input: unknown): Promise<unknown> {
     if (this.closed) throw new RpcError('TRANSPORT_CLOSED', 'Preview connection closed.')
     const value = loopbackRequestSchema.parse(input)
-    if (value.op === 'describe') return { ports: [...this.ports] }
+    if (value.op === 'describe') return { ports: [...this.getPorts()] }
     if (value.op === 'close') { this.close(value.id); return { closed: true } }
     if (value.op === 'http.open' || value.op === 'ws.open') {
-      if (!this.ports.includes(value.port)) throw new RpcError('LOOPBACK_PORT_DENIED',
+      if (!this.getPorts().includes(value.port)) throw new RpcError('LOOPBACK_PORT_DENIED',
         'This preview port is not allowed. Add it to loopback.ports in the Host Remote settings and save the access settings. / 请在 Host Remote 设置中允许此预览端口并保存访问设置。')
       if (this.handles.has(value.id)) throw new RpcError('REQUEST_CONFLICT', 'Preview handle is already in use.')
       if (this.handles.size >= LOOPBACK_MAX_CONNECTIONS) throw new RpcError('RATE_LIMITED', 'Too many active preview requests.')
