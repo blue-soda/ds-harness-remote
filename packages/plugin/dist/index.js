@@ -24666,6 +24666,7 @@ function isRecord10(value) {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
+import { accessSync as codexAccessSync, constants as fsConstants, existsSync as codexExistsSync, readFileSync as codexReadFileSync } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
@@ -26114,7 +26115,26 @@ var CodexRemoteDomain = class {
 };
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
   if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  const bundledCandidates = [
+    "/Applications/ChatGPT.app",
+    join5(userHome, "Applications", "ChatGPT.app")
+  ].flatMap((chatGptApp) => {
+    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
+    try {
+      const manifest = JSON.parse(codexReadFileSync(join5(codexCli, "codex-package.json"), "utf8"));
+      if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+        return [];
+      }
+      const candidate = join5(codexCli, manifest.entrypoint);
+      if (!codexExistsSync(candidate)) return [];
+      codexAccessSync(candidate, fsConstants.X_OK);
+      return [candidate];
+    } catch {
+      return [];
+    }
+  });
   return [.../* @__PURE__ */ new Set([
+    ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
