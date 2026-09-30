@@ -14,7 +14,7 @@ async function listen(server: Server): Promise<number> {
   cleanup.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }))
   return (server.address() as { port: number }).port
 }
-function host(ports: number[]) { const h = new LoopbackHost(ports); cleanup.push(() => h.closeAll()); return h }
+function host(ports: number[]) { const h = new LoopbackHost(() => ports); cleanup.push(() => h.closeAll()); return h }
 function rpc(host: LoopbackHost): RemoteClientCore {
   return { rpc: async (_method: string, params: unknown) => host.call(params) } as RemoteClientCore
 }

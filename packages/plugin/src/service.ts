@@ -61,7 +61,7 @@ export class HostPluginRuntime {
   readonly connections: ConnectionController
   private readonly terminalOwners = new Map<string, string>()
   private terminalEnabled: boolean
-  private readonly loopback: LoopbackHost
+  private loopbackPorts: readonly number[]
   private identity?: HostIdentity
   private readonly serverApi?: HostServerApi
   private serverConnection?: HostServerConnection
@@ -83,7 +83,7 @@ export class HostPluginRuntime {
     private readonly terminalSpawner?: RemoteTerminalSpawner,
   ) {
     this.terminalEnabled = config.terminal.enabled
-    this.loopback = new LoopbackHost(config.loopback.ports)
+    this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === undefined
@@ -130,7 +130,8 @@ export class HostPluginRuntime {
         () => this.hostCapabilities(),
         codex,
         acp,
-        this.loopback,
+        // Handles and their lifetime belong to this connection; only policy is shared.
+        new LoopbackHost(() => this.loopbackPorts),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -143,7 +144,7 @@ export class HostPluginRuntime {
   }
 
   setLoopbackPorts(ports: readonly number[]): void {
-    this.loopback.setPorts(ports)
+    this.loopbackPorts = [...ports]
   }
 
   async start(): Promise<void> {
@@ -404,7 +405,7 @@ export class HostPluginRuntime {
 
   private hostCapabilities(): string[] {
     const capabilities: string[] = []
-    if (this.loopback.hasPorts()) capabilities.push('loopback.http-ws.v1')
+    if (this.loopbackPorts.length > 0) capabilities.push('loopback.http-ws.v1')
     if (this.localGateway?.supportsCarrier === true) {
       capabilities.push(
         harnessSessionGeneration(this.harnessVersion) === 'v3' ? 'harness.remote.v3' : 'harness.remote.v1',
