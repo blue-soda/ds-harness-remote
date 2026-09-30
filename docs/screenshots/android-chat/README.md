@@ -22,7 +22,7 @@
 - 第二轮回答用量：输入 249、输出 74、缓存读取 7296、缓存写入 0、总计 7619；与 Host 投影记录一致。消息时间为 17:33。
 - 轨迹的工具筛选显示真实 write/pwsh 调用；搜索 pwsh 后只保留该匹配项；可切回普通对话。
 - `pnpm -r check` 通过。
-- Android：21 个测试文件、242 个测试通过，包括实际 store 打开的反馈缓存/分页回归和 slash 命令结果测试，以及官方图标路径/映射测试。
+- Android：23 个测试文件、245 个测试通过，包括实际 store 打开的反馈缓存/分页回归和 slash 命令结果测试、官方图标路径/映射测试、背景一致性与快捷按钮删除检查。
 - client-core：38 个测试通过。
 - ApiProxy / Typert Host bridge：35 个测试通过。
 - DSH bundle 校验与 `git diff --check` 通过。
@@ -46,6 +46,11 @@
 | `official-slash-commands.png` | 官方压缩、权限图标 |
 | `official-skill-menu.png` | 官方模型、下载、技能图标 |
 | `goal-result.png` | 真实 `/goal` 指令返回文字弹窗 |
+| `unified-file.png` | 文件菜单背景统一为“对话”标题的浅灰 |
+| `unified-session.png` | 同色的对话菜单，个人路径已打码 |
+| `no-quick-actions.png` | 已删除检查改动、提交代码、查看截图三个快捷入口 |
+
+背景补修：菜单容器、所有分组标题及高亮行均使用 `colors.background`，不再因文件候选高亮而换成不同底色。模拟器像素比对中，文件/对话标题和内容行的背景均为 RGB(245,245,247)。
 
 菜单的原始 SVG 路径来自官方 Harness，保留蓝色；出处与 MIT 许可见 [official-menu-icons.md](../../official-menu-icons.md)。上述新增菜单图标已在模拟器中实际查看，文件项已点击插入，蓝色像素断言通过。`/goal` 查询也真实执行并显示 Host 返回的文字，没有伪造普通聊天消息。
 

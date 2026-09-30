@@ -425,7 +425,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     }
   }
 
-  const runQuickPrompt = (prompt: string) => void sendMessage(prompt)
 
   const openPlusMenu = () => {
     // The composer TextInput often still owns focus when the user taps +.
@@ -763,37 +762,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         />
       )}
       <View style={styles.composerWrap}>
-        {!replyActive && mentionType === null && !trajectory && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="always"
-            contentContainerStyle={styles.quickActions}
-          >
-            {([
-              [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
-              [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
-              [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
-            ] as const).map(([label, prompt]) => (
-              <Pressable
-                key={label}
-                accessibilityRole="link"
-                accessibilityLabel={label}
-                accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
-                disabled={!connected || permissionSelecting || busy !== undefined}
-                onPress={() => runQuickPrompt(prompt)}
-                hitSlop={6}
-                style={styles.quickAction}
-              >
-                {({ pressed }) => <Text style={[
-                  styles.quickActionText,
-                  (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
-                  pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
-                ]}>{label}</Text>}
-              </Pressable>
-            ))}
-          </ScrollView>
-        )}
+
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -1953,11 +1922,7 @@ function createStyles(colors: ThemeColors) {
   welcomeBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
   mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
   composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
-  quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
-  quickAction: { minHeight: 32, justifyContent: 'center' },
-  quickActionText: { ...type.smallStrong, color: colors.primary },
-  quickActionPressed: { opacity: 0.6 },
-  quickActionDisabled: { color: colors.disabled },
+
   replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
   replyStatusText: { ...type.caption, color: colors.accent },
   replyDots: { flexDirection: 'row', alignItems: 'center', marginLeft: -spacing.xs },
