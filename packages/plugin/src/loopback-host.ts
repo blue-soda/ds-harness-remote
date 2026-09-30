@@ -5,10 +5,10 @@ import { loopbackRequestSchema, LOOPBACK_CHUNK_BYTES, LOOPBACK_MAX_BODY_BYTES, L
 import { RpcError } from './safe-error.js'
 
 interface HttpHandle {
-  kind: 'http'; request: ClientRequest; response?: IncomingMessage; reading: boolean; total: number; touched: number
+  kind: 'http'; port: number; request: ClientRequest; response?: IncomingMessage; reading: boolean; total: number; touched: number
 }
 interface WsHandle {
-  kind: 'ws'; socket: WebSocket; messages: LoopbackWsRead['messages']; bytes: number; reading: boolean
+  kind: 'ws'; port: number; socket: WebSocket; messages: LoopbackWsRead['messages']; bytes: number; reading: boolean
   closed: boolean; wake?: () => void; touched: number
 }
 type Handle = HttpHandle | WsHandle
@@ -44,6 +44,7 @@ export class LoopbackHost {
 
   setPorts(ports: readonly number[]): void {
     this.ports = [...ports]
+    for (const [id, handle] of this.handles) if (!this.ports.includes(handle.port)) this.close(id)
   }
 
   hasPorts(): boolean { return this.ports.length > 0 }
@@ -58,8 +59,13 @@ export class LoopbackHost {
         'This preview port is not allowed. Add it to loopback.ports in the Host Remote settings and save the access settings. / 请在 Host Remote 设置中允许此预览端口并保存访问设置。')
       if (this.handles.has(value.id)) throw new RpcError('REQUEST_CONFLICT', 'Preview handle is already in use.')
       if (this.handles.size >= LOOPBACK_MAX_CONNECTIONS) throw new RpcError('RATE_LIMITED', 'Too many active preview requests.')
-      try { return value.op === 'http.open' ? await this.openHttp(value) : await this.openWs(value) }
-      catch { this.close(value.id); throw new RpcError('LOOPBACK_UNAVAILABLE', 'The allowed loopback service did not respond. Check that it is running on the Host.') }
+      let openedHandle: Handle | undefined
+      try {
+        const opening = value.op === 'http.open' ? this.openHttp(value) : this.openWs(value)
+        openedHandle = this.handles.get(value.id)
+        return await opening
+      }
+      catch { this.close(value.id, openedHandle); throw new RpcError('LOOPBACK_UNAVAILABLE', 'The allowed loopback service did not respond. Check that it is running on the Host.') }
     }
     const handle = this.handles.get(value.id)
     if (handle === undefined) throw new RpcError('LOOPBACK_CLOSED', 'Preview request closed; reload the preview.')
@@ -81,6 +87,7 @@ export class LoopbackHost {
             }
             response.once('readable', ready); response.once('end', ready); response.once('close', ready); response.once('error', fail)
           })
+          if (this.handles.get(value.id) !== handle) throw new Error('closed')
           chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES)) as Buffer | null
           // A short final chunk can be smaller than the requested read size.
           if (chunk === null && response.readableLength > 0) chunk = response.read(Math.min(response.readableLength, LOOPBACK_CHUNK_BYTES)) as Buffer
@@ -89,9 +96,9 @@ export class LoopbackHost {
         if (done && !response.complete) throw new Error('truncated')
         handle.total += chunk?.length ?? 0
         if (handle.total > 64 * 1024 * 1024) throw new Error('size')
-        if (done) this.close(value.id)
+        if (done) this.close(value.id, handle)
         return { data: chunk?.toString('base64') ?? '', done }
-      } catch { this.close(value.id); throw new RpcError('LOOPBACK_READ_FAILED', 'Preview response ended or exceeded its limit; reload to retry.') }
+      } catch { this.close(value.id, handle); throw new RpcError('LOOPBACK_READ_FAILED', 'Preview response ended or exceeded its limit; reload to retry.') }
       finally { handle.reading = false }
     }
     if (handle.kind === 'ws') {
@@ -118,7 +125,7 @@ export class LoopbackHost {
           }
           handle.bytes -= bytes
           const closed = handle.closed && handle.messages.length === 0
-          if (closed) this.close(value.id)
+          if (closed) this.close(value.id, handle)
           return { messages, closed }
         } finally { handle.reading = false }
       }
@@ -127,10 +134,16 @@ export class LoopbackHost {
   }
 
   closeAll(): void { this.closed = true; clearInterval(this.timer); for (const id of this.handles.keys()) this.close(id) }
-  private close(id: string): void {
-    const handle = this.handles.get(id); this.handles.delete(id)
+  private close(id: string, expected?: Handle): void {
+    const handle = this.handles.get(id)
+    // A cancelled operation may settle after this id has been reused.
+    if (expected !== undefined && handle !== expected) return
+    this.handles.delete(id)
     if (handle?.kind === 'http') { handle.response?.destroy(); handle.request.destroy() }
-    if (handle?.kind === 'ws') { handle.closed = true; handle.wake?.(); handle.socket.terminate() }
+    if (handle?.kind === 'ws') {
+      handle.closed = true; handle.messages = []; handle.bytes = 0
+      handle.wake?.(); handle.socket.terminate()
+    }
   }
 
   private openHttp(value: Extract<LoopbackRequest, { op: 'http.open' }>): Promise<unknown> {
@@ -140,8 +153,7 @@ export class LoopbackHost {
       const headers = Object.fromEntries(cleanHeaders(value.headers))
       const request = httpRequest({ hostname: '127.0.0.1', port: value.port, method: value.method, path: value.path, headers,
         agent: false, maxHeaderSize: 32 * 1024 }, response => {
-        const handle = this.handles.get(value.id)
-        if (handle?.kind !== 'http') { response.destroy(); return }
+        if (this.handles.get(value.id) !== handle) { response.destroy(); return }
         handle.response = response
         response.on('error', () => undefined)
         clearTimeout(timer)
@@ -149,7 +161,8 @@ export class LoopbackHost {
       })
       const timer = setTimeout(() => { request.destroy(); reject(new Error('timeout')) }, 20_000)
       request.on('error', () => { clearTimeout(timer); reject(new Error('upstream')) })
-      this.handles.set(value.id, { kind: 'http', request, reading: false, total: 0, touched: Date.now() })
+      const handle: HttpHandle = { kind: 'http', port: value.port, request, reading: false, total: 0, touched: Date.now() }
+      this.handles.set(value.id, handle)
       request.end(body)
     })
   }
@@ -160,12 +173,13 @@ export class LoopbackHost {
         headers: Object.fromEntries(cleanHeaders(value.headers)), followRedirects: false,
         handshakeTimeout: 15_000, maxPayload: LOOPBACK_MAX_WS_BYTES, perMessageDeflate: false,
       })
-      const handle: WsHandle = { kind: 'ws', socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() }
+      const handle: WsHandle = { kind: 'ws', port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() }
       this.handles.set(value.id, handle)
       socket.once('open', () => resolve({ protocol: socket.protocol }))
       socket.on('message', (data, binary) => {
+        if (handle.closed) return
         const message = { data: Buffer.from(data as Buffer).toString('base64'), binary }
-        if (handle.bytes + message.data.length > 1024 * 1024 || handle.messages.length >= 256) { this.close(value.id); return }
+        if (handle.bytes + message.data.length > 1024 * 1024 || handle.messages.length >= 256) { this.close(value.id, handle); return }
         handle.messages.push(message); handle.bytes += message.data.length; handle.wake?.()
       })
       socket.on('close', () => { handle.closed = true; handle.wake?.(); reject(new Error('closed')) })

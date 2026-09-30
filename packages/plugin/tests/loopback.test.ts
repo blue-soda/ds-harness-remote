@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { once } from 'node:events'
 import { createServer, request, type Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { WebSocket, WebSocketServer } from 'ws'
@@ -53,6 +54,101 @@ describe('restricted loopback HTTP / WebSocket preview', () => {
     }
     expect(Buffer.concat(chunks).equals(data)).toBe(true)
     expect(await h.call({ op: 'http.open', id: randomUUID(), port, path: '/redirect', method: 'GET', headers: [] })).toMatchObject({ status: 302 })
+  })
+  it('revokes HTTP handles and pending reads while keeping allowed ports usable', async () => {
+    const revoked = createServer((_req, res) => { res.writeHead(200); res.flushHeaders() })
+    const sockets = new Set<import('node:net').Socket>()
+    revoked.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+    const revokedPort = await listen(revoked)
+    const keptPort = await listen(createServer((_req, res) => res.end('still allowed')))
+    const h = host([revokedPort, keptPort])
+    const id = randomUUID(); const keptId = randomUUID()
+    const open = { op: 'http.open', id, port: revokedPort, path: '/', method: 'GET', headers: [] }
+    await h.call(open)
+    await h.call({ ...open, id: keptId, port: keptPort })
+    let outcome: unknown
+    void h.call({ op: 'http.read', id }).then(value => { outcome = value }, error => { outcome = error })
+    h.setPorts([keptPort])
+    await vi.waitFor(() => {
+      expect(sockets.size).toBe(0)
+      expect(outcome).toMatchObject({ code: 'LOOPBACK_READ_FAILED' })
+    })
+    await expect(h.call({ op: 'http.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+    await expect(h.call({ ...open, id: randomUUID() })).rejects.toMatchObject({ code: 'LOOPBACK_PORT_DENIED' })
+    expect(Buffer.from((await h.call({ op: 'http.read', id: keptId }) as LoopbackRead).data, 'base64').toString()).toBe('still allowed')
+    h.setPorts([])
+    await expect(h.call({ op: 'http.read', id: keptId })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+    h.setPorts([revokedPort])
+    await expect(h.call({ op: 'http.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+    await expect(h.call({ ...open, id: randomUUID() })).resolves.toMatchObject({ status: 200 })
+  })
+  it('terminates revoked WebSockets and wakes pending reads without waiting for their timeout', async () => {
+    const server = createServer()
+    const upstream = new WebSocketServer({ server })
+    const port = await listen(server)
+    cleanup.push(() => { for (const socket of upstream.clients) socket.terminate(); upstream.close() })
+    const h = host([port]); const id = randomUUID()
+    const open = { op: 'ws.open', id, port, path: '/', headers: [], protocols: [] }
+    await h.call(open)
+    let outcome: unknown
+    void h.call({ op: 'ws.read', id }).then(value => { outcome = value }, error => { outcome = error })
+    h.setPorts([])
+    await vi.waitFor(() => {
+      expect(upstream.clients.size).toBe(0)
+      expect(outcome).toEqual({ messages: [], closed: true })
+    })
+    await expect(h.call({ op: 'ws.send', id, data: Buffer.from('denied').toString('base64'), binary: false }))
+      .rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+    h.setPorts([port])
+    await expect(h.call({ op: 'ws.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+    await h.call({ ...open, id: randomUUID() })
+    expect(upstream.clients.size).toBe(1)
+  })
+  it.each(['http', 'ws'] as const)('cancels a pending %s open when its port is revoked', async kind => {
+    const server = createServer()
+    const sockets = new Set<import('node:net').Socket>()
+    server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+    const port = await listen(server)
+    server.on('upgrade', (_req, socket) => { socket.on('end', () => socket.destroy()); socket.resume() })
+    cleanup.push(() => { for (const socket of sockets) socket.destroy() })
+    const h = host([port]); const id = randomUUID()
+    const arrived = once(server, kind === 'http' ? 'request' : 'upgrade')
+    let outcome: unknown
+    void h.call(kind === 'http'
+      ? { op: 'http.open', id, port, path: '/', method: 'GET', headers: [] }
+      : { op: 'ws.open', id, port, path: '/', headers: [], protocols: [] })
+      .then(value => { outcome = value }, error => { outcome = error })
+    await arrived
+    h.setPorts([])
+    await vi.waitFor(() => {
+      expect(outcome).toMatchObject({ code: 'LOOPBACK_UNAVAILABLE' })
+      expect(sockets.size).toBe(0)
+    })
+    await expect(h.call({ op: kind === 'http' ? 'http.read' : 'ws.read', id })).rejects.toMatchObject({ code: 'LOOPBACK_CLOSED' })
+  })
+  it.each(['http', 'ws'] as const)('does not close a reused %s id when a revoked read settles', async kind => {
+    const server = createServer((req, res) => {
+      res.writeHead(200)
+      if (req.url === '/replacement') res.end('replacement'); else res.flushHeaders()
+    })
+    const upstream = new WebSocketServer({ server })
+    const port = await listen(server)
+    cleanup.push(() => { for (const socket of upstream.clients) socket.terminate(); upstream.close() })
+    const h = host([port]); const id = randomUUID()
+    const open = kind === 'http'
+      ? { op: 'http.open', id, port, path: '/', method: 'GET', headers: [] }
+      : { op: 'ws.open', id, port, path: '/', headers: [], protocols: [] }
+    await h.call(open)
+    const oldRead = h.call({ op: kind === 'http' ? 'http.read' : 'ws.read', id }).catch(error => error)
+    h.setPorts([])
+    h.setPorts([port])
+    await h.call({ ...open, path: '/replacement' })
+    await oldRead
+    if (kind === 'http') {
+      expect(Buffer.from((await h.call({ op: 'http.read', id }) as LoopbackRead).data, 'base64').toString()).toBe('replacement')
+    } else {
+      await expect(h.call({ op: 'ws.send', id, data: '', binary: false })).resolves.toEqual({ sent: true })
+    }
   })
   it('isolates local preview origins and carries HTTP plus bidirectional HMR WebSocket', async () => {
     const server = createServer((req, res) => res.end(`page:${req.url}`))
