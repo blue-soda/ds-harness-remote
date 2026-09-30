@@ -7,7 +7,6 @@ import {
   BackHandler,
   FlatList,
   Image,
-  InteractionManager,
   Keyboard,
   Modal,
   type NativeScrollEvent,
@@ -163,16 +162,16 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     scrollAnimatedRef.current = false
   }, [])
 
-  // Let the first interaction/layout pass finish before jumping to the end.
-  // This keeps the top bar and Android back dispatch responsive while a large
-  // history page is being mounted.
+  // Let the first layout frame finish before jumping to the end. This keeps
+  // the top bar and Android back dispatch responsive while a large history
+  // page is being mounted, without relying on the deprecated InteractionManager.
   useEffect(() => {
     if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
-    const task = InteractionManager.runAfterInteractions(() => {
+    const timer = setTimeout(() => {
       if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom(false)
-    })
-    return () => task.cancel()
+    }, 32)
+    return () => clearTimeout(timer)
   }, [historyLoadingOlder, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   // Loading older history prepends above the viewport — do not yank to the end.
