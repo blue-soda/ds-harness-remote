@@ -298,23 +298,38 @@ function customPrompt(value: unknown): CustomPrompt | undefined {
 }
 
 /**
- * Saved custom prompts plus the three built-in ones. The built-ins always lead
- * the list so a fresh install shows the same three entries the quick bar had.
+ * Saved prompts. `items` is the full list the user sees — including built-in
+ * entries whose title or body was edited, so those edits survive a restart.
+ * `removed` records the ids the user deleted, which is the only way to tell a
+ * deleted built-in from one that was never seeded.
  */
 export async function loadCustomPrompts(): Promise<CustomPrompt[]> {
-  const stored = await readJson<{ items?: unknown }>(KEYS.customPrompts)
+  const stored = await readJson<{ items?: unknown; removed?: unknown }>(KEYS.customPrompts)
   const saved: CustomPrompt[] = Array.isArray(stored?.items)
     ? stored.items.flatMap(item => {
       const prompt = customPrompt(item)
       return prompt === undefined ? [] : [prompt]
     })
     : []
-  const savedIds = new Set(saved.map(item => item.id))
-  return [...BUILT_IN_PROMPTS.filter(item => !savedIds.has(item.id)), ...saved]
+  const removed = new Set(Array.isArray(stored?.removed)
+    ? stored.removed.filter((id): id is string => typeof id === 'string')
+    : [])
+  const savedById = new Map(saved.map(item => [item.id, item]))
+  // Built-ins lead the list; an edited built-in keeps its factory id, so the
+  // saved entry wins over the shipped seed.
+  const builtIns = BUILT_IN_PROMPTS
+    .filter(item => !removed.has(item.id))
+    .map(item => savedById.get(item.id) ?? item)
+  const custom = saved.filter(item => !isBuiltInPrompt(item.id) && !removed.has(item.id))
+  return [...builtIns, ...custom]
 }
 
-export async function saveCustomPrompts(items: readonly CustomPrompt[]): Promise<void> {
-  await writeJson(KEYS.customPrompts, { items })
+export async function saveCustomPrompts(items: readonly CustomPrompt[], removed: readonly string[] = []): Promise<void> {
+  await writeJson(KEYS.customPrompts, { items, removed })
+}
+
+function isBuiltInPrompt(id: string): boolean {
+  return BUILT_IN_PROMPTS.some(builtIn => builtIn.id === id)
 }
 
 export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = [

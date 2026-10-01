@@ -616,7 +616,13 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
 
   const persistPrompts = async (next: CustomPrompt[]) => {
     setCustomPrompts(next)
-    await saveCustomPrompts(next.filter(item => !BUILT_IN_PROMPTS.some(builtIn => builtIn.id === item.id)))
+    // Built-ins are re-seeded on every load, so a deleted one only stays gone
+    // when its id is recorded; edited built-ins keep their id and are saved as
+    // overrides inside `next`.
+    const removed = BUILT_IN_PROMPTS
+      .filter(item => !next.some(prompt => prompt.id === item.id))
+      .map(item => item.id)
+    await saveCustomPrompts(next, removed)
   }
 
   const savePromptEdit = async (title: string, text: string) => {
