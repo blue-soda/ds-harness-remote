@@ -238,6 +238,29 @@ export class HarnessAlphaClient {
     return result
   }
 
+  async messageFeedbackList(sessionId: string): Promise<Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }>> {
+    const result = await this.callValue<{ items: Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }> }>('messageFeedback/list', { request: { sessionId } })
+    if (!Array.isArray(result?.items) || result.items.some(item => typeof item?.messageId !== 'string' || typeof item.version !== 'string' || (item.rating !== 'positive' && item.rating !== 'negative'))) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid feedback list.')
+    return result.items
+  }
+
+  async messageFeedbackPut(sessionId: string, messageId: string, rating: 'positive' | 'negative'): Promise<{ messageId: string; rating: 'positive' | 'negative'; version: string }> {
+    type Feedback = { messageId: string; rating: 'positive' | 'negative'; version: string }
+    const list = () => this.messageFeedbackList(sessionId)
+    const previous = (await list()).find(item => item.messageId === messageId)
+    const result = await this.callValue<Feedback>('messageFeedback/put', { request: { sessionId, messageId, rating, ifVersion: previous?.version ?? null } })
+    const saved = (await list()).find(item => item.messageId === messageId)
+    if (saved?.rating !== rating || typeof saved.version !== 'string' || saved.version !== result?.version) throw new RemoteGatewayError('INVALID_MESSAGE', 'Message feedback could not be verified.')
+    return saved
+  }
+
+  async sessionFork(sessionId: string, atSeq: number): Promise<{ sessionId: string }> {
+    if (!Number.isSafeInteger(atSeq) || atSeq < 0) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid fork boundary.')
+    const result = await this.callValue<{ sessionId: string }>('session/fork', { request: { sessionId, atSeq } })
+    if (typeof result?.sessionId !== 'string' || result.sessionId.length === 0) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid fork result.')
+    return result
+  }
+
   async sessionModels(sessionId: string): Promise<HarnessSessionModels> {
     const catalog = await this.callValue<{
       default: HarnessModelSelection
@@ -277,16 +300,22 @@ export class HarnessAlphaClient {
     return result.selected
   }
 
+  async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    const execution = await this.callValue<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands/execute', {
+      agentId: sessionId, line, ...(this.host.sessionFormat === 3 ? { submittedAttachments: [] } : { images: [] }),
+    })
+    if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'Unknown or unavailable Host command.')
+    if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid command result.')
+    return execution.result
+  }
+
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(preset)) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'Harness returned an invalid permission preset.')
     }
-    const execution = await this.callValue<{
-      result: { kind: 'success' | 'error'; text?: string }
-    } | undefined>('commands/execute', { agentId: sessionId, line: `/permission ${preset}`, images: [] })
-    if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'The Host does not provide the permission command.')
-    if (execution.result.kind === 'error') {
-      throw new RemoteGatewayError('COMMAND_FAILED', execution.result.text ?? 'The Host rejected the permission preset.')
+    const result = await this.sessionExecuteCommand(sessionId, `/permission ${preset}`)
+    if (result.kind === 'error') {
+      throw new RemoteGatewayError('COMMAND_FAILED', result.text ?? 'The Host rejected the permission preset.')
     }
   }
 

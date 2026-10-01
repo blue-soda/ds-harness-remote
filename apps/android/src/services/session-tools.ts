@@ -28,6 +28,22 @@ export interface WorkspaceOfficeRender extends WorkspaceFileBytes {
   generation: string
   missingFonts: string[]
 }
+/** One human-invocable skill from the Host/工作区 skill catalog (`skills/list`). */
+export interface SkillEntry {
+  /** Kebab-case identifier referenced as `/name`. */
+  name: string
+  /** Short routing description. */
+  description: string
+  /** Whether the same skill is also advertised to the model. */
+  modelInvocable: boolean
+}
+
+/** Normalized `commands/execute` outcome. */
+export interface CommandExecutionResult {
+  kind: 'success' | 'error'
+  text?: string
+}
+
 export interface TerminalInfo {
   id: string
   title: string
@@ -60,6 +76,36 @@ export class HarnessSessionTools {
       throw Object.assign(new Error('Invalid permission catalog'), { code: 'INVALID_MESSAGE' })
     }
     return value.options.map(option => ({ value: option.value, name: option.name, ...(typeof option.description === 'string' ? { description: option.description } : {}) }))
+  }
+
+  /** Human-invocable skill catalog visible to one Session (Host `skills/list`). */
+  async listSkills(sessionId: string, signal?: AbortSignal): Promise<SkillEntry[]> {
+    const value = await this.gateway.call<{ skills?: unknown }>('skills/list', { args: { request: { sessionId } } }, signal)
+    const rows = Array.isArray(value?.skills) ? value.skills : []
+    return rows.flatMap(row => {
+      if (typeof row !== 'object' || row === null) return []
+      const record = row as Record<string, unknown>
+      if (typeof record.name !== 'string' || record.name.length === 0) return []
+      return [{
+        name: record.name,
+        description: typeof record.description === 'string' ? record.description : '',
+        modelInvocable: record.modelInvocable === true,
+      }]
+    })
+  }
+
+  /** Run one slash line (e.g. `/export`) through the Host command dispatcher. */
+  async executeCommand(sessionId: string, line: string): Promise<CommandExecutionResult> {
+    const value = await this.gateway.call<{ result?: unknown }>('commands/execute', {
+      args: { agentId: sessionId, line, submittedAttachments: [] },
+    })
+    const result = typeof value?.result === 'object' && value.result !== null
+      ? value.result as Record<string, unknown>
+      : undefined
+    if (result?.kind === 'success' || result?.kind === 'error') {
+      return { kind: result.kind, ...(typeof result.text === 'string' ? { text: result.text } : {}) }
+    }
+    throw Object.assign(new Error('Invalid command execution result'), { code: 'INVALID_MESSAGE' })
   }
 
   listFiles(sessionId: string, path: string, signal?: AbortSignal): Promise<WorkspaceDirectory> {

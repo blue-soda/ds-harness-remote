@@ -62,6 +62,26 @@ describe('native session tools', () => {
       { timeoutMs: OFFICE_PREVIEW_TIMEOUT_MS, maxResponseBytes: OFFICE_PREVIEW_MAX_RESPONSE_BYTES },
     ])
   })
+  it('loads the human-invocable skill catalog with modelInvocable flags', async () => {
+    const rawSkills = [
+      { name: 'office-docx', description: 'Word docs', modelInvocable: true },
+      { name: 'backup', description: 'Internal backup', modelInvocable: false },
+      { invalid: true },
+    ]
+    const { tools, rpc } = setup({ skills: rawSkills })
+    const rows = await tools.listSkills('s1')
+    expect(rows).toEqual([
+      { name: 'office-docx', description: 'Word docs', modelInvocable: true },
+      { name: 'backup', description: 'Internal backup', modelInvocable: false },
+    ])
+    expect(rpc).toHaveBeenCalledWith('harness.remote.call', { endpoint: 'skills/list', payload: { args: { request: { sessionId: 's1' } } } }, expect.any(AbortSignal), undefined)
+  })
+  it('executes slash lines through the Host command dispatcher', async () => {
+    const { tools, rpc } = setup({ result: { kind: 'success', text: 'exported to zip' } })
+    const outcome = await tools.executeCommand('s1', '/export')
+    expect(outcome).toEqual({ kind: 'success', text: 'exported to zip' })
+    expect(rpc).toHaveBeenCalledWith('harness.remote.call', { endpoint: 'commands/execute', payload: { args: { agentId: 's1', line: '/export', submittedAttachments: [] } } }, expect.any(AbortSignal), undefined)
+  })
 })
 
 

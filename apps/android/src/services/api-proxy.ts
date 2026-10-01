@@ -223,6 +223,22 @@ export class RemoteApiProxy {
         : {})
   }
 
+  async messageFeedbackList(_sessionId: string): Promise<Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }>> {
+    throw new ApiProxyError('UNSUPPORTED', 'Message feedback requires a Host with the official messageFeedback Typert API.')
+  }
+
+  async messageFeedbackPut(_sessionId: string, _messageId: string, _rating: 'positive' | 'negative'): Promise<{ messageId: string; rating: 'positive' | 'negative'; version: string }> {
+    // rc.2 ApiProxy has no messageFeedback API; do not invent a dot endpoint.
+    throw new ApiProxyError('UNSUPPORTED', 'Message feedback requires a Host with the official messageFeedback Typert API.')
+  }
+
+  async sessionFork(sessionId: string, atSeq: number): Promise<{ sessionId: string }> {
+    if (!Number.isSafeInteger(atSeq) || atSeq < 0) throw new ApiProxyError('INVALID_MESSAGE', 'Invalid fork boundary.')
+    const result = await this.call<{ sessionId: string }>('session.fork', { sessionId, atSeq })
+    if (typeof result?.sessionId !== 'string' || result.sessionId.length === 0) throw new ApiProxyError('INVALID_MESSAGE', 'Invalid fork result.')
+    return result
+  }
+
   async sessionModels(sessionId: string): Promise<SessionModels> {
     const result = await this.call<SessionModels>('session.models', { sessionId })
     if (!Array.isArray(result.groups) || typeof result.current?.provider !== 'string' || typeof result.current?.model !== 'string') {
@@ -242,6 +258,13 @@ export class RemoteApiProxy {
       throw new ApiProxyError('INVALID_MESSAGE', 'The Host returned an invalid model selection.')
     }
     return result.selected
+  }
+
+  async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    const execution = await this.call<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands.execute', { agentId: sessionId, line, images: [] })
+    if (execution === undefined) throw new ApiProxyError('UNSUPPORTED', 'Unknown or unavailable Host command.')
+    if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new ApiProxyError('INVALID_MESSAGE', 'Invalid command result.')
+    return execution.result
   }
 
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {

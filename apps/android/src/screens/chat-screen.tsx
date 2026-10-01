@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   AccessibilityInfo,
@@ -21,14 +21,16 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, Plus, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Plus, Shield, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
+import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import { mergeReplyReasoning } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
+import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -36,7 +38,10 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { sessionPermissions } from '../services/session-permissions'
+import type { SkillEntry } from '../services/session-tools'
 import { SessionToolsPanel } from './session-tools-panel'
+import { MessageActions } from './message-actions'
+import { ChatTrajectory } from './chat-trajectory'
 import { resolveSessionDisplayTitle } from './session-title'
 import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
 
@@ -67,10 +72,15 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const createSession = useAppStore(state => state.createSession)
   const archiveSession = useAppStore(state => state.archiveSession)
   const workspaces = useAppStore(state => state.workspaces)
+  const sessions = useAppStore(state => state.sessions)
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const [draft, setDraft] = useState('')
+  const [trajectory, setTrajectory] = useState(false)
+
+  // Web-style blue marks: `/` commands and `@` references render in accent blue.
+  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const [images, setImages] = useState<PromptImage[]>([])
   const [pickingImages, setPickingImages] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
@@ -80,6 +90,21 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  // `/` command and `@` reference popover state anchored to the composer cursor.
+  const [mentionType, setMentionType] = useState<MentionType | null>(null)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [selection, setSelection] = useState({ start: 0, end: 0 })
+  const composerInputRef = useRef<TextInput>(null)
+  const draftRef = useRef('')
+  const selectionRef = useRef({ start: 0, end: 0 })
+  /** Start index of the active `/` / `@` trigger inside the draft. */
+  const mentionSpanRef = useRef(0)
+  const [skillCatalog, setSkillCatalog] = useState<SkillEntry[]>()
+  const [skillCatalogFailed, setSkillCatalogFailed] = useState(false)
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState<WorkspaceFileRef[]>()
+  const [fileListFailed, setFileListFailed] = useState(false)
+  const skillRequestedRef = useRef<string | undefined>(undefined)
+  const filesRequestedRef = useRef<string | undefined>(undefined)
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
   const [permissionRevision, setPermissionRevision] = useState(0)
@@ -107,6 +132,33 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     if (useAppStore.getState().agentPresetOptions !== undefined) return
     void loadAgentPresets()
   }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
+  // `/` 技能目录与 `@` 文件树按会话懒加载一次；未拉取成功时技能分组回落到内置技能。
+  useEffect(() => {
+    setSkillCatalog(undefined)
+    setSkillCatalogFailed(false)
+    setWorkspaceFileRefs(undefined)
+    setFileListFailed(false)
+    skillRequestedRef.current = undefined
+    filesRequestedRef.current = undefined
+    setMentionType(null)
+  }, [session?.sessionId])
+  useEffect(() => {
+    const sessionId = session?.sessionId
+    if (mentionType === null || sessionId === undefined) return
+    if (session?.backend === 'codex' || connection.phase !== 'connected') return
+    if (mentionType === 'command' && skillCatalog === undefined && skillRequestedRef.current !== sessionId) {
+      skillRequestedRef.current = sessionId
+      void Promise.resolve().then(() => requireSessionTools().listSkills(sessionId))
+        .then(rows => { if (skillRequestedRef.current === sessionId) setSkillCatalog(rows) })
+        .catch(() => { if (skillRequestedRef.current === sessionId) setSkillCatalogFailed(true) })
+    }
+    if (mentionType === 'context' && workspaceFileRefs === undefined && filesRequestedRef.current !== sessionId) {
+      filesRequestedRef.current = sessionId
+      void loadWorkspaceFileRefs(sessionId)
+        .then(rows => { if (filesRequestedRef.current === sessionId) setWorkspaceFileRefs(rows) })
+        .catch(() => { if (filesRequestedRef.current === sessionId) setFileListFailed(true) })
+    }
+  }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const listRef = useRef<FlatList<ChatItem>>(null)
   const lastStreamingScrollAt = useRef(0)
@@ -118,10 +170,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
   const visibleMessages = useMemo(() => mergeReplyReasoning(messages).filter(item =>
-    item.kind !== 'message'
-      || hasVisibleMessageText(item.text)
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && (
+      hasVisibleMessageText(item.text)
       || (!compactChat && hasVisibleMessageText(item.reasoning ?? ''))
-      || (item.images?.length ?? 0) > 0), [compactChat, messages])
+      || (item.images?.length ?? 0) > 0))), [compactChat, messages])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
@@ -151,6 +203,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   // Entering a session (or switching sessions) should land on the latest turn.
   useEffect(() => {
+    setTrajectory(false)
     pinToBottomRef.current = true
     initialPinRef.current = true
     laidOutSessionRef.current = undefined
@@ -269,24 +322,36 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         setToolsMode(undefined)
         return true
       }
+      if (trajectory) { setTrajectory(false); return true }
       Keyboard.dismiss()
       onBackRef.current()
       return true
     })
     return () => subscription.remove()
-  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen])
+  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen, trajectory])
 
   if (session === undefined) return null
 
   const submit = async () => {
+    if (!connected || permissionSelecting) return
     const text = draft.trim()
     if (text.length === 0 && images.length === 0) return
     const submittedImages = images
-    setDraft('')
+    applyDraft('')
     setImages([])
+    setMentionType(null)
+    selectionRef.current = { start: 0, end: 0 }
+    setSelection({ start: 0, end: 0 })
     if (!await sendMessage(text, submittedImages)) {
-      setDraft(text)
+      applyDraft(draft)
       setImages(submittedImages)
+      Alert.alert(zhCN.messageActions.failed, useAppStore.getState().error ?? zhCN.messageActions.unavailable)
+    } else {
+      const result = useAppStore.getState().commandResult
+      if (result?.sessionId === session.sessionId && useAppStore.getState().selectedSession?.sessionId === session.sessionId) {
+        Alert.alert(zhCN.mention.commandSection, result.text)
+        useAppStore.setState({ commandResult: undefined })
+      }
     }
   }
 
@@ -360,7 +425,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     }
   }
 
-  const runQuickPrompt = (prompt: string) => void sendMessage(prompt)
 
   const openPlusMenu = () => {
     // The composer TextInput often still owns focus when the user taps +.
@@ -498,6 +562,140 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       )
     } else apply()
   }
+
+  const applyDraft = (next: string) => {
+    draftRef.current = next
+    setDraft(next)
+  }
+
+  const closeMention = () => setMentionType(null)
+
+  const updateMention = (text: string, cursor: number) => {
+    const detected = detectMention(text, cursor)
+    if (detected === undefined) {
+      setMentionType(null)
+      return
+    }
+    mentionSpanRef.current = detected.start
+    setMentionQuery(detected.query)
+    setMentionType(detected.type)
+  }
+
+  /** Insert the picked command or reference text at the trigger span, keeping the caret behind it (web composer grammar). */
+  const insertMentionText = (text: string) => {
+    const start = mentionSpanRef.current
+    const end = selectionRef.current.end
+    const current = draftRef.current
+    const next = current.slice(0, start) + text + current.slice(end)
+    const cursor = start + text.length
+    applyDraft(next)
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    setMentionType(null)
+    composerInputRef.current?.focus()
+  }
+
+  const onChangeText = (next: string) => {
+    if (next === draftRef.current) return
+    // Keep the tracked caret in step with the edit so the controlled selection
+    // never yanks the cursor; onSelectionChange refines it right afterwards.
+    const delta = next.length - draftRef.current.length
+    applyDraft(next)
+    const cursor = Math.max(0, Math.min(next.length, selectionRef.current.end + delta))
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    updateMention(next, cursor)
+  }
+
+  const onSelectionChange = (event: { nativeEvent: { selection: { start: number; end: number } } }) => {
+    const next = event.nativeEvent.selection
+    if (next.start === selectionRef.current.start && next.end === selectionRef.current.end) return
+    selectionRef.current = next
+    setSelection(next)
+    if (next.start === next.end) updateMention(draftRef.current, next.end)
+  }
+
+  const runSessionExport = () => {
+    setMentionType(null)
+    const sessionId = session.sessionId
+    void Promise.resolve().then(() => requireSessionTools().executeCommand(sessionId, '/export'))
+      .then(result => {
+        Alert.alert(zhCN.mention.exportTitle, result.text ?? (result.kind === 'success' ? zhCN.mention.exportTriggered : zhCN.mention.exportFailed))
+      })
+      .catch((error: unknown) => {
+        Alert.alert(zhCN.mention.exportTitle, error instanceof Error && error.message.length > 0 ? error.message : zhCN.mention.exportFailed)
+      })
+  }
+
+  // 「/」菜单：添加 / 指令 / 技能 三组，动作按 DeepSeek Harness Web 端绑定。
+  const commandAddItems: MentionItem[] = [
+    { id: 'file', icon: OfficialMenuIcons.file, title: zhCN.mention.file, description: zhCN.mention.fileDescription, onPress: () => insertMentionText('/file ') },
+    { id: 'goal', icon: OfficialMenuIcons.goal, title: zhCN.mention.goal, description: zhCN.mention.goalDescription, onPress: () => insertMentionText('/goal ') },
+    { id: 'plan', icon: OfficialMenuIcons.plan, title: zhCN.mention.plan, description: zhCN.mention.planDescription, onPress: () => insertMentionText('/plan ') },
+    { id: 'feedback', icon: OfficialMenuIcons.feedback, title: zhCN.mention.feedback, description: zhCN.mention.feedbackDescription, onPress: () => insertMentionText('/feedback ') },
+  ]
+  const commandControlItems: MentionItem[] = [
+    { id: 'compact', icon: OfficialMenuIcons.compact, title: zhCN.mention.compact, description: zhCN.mention.compactDescription, onPress: () => insertMentionText('/compact') },
+    { id: 'permission', icon: OfficialMenuIcons.permission, title: zhCN.mention.permission, description: zhCN.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
+    { id: 'model', icon: OfficialMenuIcons.model, title: zhCN.mention.model, description: zhCN.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
+    { id: 'export', icon: OfficialMenuIcons.export, title: zhCN.mention.export, description: zhCN.mention.exportDescription, onPress: runSessionExport },
+  ]
+  const skillRows: SkillEntry[] = skillCatalog ?? []
+  const skillItems: MentionItem[] = skillRows.map(row => ({
+    id: `skill:${row.name}`,
+    icon: OfficialMenuIcons.skill,
+    title: row.name,
+    description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
+    onPress: () => insertMentionText(`/${row.name} `),
+  }))
+  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
+  const sessionItems: MentionItem[] = sessions.filter(item => item.sessionId !== session.sessionId && item.backend !== 'codex')
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(item => {
+      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
+      return {
+        id: item.sessionId,
+        icon: OfficialMenuIcons.referenceSession,
+        title,
+        description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
+        meta: relativeTime(item.updatedAt),
+        onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
+      }
+    })
+  const fileItems: MentionItem[] = (workspaceFileRefs ?? []).map(ref => {
+    const isDir = ref.kind === 'directory'
+    const Icon = isDir ? OfficialMenuIcons.referenceFolder : OfficialMenuIcons.referenceFile
+    return {
+      id: ref.path,
+      icon: Icon,
+      title: ref.path,
+      onPress: () => { const mention = fileMentionText(ref.path, isDir); if (mention !== undefined) insertMentionText(mention) },
+    }
+  })
+  const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
+  const mentionGroups: MentionGroup[] = mentionType === 'command'
+    ? [
+        { key: 'add', title: zhCN.mention.addSection, items: filterByQuery(commandAddItems, mentionQuery, mentionTexts).slice(0, 20) },
+        { key: 'commands', title: zhCN.mention.commandSection, items: filterByQuery(commandControlItems, mentionQuery, mentionTexts).slice(0, 20) },
+        {
+          key: 'skills',
+          title: zhCN.mention.skillSection,
+          items: skillCatalog === undefined && skillCatalogFailed
+            ? []
+            : filterByQuery(skillItems, mentionQuery, mentionTexts).slice(0, 20),
+        },
+      ]
+    : mentionType === 'context'
+      ? [
+          { key: 'sessions', title: zhCN.mention.sessionSection, items: filterByQuery(sessionItems, mentionQuery, mentionTexts).slice(0, 20) },
+          {
+            key: 'files',
+            title: zhCN.mention.fileSection,
+            items: fileListFailed ? [] : filterByQuery(fileItems, mentionQuery, mentionTexts).slice(0, 30),
+          },
+        ]
+      : []
   return (
     <KeyboardInset>
       <TopBar
@@ -505,6 +703,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         titleLines={2}
         onBack={handleBack}
         action={<>
+          <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open} icon={trajectory ? MessageSquare : ListTree} onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
@@ -515,7 +714,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         </View>
       )}
 
-      <FlatList
+      {trajectory ? <ChatTrajectory key={session.sessionId} items={messages} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
         key={session.sessionId}
         style={styles.list}
@@ -552,40 +751,18 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
           </Pressable>
         ) : undefined}
         ListFooterComponent={showGenerating ? <GeneratingIndicator /> : undefined}
-      />
+      />}
 
+      {mentionType !== null && (
+        <Pressable
+          style={styles.mentionBackdrop}
+          onPress={closeMention}
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.common.close}
+        />
+      )}
       <View style={styles.composerWrap}>
-        {!replyActive && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="always"
-            contentContainerStyle={styles.quickActions}
-          >
-            {([
-              [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
-              [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
-              [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
-            ] as const).map(([label, prompt]) => (
-              <Pressable
-                key={label}
-                accessibilityRole="link"
-                accessibilityLabel={label}
-                accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
-                disabled={!connected || permissionSelecting || busy !== undefined}
-                onPress={() => runQuickPrompt(prompt)}
-                hitSlop={6}
-                style={styles.quickAction}
-              >
-                {({ pressed }) => <Text style={[
-                  styles.quickActionText,
-                  (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
-                  pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
-                ]}>{label}</Text>}
-              </Pressable>
-            ))}
-          </ScrollView>
-        )}
+
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -614,19 +791,32 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
             {!stopping && <ReplyStatusDots />}
           </View>
         )}
+        <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
+          {mentionType !== null && (
+            <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={zhCN.mention.noMatches} />
+          )}
         <View style={styles.composerCard}>
-          <TextInput
-            accessibilityLabel={session.backend === 'codex' ? zhCN.chat.codexMessageLabel : zhCN.chat.messageLabel}
-            style={styles.composerInput}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={session.backend === 'codex' ? zhCN.chat.codexPlaceholder : zhCN.chat.placeholder}
-            placeholderTextColor={colors.muted}
-            multiline
-            maxLength={12_000}
-            editable={connected && !permissionSelecting}
-            selectionColor={colors.accent}
-          />
+          <View style={styles.composerInputWrap}>
+            {/* Native attributed text keeps references blue without an opaque Android value layer. */}
+            <TextInput
+              ref={composerInputRef}
+              accessibilityLabel={session.backend === 'codex' ? zhCN.chat.codexMessageLabel : zhCN.chat.messageLabel}
+              style={styles.composerInput}
+              onChangeText={onChangeText}
+              onSelectionChange={onSelectionChange}
+
+              selection={selection}
+              placeholder={session.backend === 'codex' ? zhCN.chat.codexPlaceholder : zhCN.chat.placeholder}
+              placeholderTextColor={colors.muted}
+              multiline
+              maxLength={12_000}
+              editable={connected && !permissionSelecting}
+              selectionColor={colors.accent}
+              cursorColor={colors.accent}
+            >
+              <Text>{draftSegments.map((segment, index) => <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>)}</Text>
+            </TextInput>
+          </View>
           <View style={styles.composerControls}>
             <Pressable
               accessibilityRole="button"
@@ -671,6 +861,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>}
           </View>
+        </View>
         </View>
         <Text style={styles.composerHint}>
           {session.backend === 'codex' ? zhCN.chat.codexPolicyHint : zhCN.chat.policyHint}
@@ -1126,6 +1317,45 @@ function usePickerListMaxHeight(): number {
   return Math.max(180, Math.round(height * 0.7) - 96)
 }
 
+interface WorkspaceFileRef {
+  path: string
+  kind: 'file' | 'directory'
+}
+
+/** Shallow workspace tree for the `@` file menu: root entries plus one directory level. */
+async function loadWorkspaceFileRefs(sessionId: string): Promise<WorkspaceFileRef[]> {
+  const tools = requireSessionTools()
+  const refs: WorkspaceFileRef[] = []
+  const root = await tools.listFiles(sessionId, '')
+  const directories = root.entries.filter(entry => entry.type === 'directory' && !entry.name.startsWith('.'))
+  for (const entry of root.entries) {
+    if (entry.name.startsWith('.')) continue
+    refs.push({ path: entry.name, kind: entry.type === 'directory' ? 'directory' : 'file' })
+  }
+  await Promise.all(directories.slice(0, 12).map(async directory => {
+    try {
+      const listing = await tools.listFiles(sessionId, directory.name)
+      for (const entry of listing.entries) {
+        if (entry.name.startsWith('.')) continue
+        refs.push({ path: `${directory.name}/${entry.name}`, kind: entry.type === 'directory' ? 'directory' : 'file' })
+      }
+    } catch {
+      // Unreadable directories are simply absent from the menu.
+    }
+  }))
+  return refs
+}
+
+
+
+function relativeTime(timestamp: number): string {
+  const delta = Math.max(0, Date.now() - timestamp)
+  if (delta < 60_000) return zhCN.time.justNow
+  if (delta < 3_600_000) return zhCN.time.minutesAgo(Math.floor(delta / 60_000))
+  if (delta < 86_400_000) return zhCN.time.hoursAgo(Math.floor(delta / 3_600_000))
+  return new Date(timestamp).toLocaleDateString(zhCN.time.locale)
+}
+
 /** Resolve image dimensions for files that arrive without picker metadata (document picker). */
 function imageSize(uri: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
@@ -1243,6 +1473,7 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
             <StreamingCursor />
           </View>
         )}
+        {!item.streaming && showText && <MessageActions item={item} />}
       </View>
     )
   }
@@ -1689,12 +1920,9 @@ function createStyles(colors: ThemeColors) {
   welcomeSlogan: { ...type.heading, color: colors.ink },
   welcomeBadge: { borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, paddingHorizontal: spacing.sm, paddingVertical: 3, marginTop: 2 },
   welcomeBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
+  mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
   composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
-  quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
-  quickAction: { minHeight: 32, justifyContent: 'center' },
-  quickActionText: { ...type.smallStrong, color: colors.primary },
-  quickActionPressed: { opacity: 0.6 },
-  quickActionDisabled: { color: colors.disabled },
+
   replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
   replyStatusText: { ...type.caption, color: colors.accent },
   replyDots: { flexDirection: 'row', alignItems: 'center', marginLeft: -spacing.xs },
@@ -1724,7 +1952,10 @@ function createStyles(colors: ThemeColors) {
   effortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginTop: spacing.xs },
   effortRowLabel: { ...type.smallStrong, color: colors.ink },
   effortRowValue: { ...type.small, color: colors.muted, flexShrink: 1 },
-  composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm },
+  composerInputWrap: { position: 'relative' },
+
+  composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm, textAlignVertical: 'top' },
+
   sendButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendPressed: { backgroundColor: colors.primaryPressed },
   stopButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },

@@ -224,6 +224,10 @@ export interface ChatItemBase {
   id: string
   sessionId: string
   createdAt: number
+  /** Authoritative event coordinates; absent on optimistic/non-timestamped frames. */
+  nativeSeq?: number
+  nativeTime?: number
+  turn?: string
 }
 
 export interface ChatMessage extends ChatItemBase {
@@ -238,6 +242,9 @@ export interface ChatMessage extends ChatItemBase {
   streamingPhase?: 'reasoning' | 'text'
   /** Native session.prompt rpcId used to reconcile an optimistic user message. */
   requestRpcId?: string
+  context?: boolean
+  feedback?: 'positive' | 'negative'
+  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
 }
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
