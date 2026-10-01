@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react'
+import type { ComponentType, ReactNode, RefObject } from 'react'
 import {
   ActivityIndicator,
   Pressable,
@@ -109,7 +109,7 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
 
 export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop }: {
   label: string
-  icon: LucideIcon
+  icon: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
   onPress: () => void
   disabled?: boolean
   /** Overrides the default `ink` glyph color, e.g. to mark an active toggle. */

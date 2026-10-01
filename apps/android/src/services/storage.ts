@@ -22,6 +22,7 @@ const KEYS = {
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
   favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
   recentWorkspaces: 'dshremote.recent-workspaces.v1',
+  customPrompts: 'dshremote.custom-prompts.v1',
 } as const
 
 const secureOptions: SecureStore.SecureStoreOptions = {
@@ -280,3 +281,44 @@ function agentBackend(value: unknown): AgentBackend {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+/** A user-managed quick prompt shown under 「工具访问」→「提示词」. */
+export interface CustomPrompt {
+  id: string
+  title: string
+  text: string
+}
+
+function customPrompt(value: unknown): CustomPrompt | undefined {
+  if (!isRecord(value)) return undefined
+  const { id, title, text } = value
+  if (typeof id !== 'string' || id.trim() === '') return undefined
+  if (typeof title !== 'string' || typeof text !== 'string') return undefined
+  if (title.trim() === '' || text.trim() === '') return undefined
+  return { id, title, text }
+}
+
+/**
+ * Saved custom prompts plus the three built-in ones. The built-ins always lead
+ * the list so a fresh install shows the same three entries the quick bar had.
+ */
+export async function loadCustomPrompts(): Promise<CustomPrompt[]> {
+  const stored = await readJson<{ items?: unknown }>(KEYS.customPrompts)
+  const saved: CustomPrompt[] = Array.isArray(stored?.items)
+    ? stored.items.flatMap(item => {
+      const prompt = customPrompt(item)
+      return prompt === undefined ? [] : [prompt]
+    })
+    : []
+  const savedIds = new Set(saved.map(item => item.id))
+  return [...BUILT_IN_PROMPTS.filter(item => !savedIds.has(item.id)), ...saved]
+}
+
+export async function saveCustomPrompts(items: readonly CustomPrompt[]): Promise<void> {
+  await writeJson(KEYS.customPrompts, { items })
+}
+
+export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = [
+  { id: 'builtin-check-changes', title: '检查改动', text: '检查当前代码改动并指出问题。' },
+  { id: 'builtin-commit', title: '提交代码', text: '检查当前改动并直接提交代码，不要再询问确认。' },
+  { id: 'builtin-view-screenshot', title: '查看截图', text: '查看最新截图并检查界面问题。' },
+]
