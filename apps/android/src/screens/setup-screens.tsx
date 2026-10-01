@@ -3,7 +3,7 @@ import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
@@ -124,8 +124,6 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const languagePreference = useAppStore(state => state.languagePreference)
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const themePreference = useAppStore(state => state.themePreference)
-  const compactChat = useAppStore(state => state.compactChat)
-  const setCompactChat = useAppStore(state => state.setCompactChat)
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const reset = useAppStore(state => state.resetLocalData)
   const signOut = useAppStore(state => state.signOut)
@@ -197,17 +195,6 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               </Pressable>
             )
           })}
-        </View>
-
-        <Text style={styles.groupLabel}>{zhCN.settings.chat}</Text>
-        <View style={styles.preferenceList}>
-          <View style={styles.preferenceOption}>
-            <View style={styles.preferenceCopy}>
-              <Text style={styles.preferenceName}>{zhCN.settings.compactChat}</Text>
-              <Text style={styles.preferenceDescription}>{zhCN.settings.compactChatNote}</Text>
-            </View>
-            <Switch value={compactChat} onValueChange={value => void setCompactChat(value)} trackColor={{ false: colors.border, true: colors.primary }} thumbColor={colors.white} />
-          </View>
         </View>
 
         <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>

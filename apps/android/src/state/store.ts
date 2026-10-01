@@ -61,7 +61,6 @@ import {
   loadOrCreateIdentity,
   loadLanguagePreference,
   loadCodexPermissionPresets,
-  loadCompactChat,
   loadRecentWorkspaces,
   loadServerConfig,
   loadThemePreference,
@@ -72,7 +71,6 @@ import {
   saveLastConnectedDeviceId,
   saveRecentWorkspaces,
   saveCodexPermissionPreset,
-  saveCompactChat,
   saveServerConfig,
   saveThemePreference,
   saveTransportPreference,
@@ -148,7 +146,6 @@ interface AppState {
   languagePreference: LanguagePreference
   language: AppLanguage
   themePreference: ThemePreference
-  compactChat: boolean
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
   authPhase: AuthPhase
@@ -208,7 +205,6 @@ interface AppState {
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
-  setCompactChat(value: boolean): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>
   signOut(): Promise<void>
@@ -257,7 +253,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   themePreference: 'system',
   // Keep process rows available on a fresh install; their own disclosures
   // start closed so the conversation still opens at the answer.
-  compactChat: false,
   authPhase: 'idle',
   refreshing: false,
   reauthRequired: false,
@@ -265,13 +260,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   async bootstrap() {
     set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
     try {
-      const [config, identity, transportPreference, languagePreference, themePreference, compactChat, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
+      const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
         loadServerConfig(),
         loadOrCreateIdentity(),
         loadTransportPreference(),
         loadLanguagePreference(),
         loadThemePreference(),
-        loadCompactChat(),
         loadFavoriteWorkspaces(),
         loadRecentWorkspaces(),
         loadLastConnectedDeviceId(),
@@ -285,7 +279,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         languagePreference,
         language,
         themePreference,
-        compactChat,
         favoriteWorkspaces,
         recentWorkspaces,
         lastConnectedDeviceId,
@@ -1439,10 +1432,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ themePreference })
   },
 
-  async setCompactChat(compactChat) {
-    await saveCompactChat(compactChat)
-    set({ compactChat })
-  },
 
   syncSystemLocales(localeTags) {
     const language = updateSystemLocales(localeTags)

@@ -26,7 +26,7 @@ import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
-import { mergeReplyReasoning } from '../state/message-helpers'
+import { chatSections, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
@@ -51,7 +51,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const session = useAppStore(state => state.selectedSession)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
-  const compactChat = useAppStore(state => state.compactChat)
   const connection = useAppStore(state => state.connection)
   const historyHasMore = useAppStore(state => state.historyHasMore)
   const historyLoadingOlder = useAppStore(state => state.historyLoadingOlder)
@@ -95,6 +94,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [mentionQuery, setMentionQuery] = useState('')
   const [selection, setSelection] = useState({ start: 0, end: 0 })
   const composerInputRef = useRef<TextInput>(null)
+  const keyboardVisibleRef = useRef(false)
   const draftRef = useRef('')
   const selectionRef = useRef({ start: 0, end: 0 })
   /** Start index of the active `/` / `@` trigger inside the draft. */
@@ -105,6 +105,12 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [fileListFailed, setFileListFailed] = useState(false)
   const skillRequestedRef = useRef<string | undefined>(undefined)
   const filesRequestedRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    keyboardVisibleRef.current = Keyboard.isVisible()
+    const shown = Keyboard.addListener('keyboardDidShow', () => { keyboardVisibleRef.current = true })
+    const hidden = Keyboard.addListener('keyboardDidHide', () => { keyboardVisibleRef.current = false })
+    return () => { shown.remove(); hidden.remove() }
+  }, [])
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
   const [permissionRevision, setPermissionRevision] = useState(0)
@@ -160,7 +166,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     }
   }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
-  const listRef = useRef<FlatList<ChatItem>>(null)
+  const listRef = useRef<FlatList<ChatSection>>(null)
   const lastStreamingScrollAt = useRef(0)
   const scrollFrameRef = useRef<number | null>(null)
   const scrollAnimatedRef = useRef(false)
@@ -172,13 +178,16 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const visibleMessages = useMemo(() => mergeReplyReasoning(messages).filter(item =>
     item.kind !== 'message' || (item.role !== 'system' && !item.context && (
       hasVisibleMessageText(item.text)
-      || (!compactChat && hasVisibleMessageText(item.reasoning ?? ''))
-      || (item.images?.length ?? 0) > 0))), [compactChat, messages])
+      || hasVisibleMessageText(item.reasoning ?? '')
+      || (item.images?.length ?? 0) > 0))), [messages])
+  const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
     : undefined
   const sessionId = session?.sessionId
+  const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
+    || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -215,17 +224,27 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     scrollAnimatedRef.current = false
   }, [])
 
+  // A sheet or picker owns the user's next touch. Cancel a queued list jump
+  // as soon as it opens so a streaming update cannot move the responder under
+  // the panel.
+  useEffect(() => {
+    if (!panelOpen || scrollFrameRef.current === null) return
+    cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = null
+    scrollAnimatedRef.current = false
+  }, [panelOpen])
+
   // Let the first layout frame finish before jumping to the end. This keeps
   // the top bar and Android back dispatch responsive while a large history
   // page is being mounted, without relying on the deprecated InteractionManager.
   useEffect(() => {
-    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     const timer = setTimeout(() => {
       if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom(false)
     }, 32)
     return () => clearTimeout(timer)
-  }, [historyLoadingOlder, scheduleScrollToBottom, sessionId, visibleMessages.length])
+  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   // Loading older history prepends above the viewport — do not yank to the end.
   useEffect(() => {
@@ -237,41 +256,33 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   // Scroll when a brand-new item is appended. Streaming deltas keep the same
   // item id, so this fires once per assistant step instead of once per chunk.
   useEffect(() => {
-    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     scheduleScrollToBottom(initialPinRef.current ? false : true)
-  }, [visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom, sessionId])
+  }, [visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
 
   // While an assistant message is streaming, its text grows on every chunk.
   // Following it with animated scrolls piles up animation frames on the JS
   // thread (freezing back navigation and the keyboard). Snap to the end at
   // most ~10 Hz instead, without animation.
   useEffect(() => {
-    if (visibleMessages.length === 0 || lastContentVersion === undefined || historyLoadingOlder) return
+    if (panelOpen || visibleMessages.length === 0 || lastContentVersion === undefined || historyLoadingOlder) return
     if (!pinToBottomRef.current) return
     const now = Date.now()
     if (now - lastStreamingScrollAt.current < 100) return
     lastStreamingScrollAt.current = now
     scheduleScrollToBottom(false)
-  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom])
-
-  const onListContentSizeChange = useCallback(() => {
-    // FlatList often mounts before variable-height markdown finishes laying
-    // out; scroll again whenever content grows while we still want the bottom.
-    if (visibleMessages.length === 0 || historyLoadingOlder) return
-    if (!pinToBottomRef.current && !initialPinRef.current) return
-    scheduleScrollToBottom(false)
-  }, [visibleMessages.length, historyLoadingOlder, scheduleScrollToBottom])
+  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom])
 
   const onListLayout = useCallback(() => {
     // A session switch can render the list before its viewport and markdown
     // rows have measured. Defer one extra frame so the initial jump reaches
     // the actual end rather than the pre-layout content height.
-    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (laidOutSessionRef.current === sessionId) return
     laidOutSessionRef.current = sessionId
     scheduleScrollToBottom(false)
-  }, [historyLoadingOlder, scheduleScrollToBottom, sessionId, visibleMessages.length])
+  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
@@ -282,9 +293,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
-  const renderChatItem = useCallback(({ item }: { item: ChatItem }) => (
-    <ChatItemView item={item} busyAction={busy} compact={compactChat} onApproval={respondApproval} onQuestion={respondQuestion} />
-  ), [busy, compactChat, respondApproval, respondQuestion])
+  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
+    ? <ChatProcessGroup items={item.items} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
+  [busy, respondApproval, respondQuestion])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -323,12 +335,49 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         return true
       }
       if (trajectory) { setTrajectory(false); return true }
+      if (keyboardVisibleRef.current || Keyboard.isVisible()) {
+        Keyboard.dismiss()
+        return true
+      }
       Keyboard.dismiss()
       onBackRef.current()
       return true
     })
     return () => subscription.remove()
   }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen, trajectory])
+
+  const skillItems: MentionItem[] = useMemo(() => (skillCatalog ?? []).map(row => ({
+    id: `skill:${row.name}`,
+    icon: OfficialMenuIcons.skill,
+    title: row.name,
+    description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
+    onPress: () => insertMentionText(`/${row.name} `),
+  })), [skillCatalog])
+  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
+  const sessionItems: MentionItem[] = useMemo(() => sessions.filter(item => item.sessionId !== session?.sessionId && item.backend !== 'codex')
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(item => {
+      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
+      return {
+        id: item.sessionId,
+        icon: OfficialMenuIcons.referenceSession,
+        title,
+        description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
+        meta: relativeTime(item.updatedAt),
+        onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
+      }
+    }), [session?.sessionId, sessions, workspaces])
+  const fileItems: MentionItem[] = useMemo(() => (workspaceFileRefs ?? []).map(ref => {
+    const isDir = ref.kind === 'directory'
+    const Icon = isDir ? OfficialMenuIcons.referenceFolder : OfficialMenuIcons.referenceFile
+    return {
+      id: ref.path,
+      icon: Icon,
+      title: ref.path,
+      onPress: () => { const mention = fileMentionText(ref.path, isDir); if (mention !== undefined) insertMentionText(mention) },
+    }
+  }), [workspaceFileRefs])
 
   if (session === undefined) return null
 
@@ -485,7 +534,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
   const replyActive = busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem
-  const showGenerating = (busy === 'send-message' || session.running) && !hasActiveChatItem
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
   const currentPermission = permissions?.options.find(option => option.value === permissions.currentValue)
@@ -640,39 +688,6 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     { id: 'model', icon: OfficialMenuIcons.model, title: zhCN.mention.model, description: zhCN.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
     { id: 'export', icon: OfficialMenuIcons.export, title: zhCN.mention.export, description: zhCN.mention.exportDescription, onPress: runSessionExport },
   ]
-  const skillRows: SkillEntry[] = skillCatalog ?? []
-  const skillItems: MentionItem[] = skillRows.map(row => ({
-    id: `skill:${row.name}`,
-    icon: OfficialMenuIcons.skill,
-    title: row.name,
-    description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
-    onPress: () => insertMentionText(`/${row.name} `),
-  }))
-  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
-  const sessionItems: MentionItem[] = sessions.filter(item => item.sessionId !== session.sessionId && item.backend !== 'codex')
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(item => {
-      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
-      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
-      return {
-        id: item.sessionId,
-        icon: OfficialMenuIcons.referenceSession,
-        title,
-        description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
-        meta: relativeTime(item.updatedAt),
-        onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
-      }
-    })
-  const fileItems: MentionItem[] = (workspaceFileRefs ?? []).map(ref => {
-    const isDir = ref.kind === 'directory'
-    const Icon = isDir ? OfficialMenuIcons.referenceFolder : OfficialMenuIcons.referenceFile
-    return {
-      id: ref.path,
-      icon: Icon,
-      title: ref.path,
-      onPress: () => { const mention = fileMentionText(ref.path, isDir); if (mention !== undefined) insertMentionText(mention) },
-    }
-  })
   const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
   const mentionGroups: MentionGroup[] = mentionType === 'command'
     ? [
@@ -719,8 +734,8 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         key={session.sessionId}
         style={styles.list}
         contentContainerStyle={[styles.listContent, visibleMessages.length === 0 && styles.emptyList]}
-        data={visibleMessages}
-        keyExtractor={item => item.id}
+        data={visibleSections}
+        keyExtractor={item => item.key}
         renderItem={renderChatItem}
         initialNumToRender={6}
         maxToRenderPerBatch={6}
@@ -728,13 +743,13 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         windowSize={7}
         removeClippedSubviews
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
+        keyboardDismissMode="on-drag"
         onLayout={onListLayout}
-        onContentSizeChange={onListContentSizeChange}
         onScroll={onListScroll}
         scrollEventThrottle={16}
         onScrollBeginDrag={() => {
           initialPinRef.current = false
+          Keyboard.dismiss()
         }}
         ListEmptyComponent={<WelcomeMessage />}
         ListHeaderComponent={historyHasMore ? (
@@ -750,13 +765,12 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
               : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
           </Pressable>
         ) : undefined}
-        ListFooterComponent={showGenerating ? <GeneratingIndicator /> : undefined}
       />}
 
       {mentionType !== null && (
         <Pressable
           style={styles.mentionBackdrop}
-          onPress={closeMention}
+          onPress={() => { closeMention(); Keyboard.dismiss() }}
           accessibilityRole="button"
           accessibilityLabel={zhCN.common.close}
         />
@@ -1419,6 +1433,58 @@ function sessionTitle(session: RemoteSession): string {
   return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
 }
 
+/** Match the Web turn disclosure: process first, final answer always visible. */
+const ChatProcessGroup = memo(function ChatProcessGroup({ items, busyAction, onApproval, onQuestion }: {
+  items: ChatItem[]
+  busyAction?: string
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const [open, setOpen] = useState(false)
+  const last = items.at(-1)
+  const running = items.some(isActiveChatItem)
+  const pendingDecision = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
+  const hasAnswer = !running && last?.kind === 'message' && last.role === 'assistant'
+    && (hasVisibleMessageText(last.text) || (last.images?.length ?? 0) > 0)
+  const failed = !hasAnswer && last?.kind === 'tool' && last.state === 'failed'
+  const answer = hasAnswer && !failed ? last : undefined
+  const processItems = answer === undefined ? items : items.slice(0, -1)
+  const answerReasoning = answer?.kind === 'message' && hasVisibleMessageText(answer.reasoning ?? '') ? answer : undefined
+  const hasDetails = processItems.length > 0 || answerReasoning !== undefined
+  if (!hasDetails && answer !== undefined) return <MessageBubble item={answer} compact />
+  const alwaysOpen = failed || pendingDecision || (!running && answer === undefined)
+  const expanded = alwaysOpen || open
+  const summaryItem = [...processItems, ...(answerReasoning === undefined ? [] : [answerReasoning])].at(-1)
+  const summary = running
+    ? summaryItem?.kind === 'tool' ? compactActivityText(summaryItem.summary ?? summaryItem.arguments)
+      : summaryItem?.kind === 'message' ? compactActivityText(summaryItem.reasoning)
+        : undefined
+    : undefined
+  const label = running ? zhCN.chat.processRunning : failed ? zhCN.chat.failed : zhCN.chat.completed
+  return <View style={styles.processGroup}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ expanded, disabled: alwaysOpen || !hasDetails }}
+      disabled={alwaysOpen || !hasDetails}
+      onPress={() => setOpen(value => !value)}
+      style={({ pressed }) => [styles.processHeader, pressed && styles.reasoningHeaderPressed]}
+    >
+      <Sparkles size={16} color={running ? colors.accent : colors.muted} />
+      <Text style={[styles.reasoningLabel, running && styles.reasoningLabelActive]}>{label}</Text>
+      {summary !== undefined && <Text style={styles.reasoningPreview} numberOfLines={1}>{summary}</Text>}
+      {hasDetails && !alwaysOpen && (expanded ? <ChevronDown size={17} color={colors.muted} /> : <ChevronRight size={17} color={colors.muted} />)}
+    </Pressable>
+    {expanded && <View style={styles.processBody}>
+      {processItems.map(item => <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+      {answerReasoning !== undefined && <ReasoningDisclosure key={`${answerReasoning.id}:reasoning`} item={answerReasoning} />}
+    </View>}
+    {answer !== undefined && <MessageBubble item={answer} compact />}
+  </View>
+})
+
 const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion }: {
   item: ChatItem
   busyAction?: string
@@ -1735,16 +1801,6 @@ function WelcomeMessage() {
   )
 }
 
-function GeneratingIndicator() {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  return (
-    <View style={styles.generatingIndicator} accessibilityRole="progressbar" accessibilityLabel={zhCN.chat.generating}>
-      <ActivityIndicator size="small" color={colors.accent} />
-    </View>
-  )
-}
-
 function StreamingCursor() {
   const opacity = useRef(new Animated.Value(1)).current
   const styles = useThemedStyles(createStyles)
@@ -1875,7 +1931,9 @@ function createStyles(colors: ThemeColors) {
   reasoningPreview: { ...type.small, color: colors.muted, flex: 1 },
   activitySeparator: { ...type.small, color: colors.subtle },
   reasoningBody: { backgroundColor: colors.surface, padding: spacing.sm, marginHorizontal: spacing.xs, marginBottom: spacing.xs, borderRadius: radius.sm },
-  generatingIndicator: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, marginVertical: spacing.xs },
+  processGroup: { alignSelf: 'stretch' },
+  processHeader: { minHeight: 48, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  processBody: { paddingLeft: spacing.xs, gap: spacing.xxs },
   streamingCursor: { width: 7, height: 16, backgroundColor: colors.accent, borderRadius: 2, marginTop: 3 },
   toolCard: { borderRadius: radius.md, overflow: 'hidden' },
   toolCardExpanded: { backgroundColor: colors.surface },

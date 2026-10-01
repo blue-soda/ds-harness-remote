@@ -17,7 +17,6 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
-  compactChat: 'dshremote.compact-chat.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
   workspaceBackends: 'dshremote.workspace-backends.v1',
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
@@ -280,13 +279,4 @@ function agentBackend(value: unknown): AgentBackend {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export async function loadCompactChat(): Promise<boolean> {
-  const stored = await readJson<{ value: unknown }>(KEYS.compactChat)
-  return stored === undefined ? false : stored.value === true
-}
-
-export async function saveCompactChat(value: boolean): Promise<void> {
-  await writeJson(KEYS.compactChat, { value })
 }

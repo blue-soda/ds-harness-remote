@@ -51,6 +51,29 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[]): Chat
   ]
 }
 
+export type ChatSection =
+  | { kind: 'item'; key: string; item: ChatItem }
+  | { kind: 'process'; key: string; turn: string; items: ChatItem[] }
+
+/** Group adjacent activity from one native turn, leaving user rows in place. */
+export function chatSections(items: ChatItem[]): ChatSection[] {
+  const sections: ChatSection[] = []
+  for (const item of items) {
+    const turn = item.kind === 'message' && item.role === 'user'
+      ? undefined
+      : item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+    const previous = sections.at(-1)
+    if (turn !== undefined && previous?.kind === 'process' && previous.turn === turn) {
+      previous.items.push(item)
+    } else if (turn !== undefined) {
+      sections.push({ kind: 'process', key: `process:${turn}:${item.id}`, turn, items: [item] })
+    } else {
+      sections.push({ kind: 'item', key: item.id, item })
+    }
+  }
+  return sections
+}
+
 /**
  * Fold assistant reasoning fragments from one native turn into one disclosure.
  *

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ChatItem } from '../types'
 import { strings } from '../locales/i18n'
 import { useTheme } from '../ui/theme-context'
@@ -32,7 +32,7 @@ export function ChatTrajectory({ items, renderItem, hasMore, loading, loadOlder 
     <View><ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
       {(['all', 'system', 'user', 'context', 'assistant', 'tool'] as const).map(key => <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: key === filter }} onPress={() => setFilter(key)} style={[styles.filter, { backgroundColor: key === filter ? colors.primarySoft : colors.surface }]}><Text style={{ color: key === filter ? colors.primary : colors.muted }}>{strings.trajectory[key]}</Text></Pressable>)}
     </ScrollView></View>
-    <FlatList data={rows} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" initialNumToRender={6} maxToRenderPerBatch={6}
+    <FlatList data={rows} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" onScrollBeginDrag={() => Keyboard.dismiss()} initialNumToRender={6} maxToRenderPerBatch={6}
       ListHeaderComponent={hasMore ? <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.older} disabled={loading} onPress={loadOlder} style={styles.filter}>{loading ? <ActivityIndicator color={colors.primary} /> : <Text style={{ color: colors.primary }}>{strings.chat.older}</Text>}</Pressable> : null}
       ListEmptyComponent={<Text style={[styles.hint, { color: colors.muted }]}>{strings.trajectory.empty}</Text>}
       contentContainerStyle={styles.list} renderItem={({ item }) => <View style={[styles.entry, { borderColor: colors.border }]}>

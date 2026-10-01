@@ -296,6 +296,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         role: item.role,
         text: item.text ?? '',
         ...(item.nativeRef.turnId === undefined ? {} : { replyGroup: item.nativeRef.turnId }),
+        ...(item.nativeRef.turnId === undefined ? {} : { turn: item.nativeRef.turnId }),
         ...(item.images === undefined || item.images.length === 0 ? {} : { images: item.images }),
         ...(item.role === 'assistant' && item.status === 'running' ? { streaming: true as const } : {}),
         createdAt,
@@ -306,6 +307,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
       output.push({
         kind: 'message', id: item.id, sessionId: item.sessionId, role: 'assistant', text: '',
         ...(item.nativeRef.turnId === undefined ? {} : { replyGroup: item.nativeRef.turnId }),
+        ...(item.nativeRef.turnId === undefined ? {} : { turn: item.nativeRef.turnId }),
         reasoning: item.text ?? '',
         ...(item.status === 'running' ? { streaming: true as const, streamingPhase: 'reasoning' as const } : {}),
         createdAt,
@@ -326,6 +328,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         sessionId: item.sessionId,
         approvalId: item.nativeRef.requestHandle,
         toolName: item.text ?? strings.chat.codexOperation,
+        ...(item.nativeRef.turnId === undefined ? {} : { turn: item.nativeRef.turnId }),
         ...(typeof item.details?.reason === 'string' ? { reason: item.details.reason } : {}),
         ...(item.status === 'running' ? {} : { outcome: 'unavailable' as const }),
         createdAt,
@@ -338,6 +341,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
       id: item.id,
       sessionId: item.sessionId,
       toolName: codexToolName(item),
+      ...(item.nativeRef.turnId === undefined ? {} : { turn: item.nativeRef.turnId }),
       summary: text.split('\n', 1)[0],
       ...(item.images === undefined || item.images.length === 0 ? {} : { images: item.images }),
       ...(text.length === 0 ? {} : {
