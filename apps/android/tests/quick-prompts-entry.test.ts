@@ -151,8 +151,8 @@ describe('composer quick prompts entry', () => {
       { id: 'custom', title: 'My prompt', text: 'Custom instructions.' },
     ], ['builtin-view-screenshot'])
     await mount()
-    expect(button('Quick prompts')).toBeDefined()
-    await press(button('Quick prompts'))
+    expect(button('Prompts')).toBeDefined()
+    await press(button('Prompts'))
     expect(button(getBuiltInPrompts()[0]!.title)).toBeDefined()
     expect(button(strings.chat.quickViewScreenshot)).toBeUndefined()
     await press(button('My commit'))

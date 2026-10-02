@@ -38,7 +38,7 @@ CodeX App Server domain advertised by the Host.
   and persist an explicit in-app language choice across launches.
 - Show the installed app/build version and the complete open-source repository and latest-release
   addresses in Settings; both addresses open in the system browser.
-- Open saved prompts directly from **Quick prompts** beside the composer's `+` button. Tap a
+- Open saved prompts directly from **Prompts** beside the composer's `+` button. Tap a
   prompt to send it, or edit the list in the same panel. Built-in translations, saved overrides,
   deletions, and custom entries use the existing local storage. Files, Terminal, and Trajectory
   remain under `+` → **Tool access**.
