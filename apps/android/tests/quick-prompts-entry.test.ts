@@ -4,6 +4,16 @@ import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// pnpm's hoisted layout may install the renderer at the workspace root while
+// Android keeps its own React version. Use the renderer's React for this test
+// so component hooks and the renderer always share one dispatcher.
+vi.mock('react', async () => {
+  const { createRequire } = await import('node:module')
+  const require = createRequire(import.meta.url)
+  const rendererRequire = createRequire(require.resolve('react-test-renderer'))
+  return import(rendererRequire.resolve('react'))
+})
+
 const native = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   storage: new Map<string, string>(),
