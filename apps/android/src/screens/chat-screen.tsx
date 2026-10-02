@@ -91,9 +91,12 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
   const [promptsPickerOpen, setPromptsPickerOpen] = useState(false)
-  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>()
+  const [customPrompts, setCustomPrompts] = useState<readonly CustomPrompt[]>()
   const [promptEditing, setPromptEditing] = useState<CustomPrompt | 'new' | null>(null)
   const [promptsManagerOpen, setPromptsManagerOpen] = useState(false)
+  const [promptsLoading, setPromptsLoading] = useState(false)
+  const promptsLoadingRef = useRef(false)
+  const promptMutatedRef = useRef(false)
   // `/` command and `@` reference popover state anchored to the composer cursor.
   const [mentionType, setMentionType] = useState<MentionType | null>(null)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -140,8 +143,22 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   // 「工具访问」→「提示词」列表：连接后加载一次（内置三条 + 本地保存的自定义条目）。
   useEffect(() => {
     if (connection.phase !== 'connected') return
-    if (customPrompts !== undefined) return
-    void loadCustomPrompts().then(items => setCustomPrompts(items))
+    if (customPrompts !== undefined || promptsLoadingRef.current) return
+    promptsLoadingRef.current = true
+    setPromptsLoading(true)
+    let cancelled = false
+    void loadCustomPrompts()
+      .then(items => {
+        if (cancelled || promptMutatedRef.current) return
+        setCustomPrompts(items)
+      })
+      .finally(() => {
+        promptsLoadingRef.current = false
+        if (!cancelled) setPromptsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [connection.phase, customPrompts])
   // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
   useEffect(() => {
@@ -177,6 +194,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
   }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
+  const [newSessionPending, setNewSessionPending] = useState(false)
   const listRef = useRef<FlatList<ChatSection>>(null)
   const lastStreamingScrollAt = useRef(0)
   const scrollFrameRef = useRef<number | null>(null)
@@ -199,6 +217,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -343,10 +362,12 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       }
       if (promptEditing !== null) {
         setPromptEditing(null)
+        setPromptsManagerOpen(true)
         return true
       }
       if (promptsManagerOpen) {
         setPromptsManagerOpen(false)
+        setPromptsPickerOpen(true)
         return true
       }
       if (promptsPickerOpen) {
@@ -601,10 +622,18 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   }
 
   const startNewSession = async () => {
-    if (onNewSession === undefined) return
-    const created = await createSession()
-    if (created) onNewSession()
-    else Alert.alert(zhCN.chat.newChatFailedTitle, zhCN.chat.newChatFailedBody)
+    if (newSessionPending || busy !== undefined) return
+    setNewSessionPending(true)
+    try {
+      const created = await createSession(currentWorkspace?.workspaceId)
+      if (created) {
+        onNewSession?.()
+      } else {
+        Alert.alert(zhCN.chat.newChatFailedTitle, zhCN.chat.newChatFailedBody)
+      }
+    } finally {
+      setNewSessionPending(false)
+    }
   }
 
   const sendPrompt = async (prompt: CustomPrompt) => {
@@ -614,7 +643,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     else Alert.alert(zhCN.chat.toolPromptSendFailed, zhCN.chat.toolPromptSendFailed)
   }
 
-  const persistPrompts = async (next: CustomPrompt[]) => {
+  const persistPrompts = async (next: readonly CustomPrompt[]): Promise<boolean> => {
+    if (promptsLoading) return false
+    promptMutatedRef.current = true
+    const previous = customPrompts ?? BUILT_IN_PROMPTS
     setCustomPrompts(next)
     // Built-ins are re-seeded on every load, so a deleted one only stays gone
     // when its id is recorded; edited built-ins keep their id and are saved as
@@ -622,24 +654,37 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     const removed = BUILT_IN_PROMPTS
       .filter(item => !next.some(prompt => prompt.id === item.id))
       .map(item => item.id)
-    await saveCustomPrompts(next, removed)
+    try {
+      await saveCustomPrompts(next, removed)
+      return true
+    } catch {
+      setCustomPrompts(previous)
+      Alert.alert(zhCN.chat.toolPromptSaveFailedTitle, zhCN.chat.toolPromptSaveFailedBody)
+      return false
+    }
   }
 
   const savePromptEdit = async (title: string, text: string) => {
+    if (promptsLoading) return
     const editing = promptEditing
     const trimmedTitle = title.trim()
     const trimmedText = text.trim()
     if (trimmedTitle === '' || trimmedText === '') return
     const current = customPrompts ?? BUILT_IN_PROMPTS
+    let ok = false
     if (editing === 'new') {
-      await persistPrompts([...current, { id: `prompt-${Date.now()}`, title: trimmedTitle, text: trimmedText }])
+      ok = await persistPrompts([...current, { id: `prompt-${Date.now()}`, title: trimmedTitle, text: trimmedText }])
     } else if (editing !== null) {
-      await persistPrompts(current.map(item => item.id === editing.id ? { ...item, title: trimmedTitle, text: trimmedText } : item))
+      ok = await persistPrompts(current.map(item => item.id === editing.id ? { ...item, title: trimmedTitle, text: trimmedText } : item))
     }
-    setPromptEditing(null)
+    if (ok) {
+      setPromptEditing(null)
+      setPromptsManagerOpen(true)
+    }
   }
 
   const deletePrompt = async (prompt: CustomPrompt) => {
+    if (promptsLoading) return
     const current = customPrompts ?? BUILT_IN_PROMPTS
     await persistPrompts(current.filter(item => item.id !== prompt.id))
   }
@@ -797,7 +842,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         titleLines={2}
         onBack={handleBack}
         action={<>
-          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} onPress={() => void startNewSession()} disabled={onNewSession === undefined} />
+          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
@@ -1082,6 +1127,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <PromptsManager
         visible={promptsManagerOpen}
         prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
         onClose={() => setPromptsManagerOpen(false)}
         onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
         onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
@@ -1095,6 +1142,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <PromptEditor
         visible={promptEditing !== null}
         prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
         onClose={() => setPromptEditing(null)}
         onSave={(title, text) => void savePromptEdit(title, text)}
       />
@@ -1362,9 +1411,11 @@ function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
   )
 }
 
-function PromptsManager({ visible, prompts, onClose, onAdd, onEdit, onDelete }: {
+function PromptsManager({ visible, prompts, promptsLoading, onBack, onClose, onAdd, onEdit, onDelete }: {
   visible: boolean
   prompts: readonly CustomPrompt[]
+  promptsLoading?: boolean
+  onBack: () => void
   onClose: () => void
   onAdd: () => void
   onEdit: (prompt: CustomPrompt) => void
@@ -1374,12 +1425,15 @@ function PromptsManager({ visible, prompts, onClose, onAdd, onEdit, onDelete }: 
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>{zhCN.chat.toolPromptEdit}</Text>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>{zhCN.chat.toolPromptEdit}</Text>
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <IconButton label={zhCN.chat.toolPromptAdd} icon={Plus} tint={colors.primary} onPress={onAdd} />
+            <IconButton label={zhCN.chat.toolPromptAdd} icon={Plus} tint={colors.primary} onPress={onAdd} disabled={promptsLoading} />
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
           </View>
         </View>
@@ -1400,8 +1454,8 @@ function PromptsManager({ visible, prompts, onClose, onAdd, onEdit, onDelete }: 
                 <Text style={styles.permissionOptionName}>{prompt.title}</Text>
                 <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
               </View>
-              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={Pencil} onPress={() => onEdit(prompt)} dense />
-              <IconButton label={zhCN.common.delete} icon={Trash2} onPress={() => onDelete(prompt)} dense />
+              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={Pencil} onPress={() => onEdit(prompt)} dense disabled={promptsLoading} />
+              <IconButton label={zhCN.common.delete} icon={Trash2} onPress={() => onDelete(prompt)} dense disabled={promptsLoading} />
             </View>
           ))}
         </ScrollView>
@@ -1410,9 +1464,11 @@ function PromptsManager({ visible, prompts, onClose, onAdd, onEdit, onDelete }: 
   )
 }
 
-function PromptEditor({ visible, prompt, onClose, onSave }: {
+function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose, onSave }: {
   visible: boolean
   prompt?: CustomPrompt
+  promptsLoading?: boolean
+  onBack: () => void
   onClose: () => void
   onSave: (title: string, text: string) => void
 }) {
@@ -1426,14 +1482,17 @@ function PromptEditor({ visible, prompt, onClose, onSave }: {
     setTitle(prompt?.title ?? '')
     setText(prompt?.text ?? '')
   }, [visible, prompt?.id])
-  const canSave = title.trim().length > 0 && text.trim().length > 0
+  const canSave = title.trim().length > 0 && text.trim().length > 0 && !promptsLoading
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle} numberOfLines={1}>
-            {prompt === undefined ? zhCN.chat.toolPromptAdd : zhCN.chat.toolPromptEditTitle(prompt.title)}
-          </Text>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>
+              {prompt === undefined ? zhCN.chat.toolPromptAdd : zhCN.chat.toolPromptEditTitle(prompt.title)}
+            </Text>
+          </View>
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView style={{ maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">

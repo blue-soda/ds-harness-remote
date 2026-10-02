@@ -93,7 +93,6 @@ function AppNavigator() {
   const styles = useThemedStyles(createStyles)
 
   const push = (next: Route) => setRoutes(current => [...current, next])
-  const openChat = () => push({ name: 'chat' })
   const replace = (next: Route) => setRoutes(current => [...current.slice(0, -1), next])
   const pop = () => setRoutes(current => current.length > 1 ? current.slice(0, -1) : current)
   const reset = (next: Route) => setRoutes([next])
@@ -319,7 +318,7 @@ function AppNavigator() {
         }}
       />}
       {route.name === 'sessions' && <SessionsScreen onBack={pop} onSession={() => push({ name: 'chat' })} />}
-      {route.name === 'chat' && <ChatScreen onBack={pop} onNewSession={openChat} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
+      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       <HomeActionsMenu

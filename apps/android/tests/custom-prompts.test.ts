@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as SecureStore from 'expo-secure-store'
 
 const store = new Map<string, string>()
 
@@ -13,7 +14,16 @@ vi.mock('expo-application', () => ({ applicationId: 'io.github.liguobao.dshremot
 vi.mock('expo-device', () => ({ modelName: 'Pixel' }))
 vi.mock('expo-crypto', () => ({ getRandomBytes: () => new Uint8Array(32), randomUUID: () => 'uuid' }))
 
-import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts, type CustomPrompt } from '../src/services/storage'
+import { applyLanguagePreference } from '../src/locales/i18n'
+import enUS from '../src/locales/en-US'
+import zhCN from '../src/locales/zh-CN'
+import {
+  BUILT_IN_PROMPTS,
+  getBuiltInPrompts,
+  loadCustomPrompts,
+  saveCustomPrompts,
+  type CustomPrompt,
+} from '../src/services/storage'
 
 const KEY = 'dshremote.custom-prompts.v1'
 const titles = (items: readonly CustomPrompt[]) => items.map(item => `${item.title}|${item.text}`)
@@ -34,6 +44,14 @@ const builtIn = (id: string): CustomPrompt => {
 
 beforeEach(() => {
   store.clear()
+  applyLanguagePreference('zh-CN')
+  vi.mocked(SecureStore.setItemAsync).mockImplementation(async (key: string, value: string) => {
+    store.set(key, value)
+  })
+})
+
+afterEach(() => {
+  applyLanguagePreference('zh-CN')
 })
 
 describe('custom prompt persistence', () => {
@@ -98,5 +116,147 @@ describe('custom prompt persistence', () => {
   it('drops everything when every prompt is deleted', async () => {
     await persist([])
     await expect(loadCustomPrompts()).resolves.toEqual([])
+  })
+})
+
+describe('localized built-in prompts', () => {
+  it('materializes English built-in prompts with explicit enUS messages', () => {
+    const enPrompts = getBuiltInPrompts(enUS)
+    expect(enPrompts).toEqual([
+      {
+        id: 'builtin-check-changes',
+        title: enUS.chat.quickCheckChanges,
+        text: enUS.chat.quickCheckChangesPrompt,
+      },
+      {
+        id: 'builtin-commit',
+        title: enUS.chat.quickCommit,
+        text: enUS.chat.quickCommitPrompt,
+      },
+      {
+        id: 'builtin-view-screenshot',
+        title: enUS.chat.quickViewScreenshot,
+        text: enUS.chat.quickViewScreenshotPrompt,
+      },
+    ])
+  })
+
+  it('materializes English built-in prompts from active language preference', async () => {
+    applyLanguagePreference('en-US')
+    const active = getBuiltInPrompts()
+    expect(active.map(p => p.title)).toEqual([
+      'Review changes',
+      'Commit changes',
+      'Review screenshot',
+    ])
+    expect(await loadCustomPrompts()).toEqual(getBuiltInPrompts(enUS))
+  })
+
+  it('switching locale updates unedited built-ins while preserving custom items and user overrides', async () => {
+    applyLanguagePreference('zh-CN')
+
+    const userPrompts: CustomPrompt[] = [
+      { id: 'builtin-check-changes', title: '检查改动', text: '检查当前代码改动并指出问题。' },
+      { id: 'builtin-commit', title: '我的提交', text: '直接执行提交。' },
+      custom('prompt-user-1', '代码审查', '仔细阅读并指出代码缺陷。'),
+    ]
+    await saveCustomPrompts(userPrompts, ['builtin-view-screenshot'])
+
+    applyLanguagePreference('en-US')
+    const loadedEn = await loadCustomPrompts()
+
+    expect(loadedEn.find(p => p.id === 'builtin-check-changes')).toEqual({
+      id: 'builtin-check-changes',
+      title: 'Review changes',
+      text: 'Review the current code changes and point out any issues.',
+    })
+
+    expect(loadedEn.find(p => p.id === 'builtin-commit')).toEqual({
+      id: 'builtin-commit',
+      title: '我的提交',
+      text: '直接执行提交。',
+    })
+
+    expect(loadedEn.find(p => p.id === 'builtin-view-screenshot')).toBeUndefined()
+
+    expect(loadedEn.find(p => p.id === 'prompt-user-1')).toEqual({
+      id: 'prompt-user-1',
+      title: '代码审查',
+      text: '仔细阅读并指出代码缺陷。',
+    })
+
+    applyLanguagePreference('zh-CN')
+    const loadedZh = await loadCustomPrompts()
+
+    expect(loadedZh.find(p => p.id === 'builtin-check-changes')).toEqual({
+      id: 'builtin-check-changes',
+      title: '检查改动',
+      text: '检查当前代码改动并指出问题。',
+    })
+    expect(loadedZh.find(p => p.id === 'builtin-commit')).toEqual({
+      id: 'builtin-commit',
+      title: '我的提交',
+      text: '直接执行提交。',
+    })
+    expect(loadedZh.find(p => p.id === 'prompt-user-1')).toEqual({
+      id: 'prompt-user-1',
+      title: '代码审查',
+      text: '仔细阅读并指出代码缺陷。',
+    })
+  })
+})
+
+describe('serialization and write failure handling', () => {
+  it('serializes rapid consecutive writes strictly in order', async () => {
+    const callOrder: string[] = []
+    const setItemMock = vi.mocked(SecureStore.setItemAsync)
+
+    setItemMock.mockImplementation(async (key: string, value: string) => {
+      const parsed = JSON.parse(value) as { items: CustomPrompt[] }
+      const marker = parsed.items[0]?.title ?? 'empty'
+      callOrder.push(`start:${marker}`)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      store.set(key, value)
+      callOrder.push(`finish:${marker}`)
+    })
+
+    const write1 = saveCustomPrompts([custom('p1', 'first', '1')])
+    const write2 = saveCustomPrompts([custom('p2', 'second', '2')])
+    const write3 = saveCustomPrompts([custom('p3', 'third', '3')])
+
+    await Promise.all([write1, write2, write3])
+
+    expect(callOrder).toEqual([
+      'start:first',
+      'finish:first',
+      'start:second',
+      'finish:second',
+      'start:third',
+      'finish:third',
+    ])
+
+    const finalLoaded = await loadCustomPrompts()
+    expect(finalLoaded.find(p => p.id === 'p3')?.title).toBe('third')
+  })
+
+  it('rejects the returned promise on write failure so callers can detect error', async () => {
+    const setItemMock = vi.mocked(SecureStore.setItemAsync)
+    setItemMock.mockRejectedValueOnce(new Error('Disk write failed'))
+
+    await expect(saveCustomPrompts([custom('p-err', 'error', 'err')])).rejects.toThrow('Disk write failed')
+  })
+
+  it('allows subsequent writes to succeed even after a previous write failed in the queue', async () => {
+    const setItemMock = vi.mocked(SecureStore.setItemAsync)
+    setItemMock.mockRejectedValueOnce(new Error('Storage unavailable'))
+
+    const writeFail = saveCustomPrompts([custom('p-fail', 'fail', 'fail')])
+    const writeOk = saveCustomPrompts([custom('p-ok', 'ok', 'ok')])
+
+    await expect(writeFail).rejects.toThrow('Storage unavailable')
+    await expect(writeOk).resolves.toBeUndefined()
+
+    const loaded = await loadCustomPrompts()
+    expect(loaded.find(p => p.id === 'p-ok')).toBeDefined()
   })
 })

@@ -3,7 +3,10 @@ import * as Application from 'expo-application'
 import * as Crypto from 'expo-crypto'
 import * as Device from 'expo-device'
 import * as SecureStore from 'expo-secure-store'
-import { isLanguagePreference, type LanguagePreference } from '../locales/i18n'
+import { isLanguagePreference, strings, type LanguagePreference } from '../locales/i18n'
+import type { Messages } from '../locales/types'
+import enUS from '../locales/en-US'
+import zhCN from '../locales/zh-CN'
 import { isThemePreference, type ThemePreference } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
@@ -297,6 +300,50 @@ function customPrompt(value: unknown): CustomPrompt | undefined {
   return { id, title, text }
 }
 
+const BUILT_IN_IDS = new Set<string>(['builtin-check-changes', 'builtin-commit', 'builtin-view-screenshot'])
+
+export function getBuiltInPrompts(messages?: Messages): readonly CustomPrompt[] {
+  const msg = messages ?? strings
+  return [
+    {
+      id: 'builtin-check-changes',
+      title: msg.chat.quickCheckChanges,
+      text: msg.chat.quickCheckChangesPrompt,
+    },
+    {
+      id: 'builtin-commit',
+      title: msg.chat.quickCommit,
+      text: msg.chat.quickCommitPrompt,
+    },
+    {
+      id: 'builtin-view-screenshot',
+      title: msg.chat.quickViewScreenshot,
+      text: msg.chat.quickViewScreenshotPrompt,
+    },
+  ]
+}
+
+export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = Object.freeze(getBuiltInPrompts(zhCN))
+
+const factoryZhBuiltIns = getBuiltInPrompts(zhCN)
+const factoryEnBuiltIns = getBuiltInPrompts(enUS)
+
+function isFactoryDefaultBuiltIn(prompt: CustomPrompt): boolean {
+  const zh = factoryZhBuiltIns.find(item => item.id === prompt.id)
+  if (zh !== undefined && prompt.title === zh.title && prompt.text === zh.text) {
+    return true
+  }
+  const en = factoryEnBuiltIns.find(item => item.id === prompt.id)
+  if (en !== undefined && prompt.title === en.title && prompt.text === en.text) {
+    return true
+  }
+  return false
+}
+
+function isBuiltInPrompt(id: string): boolean {
+  return BUILT_IN_IDS.has(id)
+}
+
 /**
  * Saved prompts. `items` is the full list the user sees — including built-in
  * entries whose title or body was edited, so those edits survive a restart.
@@ -316,24 +363,32 @@ export async function loadCustomPrompts(): Promise<CustomPrompt[]> {
     : [])
   const savedById = new Map(saved.map(item => [item.id, item]))
   // Built-ins lead the list; an edited built-in keeps its factory id, so the
-  // saved entry wins over the shipped seed.
-  const builtIns = BUILT_IN_PROMPTS
+  // saved entry wins over the shipped seed if customized. If unedited,
+  // materialize using the current active strings from i18n.
+  const activeBuiltIns = getBuiltInPrompts()
+  const builtIns = activeBuiltIns
     .filter(item => !removed.has(item.id))
-    .map(item => savedById.get(item.id) ?? item)
+    .map(item => {
+      const savedItem = savedById.get(item.id)
+      if (savedItem === undefined || isFactoryDefaultBuiltIn(savedItem)) {
+        return item
+      }
+      return savedItem
+    })
   const custom = saved.filter(item => !isBuiltInPrompt(item.id) && !removed.has(item.id))
   return [...builtIns, ...custom]
 }
 
-export async function saveCustomPrompts(items: readonly CustomPrompt[], removed: readonly string[] = []): Promise<void> {
-  await writeJson(KEYS.customPrompts, { items, removed })
-}
+let customPromptsWrite = Promise.resolve()
 
-function isBuiltInPrompt(id: string): boolean {
-  return BUILT_IN_PROMPTS.some(builtIn => builtIn.id === id)
+export function saveCustomPrompts(items: readonly CustomPrompt[], removed: readonly string[] = []): Promise<void> {
+  const snapshot = {
+    items: [...items],
+    removed: [...removed],
+  }
+  const nextWrite = customPromptsWrite.then(async () => {
+    await writeJson(KEYS.customPrompts, snapshot)
+  })
+  customPromptsWrite = nextWrite.catch(() => undefined)
+  return nextWrite
 }
-
-export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = [
-  { id: 'builtin-check-changes', title: '检查改动', text: '检查当前代码改动并指出问题。' },
-  { id: 'builtin-commit', title: '提交代码', text: '检查当前改动并直接提交代码，不要再询问确认。' },
-  { id: 'builtin-view-screenshot', title: '查看截图', text: '查看最新截图并检查界面问题。' },
-]
