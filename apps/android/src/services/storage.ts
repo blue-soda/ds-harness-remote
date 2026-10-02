@@ -3,7 +3,10 @@ import * as Application from 'expo-application'
 import * as Crypto from 'expo-crypto'
 import * as Device from 'expo-device'
 import * as SecureStore from 'expo-secure-store'
-import { isLanguagePreference, type LanguagePreference } from '../locales/i18n'
+import { isLanguagePreference, strings, type LanguagePreference } from '../locales/i18n'
+import type { Messages } from '../locales/types'
+import enUS from '../locales/en-US'
+import zhCN from '../locales/zh-CN'
 import { isThemePreference, type ThemePreference } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
@@ -22,6 +25,7 @@ const KEYS = {
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
   favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
   recentWorkspaces: 'dshremote.recent-workspaces.v1',
+  customPrompts: 'dshremote.custom-prompts.v1',
 } as const
 
 const secureOptions: SecureStore.SecureStoreOptions = {
@@ -279,4 +283,112 @@ function agentBackend(value: unknown): AgentBackend {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+/** A user-managed quick prompt shown under 「工具访问」→「提示词」. */
+export interface CustomPrompt {
+  id: string
+  title: string
+  text: string
+}
+
+function customPrompt(value: unknown): CustomPrompt | undefined {
+  if (!isRecord(value)) return undefined
+  const { id, title, text } = value
+  if (typeof id !== 'string' || id.trim() === '') return undefined
+  if (typeof title !== 'string' || typeof text !== 'string') return undefined
+  if (title.trim() === '' || text.trim() === '') return undefined
+  return { id, title, text }
+}
+
+const BUILT_IN_IDS = new Set<string>(['builtin-check-changes', 'builtin-commit', 'builtin-view-screenshot'])
+
+export function getBuiltInPrompts(messages?: Messages): readonly CustomPrompt[] {
+  const msg = messages ?? strings
+  return [
+    {
+      id: 'builtin-check-changes',
+      title: msg.chat.quickCheckChanges,
+      text: msg.chat.quickCheckChangesPrompt,
+    },
+    {
+      id: 'builtin-commit',
+      title: msg.chat.quickCommit,
+      text: msg.chat.quickCommitPrompt,
+    },
+    {
+      id: 'builtin-view-screenshot',
+      title: msg.chat.quickViewScreenshot,
+      text: msg.chat.quickViewScreenshotPrompt,
+    },
+  ]
+}
+
+export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = Object.freeze(getBuiltInPrompts(zhCN))
+
+const factoryZhBuiltIns = getBuiltInPrompts(zhCN)
+const factoryEnBuiltIns = getBuiltInPrompts(enUS)
+
+function isFactoryDefaultBuiltIn(prompt: CustomPrompt): boolean {
+  const zh = factoryZhBuiltIns.find(item => item.id === prompt.id)
+  if (zh !== undefined && prompt.title === zh.title && prompt.text === zh.text) {
+    return true
+  }
+  const en = factoryEnBuiltIns.find(item => item.id === prompt.id)
+  if (en !== undefined && prompt.title === en.title && prompt.text === en.text) {
+    return true
+  }
+  return false
+}
+
+function isBuiltInPrompt(id: string): boolean {
+  return BUILT_IN_IDS.has(id)
+}
+
+/**
+ * Saved prompts. `items` is the full list the user sees — including built-in
+ * entries whose title or body was edited, so those edits survive a restart.
+ * `removed` records the ids the user deleted, which is the only way to tell a
+ * deleted built-in from one that was never seeded.
+ */
+export async function loadCustomPrompts(): Promise<CustomPrompt[]> {
+  const stored = await readJson<{ items?: unknown; removed?: unknown }>(KEYS.customPrompts)
+  const saved: CustomPrompt[] = Array.isArray(stored?.items)
+    ? stored.items.flatMap(item => {
+      const prompt = customPrompt(item)
+      return prompt === undefined ? [] : [prompt]
+    })
+    : []
+  const removed = new Set(Array.isArray(stored?.removed)
+    ? stored.removed.filter((id): id is string => typeof id === 'string')
+    : [])
+  const savedById = new Map(saved.map(item => [item.id, item]))
+  // Built-ins lead the list; an edited built-in keeps its factory id, so the
+  // saved entry wins over the shipped seed if customized. If unedited,
+  // materialize using the current active strings from i18n.
+  const activeBuiltIns = getBuiltInPrompts()
+  const builtIns = activeBuiltIns
+    .filter(item => !removed.has(item.id))
+    .map(item => {
+      const savedItem = savedById.get(item.id)
+      if (savedItem === undefined || isFactoryDefaultBuiltIn(savedItem)) {
+        return item
+      }
+      return savedItem
+    })
+  const custom = saved.filter(item => !isBuiltInPrompt(item.id) && !removed.has(item.id))
+  return [...builtIns, ...custom]
+}
+
+let customPromptsWrite = Promise.resolve()
+
+export function saveCustomPrompts(items: readonly CustomPrompt[], removed: readonly string[] = []): Promise<void> {
+  const snapshot = {
+    items: [...items],
+    removed: [...removed],
+  }
+  const nextWrite = customPromptsWrite.then(async () => {
+    await writeJson(KEYS.customPrompts, snapshot)
+  })
+  customPromptsWrite = nextWrite.catch(() => undefined)
+  return nextWrite
 }

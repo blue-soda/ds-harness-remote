@@ -45,4 +45,7 @@ export const OfficialMenuIcons = {
   model: officialIcon('model'),
   export: officialIcon('export'),
   skill: officialIcon('skill'),
+  newChat: officialIcon('newChat'),
+  sliders: officialIcon('sliders'),
+  edit: officialIcon('edit'),
 } satisfies Record<OfficialMenuIconKind, ComponentType<MenuIconProps>>

@@ -21,7 +21,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Plus, Shield, Terminal, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
@@ -38,6 +38,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { sessionPermissions } from '../services/session-permissions'
+import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts, type CustomPrompt } from '../services/storage'
 import type { SkillEntry } from '../services/session-tools'
 import { SessionToolsPanel } from './session-tools-panel'
 import { MessageActions } from './message-actions'
@@ -47,7 +48,7 @@ import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, valida
 
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
 
-export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; onOpenWorkspaces?: () => void }) {
+export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
   const session = useAppStore(state => state.selectedSession)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
@@ -89,6 +90,13 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  const [promptsPickerOpen, setPromptsPickerOpen] = useState(false)
+  const [customPrompts, setCustomPrompts] = useState<readonly CustomPrompt[]>()
+  const [promptEditing, setPromptEditing] = useState<CustomPrompt | 'new' | null>(null)
+  const [promptsManagerOpen, setPromptsManagerOpen] = useState(false)
+  const [promptsLoading, setPromptsLoading] = useState(false)
+  const promptsLoadingRef = useRef(false)
+  const promptMutatedRef = useRef(false)
   // `/` command and `@` reference popover state anchored to the composer cursor.
   const [mentionType, setMentionType] = useState<MentionType | null>(null)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -132,6 +140,26 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     return () => controller.abort()
   }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
   useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
+  // 「工具访问」→「提示词」列表：连接后加载一次（内置三条 + 本地保存的自定义条目）。
+  useEffect(() => {
+    if (connection.phase !== 'connected') return
+    if (customPrompts !== undefined || promptsLoadingRef.current) return
+    promptsLoadingRef.current = true
+    setPromptsLoading(true)
+    let cancelled = false
+    void loadCustomPrompts()
+      .then(items => {
+        if (cancelled || promptMutatedRef.current) return
+        setCustomPrompts(items)
+      })
+      .finally(() => {
+        promptsLoadingRef.current = false
+        if (!cancelled) setPromptsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connection.phase, customPrompts])
   // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
   useEffect(() => {
     if (connection.phase !== 'connected' || session?.backend === 'codex') return
@@ -166,6 +194,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     }
   }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
+  const [newSessionPending, setNewSessionPending] = useState(false)
   const listRef = useRef<FlatList<ChatSection>>(null)
   const lastStreamingScrollAt = useRef(0)
   const scrollFrameRef = useRef<number | null>(null)
@@ -188,6 +217,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -330,6 +360,20 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         setToolPickerOpen(false)
         return true
       }
+      if (promptEditing !== null) {
+        setPromptEditing(null)
+        setPromptsManagerOpen(true)
+        return true
+      }
+      if (promptsManagerOpen) {
+        setPromptsManagerOpen(false)
+        setPromptsPickerOpen(true)
+        return true
+      }
+      if (promptsPickerOpen) {
+        setPromptsPickerOpen(false)
+        return true
+      }
       if (toolsMode !== undefined) {
         setToolsMode(undefined)
         return true
@@ -344,7 +388,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
       return true
     })
     return () => subscription.remove()
-  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen, trajectory])
+  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen, trajectory, promptsPickerOpen, promptsManagerOpen, promptEditing])
 
   const skillItems: MentionItem[] = useMemo(() => (skillCatalog ?? []).map(row => ({
     id: `skill:${row.name}`,
@@ -491,6 +535,10 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
 
   const handleBack = () => {
     Keyboard.dismiss()
+    if (trajectory) {
+      setTrajectory(false)
+      return
+    }
     onBack()
   }
 
@@ -560,9 +608,85 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
     }
   }
 
-  const pickToolMode = (mode: 'files' | 'terminal') => {
+  const pickToolMode = (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => {
     setToolPickerOpen(false)
+    if (mode === 'trajectory') {
+      setTrajectory(value => !value)
+      return
+    }
+    if (mode === 'prompts') {
+      setPromptsPickerOpen(true)
+      return
+    }
     setToolsMode(mode)
+  }
+
+  const startNewSession = async () => {
+    if (newSessionPending || busy !== undefined) return
+    setNewSessionPending(true)
+    try {
+      const created = await createSession(currentWorkspace?.workspaceId)
+      if (created) {
+        onNewSession?.()
+      } else {
+        Alert.alert(zhCN.chat.newChatFailedTitle, zhCN.chat.newChatFailedBody)
+      }
+    } finally {
+      setNewSessionPending(false)
+    }
+  }
+
+  const sendPrompt = async (prompt: CustomPrompt) => {
+    setPromptsPickerOpen(false)
+    const ok = await sendMessage(prompt.text)
+    if (ok) AccessibilityInfo.announceForAccessibility(zhCN.chat.toolPromptSent(prompt.title))
+    else Alert.alert(zhCN.chat.toolPromptSendFailed, zhCN.chat.toolPromptSendFailed)
+  }
+
+  const persistPrompts = async (next: readonly CustomPrompt[]): Promise<boolean> => {
+    if (promptsLoading) return false
+    promptMutatedRef.current = true
+    const previous = customPrompts ?? BUILT_IN_PROMPTS
+    setCustomPrompts(next)
+    // Built-ins are re-seeded on every load, so a deleted one only stays gone
+    // when its id is recorded; edited built-ins keep their id and are saved as
+    // overrides inside `next`.
+    const removed = BUILT_IN_PROMPTS
+      .filter(item => !next.some(prompt => prompt.id === item.id))
+      .map(item => item.id)
+    try {
+      await saveCustomPrompts(next, removed)
+      return true
+    } catch {
+      setCustomPrompts(previous)
+      Alert.alert(zhCN.chat.toolPromptSaveFailedTitle, zhCN.chat.toolPromptSaveFailedBody)
+      return false
+    }
+  }
+
+  const savePromptEdit = async (title: string, text: string) => {
+    if (promptsLoading) return
+    const editing = promptEditing
+    const trimmedTitle = title.trim()
+    const trimmedText = text.trim()
+    if (trimmedTitle === '' || trimmedText === '') return
+    const current = customPrompts ?? BUILT_IN_PROMPTS
+    let ok = false
+    if (editing === 'new') {
+      ok = await persistPrompts([...current, { id: `prompt-${Date.now()}`, title: trimmedTitle, text: trimmedText }])
+    } else if (editing !== null) {
+      ok = await persistPrompts(current.map(item => item.id === editing.id ? { ...item, title: trimmedTitle, text: trimmedText } : item))
+    }
+    if (ok) {
+      setPromptEditing(null)
+      setPromptsManagerOpen(true)
+    }
+  }
+
+  const deletePrompt = async (prompt: CustomPrompt) => {
+    if (promptsLoading) return
+    const current = customPrompts ?? BUILT_IN_PROMPTS
+    await persistPrompts(current.filter(item => item.id !== prompt.id))
   }
 
   const sessionBlank = visibleMessages.length === 0 && session.blank !== false
@@ -718,7 +842,7 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         titleLines={2}
         onBack={handleBack}
         action={<>
-          <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open} icon={trajectory ? MessageSquare : ListTree} onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
+          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
@@ -981,11 +1105,48 @@ export function ChatScreen({ onBack, onOpenWorkspaces }: { onBack: () => void; o
         onClose={() => setModelPickerOpen(false)}
         onPick={pickModel}
       />
-      {toolsMode !== undefined && connected && <SessionToolsPanel key={`${session.sessionId}:${toolsMode}`} mode={toolsMode} sessionId={session.sessionId} onClose={() => setToolsMode(undefined)} />}
+      {toolsMode !== undefined && connected && (
+        <SessionToolsPanel
+          key={`${session.sessionId}:${toolsMode}`}
+          mode={toolsMode}
+          sessionId={session.sessionId}
+          onClose={() => setToolsMode(undefined)}
+        />
+      )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
-      <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+      <ToolAccessPicker visible={toolPickerOpen} trajectory={trajectory} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+      <PromptsPicker
+        visible={promptsPickerOpen}
+        prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        onClose={() => setPromptsPickerOpen(false)}
+        onPick={prompt => void sendPrompt(prompt)}
+        onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
+      />
+      <PromptsManager
+        visible={promptsManagerOpen}
+        prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
+        onClose={() => setPromptsManagerOpen(false)}
+        onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
+        onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
+        onDelete={prompt => {
+          Alert.alert(zhCN.chat.toolPromptDeleteTitle(prompt.title), zhCN.chat.toolPromptDeleteBody, [
+            { text: zhCN.common.cancel, style: 'cancel' },
+            { text: zhCN.common.delete, style: 'destructive', onPress: () => void deletePrompt(prompt) },
+          ])
+        }}
+      />
+      <PromptEditor
+        visible={promptEditing !== null}
+        prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
+        onClose={() => setPromptEditing(null)}
+        onSave={(title, text) => void savePromptEdit(title, text)}
+      />
     </KeyboardInset>
   )
 }
@@ -1141,10 +1302,11 @@ function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend
   )
 }
 
-function ToolAccessPicker({ visible, onClose, onPick }: {
+function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
   visible: boolean
+  trajectory: boolean
   onClose: () => void
-  onPick: (mode: 'files' | 'terminal') => void
+  onPick: (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1152,6 +1314,8 @@ function ToolAccessPicker({ visible, onClose, onPick }: {
   const options = [
     { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
     { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
+    { id: 'trajectory' as const, icon: ListTree, name: zhCN.trajectory.title, description: trajectory ? zhCN.trajectory.close : zhCN.trajectory.open },
+    { id: 'prompts' as const, icon: OfficialMenuIcons.sliders, name: zhCN.chat.toolPrompts, description: zhCN.chat.toolPromptsDescription },
   ]
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -1182,6 +1346,186 @@ function ToolAccessPicker({ visible, onClose, onPick }: {
               )
             })}
           </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
+}
+
+function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
+  visible: boolean
+  prompts: readonly CustomPrompt[]
+  onClose: () => void
+  onPick: (prompt: CustomPrompt) => void
+  onManage: () => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{zhCN.chat.toolPrompts}</Text>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView
+          style={{ maxHeight: Math.max(140, listMaxHeight - 56) }}
+          contentContainerStyle={styles.modalListContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          {prompts.length === 0 ? (
+            <View style={styles.pickerEmpty}>
+              <Text style={styles.permissionOptionName}>{zhCN.chat.toolPromptEmptyTitle}</Text>
+              <Text style={styles.permissionOptionDescription}>{zhCN.chat.toolPromptEmptyBody}</Text>
+            </View>
+          ) : prompts.map(prompt => (
+            <Pressable
+              key={prompt.id}
+              accessibilityRole="button"
+              accessibilityLabel={prompt.title}
+              onPress={() => onPick(prompt)}
+              style={({ pressed }) => [styles.permissionOption, pressed && styles.plusMenuOptionPressed]}
+            >
+              <View style={styles.permissionOptionCopy}>
+                <Text style={styles.permissionOptionName}>{prompt.title}</Text>
+                <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
+              </View>
+              <ChevronRight size={16} color={colors.muted} />
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.chat.toolPromptEdit}
+          onPress={onManage}
+          style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
+        >
+          <Text style={styles.effortRowLabel}>{zhCN.chat.toolPromptEdit}</Text>
+          <View style={styles.plusMenuOptionValue}>
+            <ChevronRight size={16} color={colors.muted} />
+          </View>
+        </Pressable>
+      </ModalSurface>
+    </Modal>
+  )
+}
+
+function PromptsManager({ visible, prompts, promptsLoading, onBack, onClose, onAdd, onEdit, onDelete }: {
+  visible: boolean
+  prompts: readonly CustomPrompt[]
+  promptsLoading?: boolean
+  onBack: () => void
+  onClose: () => void
+  onAdd: () => void
+  onEdit: (prompt: CustomPrompt) => void
+  onDelete: (prompt: CustomPrompt) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>{zhCN.chat.toolPromptEdit}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <IconButton label={zhCN.chat.toolPromptAdd} icon={Plus} tint={colors.primary} onPress={onAdd} disabled={promptsLoading} />
+            <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          </View>
+        </View>
+        <ScrollView
+          style={{ maxHeight: listMaxHeight }}
+          contentContainerStyle={styles.modalListContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          {prompts.length === 0 ? (
+            <View style={styles.pickerEmpty}>
+              <Text style={styles.permissionOptionName}>{zhCN.chat.toolPromptEmptyTitle}</Text>
+              <Text style={styles.permissionOptionDescription}>{zhCN.chat.toolPromptEmptyBody}</Text>
+            </View>
+          ) : prompts.map(prompt => (
+            <View key={prompt.id} style={[styles.permissionOption, { paddingRight: 4 }]}>
+              <View style={styles.permissionOptionCopy}>
+                <Text style={styles.permissionOptionName}>{prompt.title}</Text>
+                <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
+              </View>
+              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={Pencil} onPress={() => onEdit(prompt)} dense disabled={promptsLoading} />
+              <IconButton label={zhCN.common.delete} icon={Trash2} onPress={() => onDelete(prompt)} dense disabled={promptsLoading} />
+            </View>
+          ))}
+        </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
+}
+
+function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose, onSave }: {
+  visible: boolean
+  prompt?: CustomPrompt
+  promptsLoading?: boolean
+  onBack: () => void
+  onClose: () => void
+  onSave: (title: string, text: string) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  useEffect(() => {
+    if (!visible) return
+    setTitle(prompt?.title ?? '')
+    setText(prompt?.text ?? '')
+  }, [visible, prompt?.id])
+  const canSave = title.trim().length > 0 && text.trim().length > 0 && !promptsLoading
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>
+              {prompt === undefined ? zhCN.chat.toolPromptAdd : zhCN.chat.toolPromptEditTitle(prompt.title)}
+            </Text>
+          </View>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView style={{ maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">
+          <Text style={styles.promptInputLabel}>{zhCN.chat.toolPromptTitlePlaceholder}</Text>
+          <TextInput
+            accessibilityLabel={zhCN.chat.toolPromptTitlePlaceholder}
+            placeholder={zhCN.chat.toolPromptTitlePlaceholder}
+            placeholderTextColor={colors.muted}
+            value={title}
+            onChangeText={setTitle}
+            style={styles.promptInput}
+          />
+          <Text style={[styles.promptInputLabel, { marginTop: 12 }]}>{zhCN.chat.toolPromptTextPlaceholder}</Text>
+          <TextInput
+            accessibilityLabel={zhCN.chat.toolPromptTextPlaceholder}
+            placeholder={zhCN.chat.toolPromptTextPlaceholder}
+            placeholderTextColor={colors.muted}
+            value={text}
+            onChangeText={setText}
+            multiline
+            style={[styles.promptInput, styles.promptTextArea]}
+          />
+        </ScrollView>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.chat.toolPromptSave}
+          disabled={!canSave}
+          onPress={() => onSave(title, text)}
+          style={({ pressed }) => [styles.effortRow, { justifyContent: 'center', backgroundColor: canSave ? colors.primary : colors.surface, marginTop: 12 }, pressed && canSave && styles.plusMenuOptionPressed]}
+        >
+          <Check size={16} color={canSave ? colors.surface : colors.disabled} />
+          <Text style={[styles.effortRowLabel, { color: canSave ? colors.surface : colors.disabled, marginLeft: 6 }]}>{zhCN.chat.toolPromptSave}</Text>
+        </Pressable>
       </ModalSurface>
     </Modal>
   )
@@ -1309,7 +1653,7 @@ function ModelPicker({ visible, models, onClose, onPick }: {
  * Android's responder negotiation can otherwise let the backdrop consume a
  * child press, which makes every option in a transparent modal look inert.
  */
-function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+export function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const styles = useThemedStyles(createStyles)
   return (
     <View style={styles.modalBackdrop} pointerEvents="box-none">
@@ -1326,7 +1670,7 @@ function ModalSurface({ onClose, children }: { onClose: () => void; children: Re
 }
 
 /** Keep the picker sheet within ~70% of the screen while letting long catalogs scroll. */
-function usePickerListMaxHeight(): number {
+export function usePickerListMaxHeight(): number {
   const { height } = useWindowDimensions()
   return Math.max(180, Math.round(height * 0.7) - 96)
 }
@@ -2020,5 +2364,8 @@ function createStyles(colors: ThemeColors) {
   stopPressed: { opacity: 0.78 },
   sendDisabled: { backgroundColor: colors.disabled },
   composerHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: 5 },
+  promptInputLabel: { ...type.caption, color: colors.muted, marginBottom: 4, marginTop: 4 },
+  promptInput: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.ink, paddingHorizontal: spacing.sm, paddingVertical: 8, ...type.body, minHeight: 40 },
+  promptTextArea: { minHeight: 88, textAlignVertical: 'top' },
   })
 }

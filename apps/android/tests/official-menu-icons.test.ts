@@ -14,7 +14,10 @@ const golden = {
   "permission": "65da5da1cc377ccc158dd1477fad2607b3dd6553c4a0ce3e978316e2147e1a98",
   "model": "514c99db92575cc46fe7828dbfbd07875f42c7f1d6e46487d0e115b628f5868a",
   "export": "c4ee234c9a5baaf593a5867e2c4f4cc9cee9be7f1e409031c8593a2b90447215",
-  "skill": "6741fc76907275604887c447a6af503119b5d14296a15bdacdcc8f1434442f92"
+  "skill": "6741fc76907275604887c447a6af503119b5d14296a15bdacdcc8f1434442f92",
+  "newChat": "bbc3cb51c7d7dbb55f30ff296890a8c87bb486776bda45f208c3fefa0de21876",
+  "sliders": "0301d4825dacc3d99897f73ad27884c480413bd94cf5edbd8b2e72deb23eef37",
+  "edit": "e2e92d452a5a9d50fd624fd5eb341cf8df6a3e4e56a5b601846e7d71de450650"
 } as const
 const specUrl = new URL('../src/ui/official-menu-icon-data.ts', import.meta.url)
 
