@@ -73,7 +73,9 @@ function applyNativeEvent(
     if (turn === undefined) return current
     const reasonData = event.data.reason
     const kind = isRecord(reasonData) ? reasonData.kind : reasonData
-    const reason = kind === 'aborted' ? 'stopped' : kind === 'error' ? 'failed' : 'completed'
+    const reason = kind === 'completed' ? 'completed'
+      : kind === 'aborted' || kind === 'interrupted' ? 'stopped'
+        : 'failed'
     return settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
       ? { ...item, turnEnd: { reason, time: event.time } } : item)
   }
@@ -151,9 +153,14 @@ function reduceNativeEvent(
 
 /** A closed turn must not leave stale streams or actionable approvals behind. */
 export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?: string): ChatItem[] {
+  const hasOtherOwnedTurn = turn !== undefined && current.some(item => {
+    const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+    return owner !== undefined && owner !== turn
+  })
   return current.map(item => {
     const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
-    if ((turn !== undefined && owner !== undefined && owner !== turn) || (exceptTurn !== undefined && owner === exceptTurn)) return item
+    if ((turn !== undefined && ((owner !== undefined && owner !== turn) || (owner === undefined && hasOtherOwnedTurn)))
+      || (exceptTurn !== undefined && owner === exceptTurn)) return item
     if (item.kind === 'message' && item.streaming) return { ...item, streaming: false, streamingPhase: undefined }
     // Without a result we cannot claim a tool succeeded.
     if (item.kind === 'tool' && item.state === 'running') return { ...item, state: 'failed' }
@@ -501,12 +508,14 @@ function addApproval(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
   if (approvalId === undefined || sessionId === undefined) return current
   const id = `approval:${approvalId}`
   const existing = current.find(item => item.id === id)
+  const turn = requestTurn(current, payload)
   const activity = {
     kind: 'approval' as const,
     id,
     sessionId,
     approvalId,
     toolName: stringValue(payload.toolName) ?? 'Harness',
+    ...(turn === undefined ? {} : { turn }),
     ...(stringValue(payload.reason) === undefined ? {} : { reason: stringValue(payload.reason) }),
     ...(frameRpcId.length === 0 ? {} : { frameRpcId }),
     createdAt: Date.now(),
@@ -530,15 +539,29 @@ function addQuestion(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
   if (sessionId === undefined || questions.length === 0) return current
   const id = `question:${frameRpcId || questions[0]?.id || localId('question')}`
   const existing = current.find(item => item.id === id)
+  const turn = requestTurn(current, payload)
   const activity = {
     kind: 'question' as const,
     id,
     sessionId,
+    ...(turn === undefined ? {} : { turn }),
     ...(frameRpcId.length === 0 ? {} : { frameRpcId }),
     questions,
     createdAt: Date.now(),
   }
   return existing !== undefined ? current : [...current, activity]
+}
+
+/** Approval/question frames may omit their turn; use the active transcript owner. */
+function requestTurn(current: ChatItem[], payload: UnknownRecord): string | undefined {
+  const explicit = replyGroup(payload)
+  if (explicit !== undefined) return explicit
+  for (let index = current.length - 1; index >= 0; index -= 1) {
+    const item = current[index]!
+    const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+    if (owner !== undefined) return owner
+  }
+  return undefined
 }
 
 function resolveQuestion(current: ChatItem[], payload: UnknownRecord): ChatItem[] {

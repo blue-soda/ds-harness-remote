@@ -58,7 +58,10 @@ describe('remote mux frame reducer', () => {
       .toMatchObject({ streaming: false, nativeSeq: 10, nativeTime: 1000, turn: '3' })
   })
 
-  it.each([['completed', 'completed'], ['aborted', 'stopped'], ['error', 'failed']] as const)(
+  it.each([
+    ['completed', 'completed'], ['aborted', 'stopped'], ['interrupted', 'stopped'],
+    ['error', 'failed'], ['blocked', 'failed'], ['max-tokens', 'failed'], ['forked', 'failed'],
+  ] as const)(
     'retains %s turn-end evidence without moving message and tool sequence anchors', (kind, reason) => {
       const events = [
         sessionEvent({ type: 'assistant/message', seq: 10, time: 1000, data: { turn: 3, step: 1, message: { id: 'reply', content: [{ type: 'text', text: 'Working' }] } } }),
@@ -421,5 +424,26 @@ describe('remote mux frame reducer', () => {
     expect(items).toMatchObject([{ kind: 'question', frameRpcId: 'rpc-question-1', questions: [{ id: 'q1' }] }])
     items = applyMuxFrame(items, resolved)
     expect(items).toMatchObject([{ kind: 'question', outcome: 'answered' }])
+  })
+
+  it('settles approval and question requests when their owning turn ends', () => {
+    const tool = sessionEvent({ type: 'tool/call', seq: 10, data: { turn: 3, name: 'bash', callId: 'call' } })
+    const current = foldHistory([{ event: tool }], 's1')
+    const approval = frame('rpc-approval-2', {
+      type: 'approval/requested', sessionId: 's1', approvalId: 'a2', toolName: 'bash',
+    })
+    const question = frame('rpc-question-2', {
+      type: 'question/requested', sessionId: 's1', questions: [{ id: 'q2', question: 'Continue?' }],
+    })
+    const end = frame('', {
+      type: 'session/event', sessionId: 's1',
+      event: sessionEvent({ type: 'turn/end', seq: 13, data: { turn: 3, reason: { kind: 'aborted' } } }),
+    })
+    const items = applyMuxFrame(applyMuxFrame(applyMuxFrame(current, approval), question), end)
+    expect(items).toMatchObject([
+      { kind: 'tool', state: 'failed' },
+      { kind: 'approval', turn: '3', outcome: 'unavailable' },
+      { kind: 'question', turn: '3', outcome: 'cancelled' },
+    ])
   })
 })

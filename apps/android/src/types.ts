@@ -357,6 +357,7 @@ export interface NativeSessionEvent {
 export interface MuxFrame {
   type: string
   sessionId?: string
+  turn?: string | number
   key?: string
   value?: unknown
   seq?: number
