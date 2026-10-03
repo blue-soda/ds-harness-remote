@@ -38,7 +38,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ b
 vi.mock('expo-image-picker', () => ({}))
 vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'Path' }))
 vi.mock('lucide-react-native', () => Object.fromEntries(
-  'ArrowLeft AlertCircle CircleCheck WifiOff ArrowUp Bot Camera Check ChevronDown ChevronLeft ChevronRight CircleStop Code2 Folder Layers ListTree MessageSquare Paperclip Pencil Plus Shield Terminal Trash2 Images RefreshCw ShieldAlert Sparkles User X'.split(' ').map(name => [name, name]),
+  'ArrowLeft AlertCircle CircleCheck WifiOff ArrowUp Bot Camera Check ChevronDown ChevronUp ChevronLeft ChevronRight CircleStop Code2 Folder Layers ListTree MessageSquare Paperclip Pencil Plus Search Settings2 Shield Terminal Trash2 Images RefreshCw ShieldAlert Sparkles User Wrench X'.split(' ').map(name => [name, name]),
 ))
 vi.mock('../src/ui/official-menu-icons', () => ({ OfficialMenuIcons: new Proxy({}, { get: (_, key) => String(key) }) }))
 vi.mock('../src/state/store', () => ({
@@ -160,13 +160,13 @@ describe('composer quick prompts entry', () => {
     expect(native.send).toHaveBeenCalledWith('My saved instructions.')
   })
 
-  it('keeps files, terminal and trajectory reachable in Tool access without a prompts row', async () => {
+  it('keeps files and terminal in Tool access while exposing trajectory in the title bar', async () => {
     await mount()
     await press(button(strings.chat.moreActions))
     await press(button(strings.chat.toolAccess))
     const pickTool = modal().findAll(node => node.type === Pressable && node.props.onPress !== undefined)
       .filter(node => node.props.accessibilityLabel === undefined)
-    expect(pickTool).toHaveLength(3)
+    expect(pickTool).toHaveLength(2)
     await press(pickTool[0]!)
     expect(screen.root.findByType(SessionToolsPanel).props.mode).toBe('files')
     await act(async () => screen.root.findByType(SessionToolsPanel).props.onClose())
@@ -176,9 +176,7 @@ describe('composer quick prompts entry', () => {
     await press(rows[1]!)
     expect(screen.root.findByType(SessionToolsPanel).props.mode).toBe('terminal')
     await act(async () => screen.root.findByType(SessionToolsPanel).props.onClose())
-    await press(button(strings.chat.moreActions))
-    await press(button(strings.chat.toolAccess))
-    await press(modal().findAll(node => node.type === Pressable && node.props.accessibilityLabel === undefined)[2]!)
+    await press(button(strings.trajectory.open))
     expect(screen.root.findByType(ChatTrajectory)).toBeDefined()
     await act(async () => { expect(native.back?.()).toBe(true) })
     expect(onBack).not.toHaveBeenCalled()

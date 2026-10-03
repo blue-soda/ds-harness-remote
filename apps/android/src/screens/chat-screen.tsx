@@ -619,12 +619,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
   }
 
-  const pickToolMode = (mode: 'files' | 'terminal' | 'prompts') => {
+  const pickToolMode = (mode: 'files' | 'terminal') => {
     setToolPickerOpen(false)
-    if (mode === 'prompts') {
-      setPromptsPickerOpen(true)
-      return
-    }
     setToolsMode(mode)
   }
 
@@ -1326,7 +1322,7 @@ function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend
 function ToolAccessPicker({ visible, onClose, onPick }: {
   visible: boolean
   onClose: () => void
-  onPick: (mode: 'files' | 'terminal' | 'prompts') => void
+  onPick: (mode: 'files' | 'terminal') => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1334,7 +1330,6 @@ function ToolAccessPicker({ visible, onClose, onPick }: {
   const options = [
     { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
     { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
-    { id: 'prompts' as const, icon: OfficialMenuIcons.sliders, name: zhCN.chat.toolPrompts, description: zhCN.chat.toolPromptsDescription },
   ]
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
