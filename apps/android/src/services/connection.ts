@@ -28,6 +28,7 @@ export class AndroidRemoteConnection {
   private unsubscribeClose?: () => void
   private muxHandler?: MuxFrameHandler
   private transport?: AdaptiveTransport
+  private connectionAttempt = 0
 
   async connect(
     baseUrl: string,
@@ -39,7 +40,9 @@ export class AndroidRemoteConnection {
   ): Promise<void> {
     // Replacing a connection must not wait for a graceful stream-close RPC:
     // the old data path may be exactly what is being recovered from.
-    await this.close()
+    const attempt = ++this.connectionAttempt
+    await this.clearConnection()
+    if (attempt !== this.connectionAttempt) throw new Error('The connection attempt was superseded.')
     this.muxHandler = onFrame
     let webRtcFallback = false
     let replacingFallback = false
@@ -95,6 +98,7 @@ export class AndroidRemoteConnection {
         if (!replacingFallback) options.onClose?.()
       })
       await core.connect()
+      if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
       return core
     }
     try {
@@ -114,6 +118,18 @@ export class AndroidRemoteConnection {
         core = await connectCore(true)
       }
       const features = await probeRemoteHostFeatures(core, host.clientVersion)
+      if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
+      const emitFrame = (frame: MuxStreamFrame) => {
+        if (this.core !== core) return
+        if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'failed') {
+          // A live carrier failure is an offline channel, even if its socket
+          // still answers. Reconnect will create a fresh follow subscription.
+          void this.close()
+          options.onClose?.()
+          return
+        }
+        this.muxHandler?.(frame)
+      }
       const capabilities = new Set(features.capabilities)
       if (capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')) {
         this.codex = new CodexRemoteClient(core)
@@ -127,7 +143,7 @@ export class AndroidRemoteConnection {
             harnessVersion: host.harnessVersion,
             ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
           },
-          frame => this.muxHandler?.(frame as unknown as MuxStreamFrame),
+          frame => emitFrame(frame as unknown as MuxStreamFrame),
         )
         alpha.start()
         this.proxy = alpha
@@ -135,12 +151,17 @@ export class AndroidRemoteConnection {
       } else if (features.apiProxy) {
         const apiProxy = new RemoteApiProxy(core)
         this.proxy = apiProxy
-        this.closeMux = await apiProxy.openMuxStream(frame => this.muxHandler?.(frame))
+        const closeMux = await apiProxy.openMuxStream(emitFrame)
+        if (attempt !== this.connectionAttempt || this.core !== core) {
+          await closeMux(false).catch(() => undefined)
+          throw new Error('The connection attempt was superseded.')
+        }
+        this.closeMux = closeMux
       } else {
         throw new Error('The remote Host exposes no supported Harness transport.')
       }
     } catch (error) {
-      await this.close()
+      if (attempt === this.connectionAttempt) await this.clearConnection()
       throw error
     }
   }
@@ -175,21 +196,26 @@ export class AndroidRemoteConnection {
   }
 
   async close(): Promise<void> {
+    ++this.connectionAttempt
+    await this.clearConnection()
+  }
+
+  private async clearConnection(): Promise<void> {
     this.muxHandler = undefined
     const mux = this.closeMux
     this.closeMux = undefined
+    const core = this.core
+    this.core = undefined
     // Closing the whole transport makes a remote stream-close redundant.
     // Only remove the local subscription here so a half-open RTC path cannot
     // add another RPC timeout before recovery begins.
-    if (mux !== undefined) await mux(false).catch(() => undefined)
     this.unsubscribeClose?.()
     this.unsubscribeClose = undefined
-    const core = this.core
-    this.core = undefined
     this.transport = undefined
     this.proxy = undefined
     this.codex = undefined
     this.sessionTools = undefined
+    if (mux !== undefined) await mux(false).catch(() => undefined)
     if (core !== undefined) await core.close()
   }
 }

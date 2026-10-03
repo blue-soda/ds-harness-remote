@@ -45,19 +45,24 @@ export function MessageActions({ item }: { item: ChatMessage }) {
     ] as const
     Alert.alert(strings.messageActions.usage, rows.map(([label, value]) => `${label}: ${value ?? strings.messageActions.usageUnavailable}`).join('\n'))
   }
-  return <View style={styles.row}>
+  const user = item.role === 'user'
+  return <View style={[styles.row, user && styles.userRow]}>
+    {user && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(item.nativeTime)}</Text>}
     <Pressable accessibilityRole="button" accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy} disabled={item.text.length === 0} style={styles.icon} onPress={() => {
       void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
     }}><Copy size={16} color={copied ? colors.primary : colors.muted} /></Pressable>
+    {!user && <>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.good} accessibilityState={{ selected: item.feedback === 'positive', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('positive')}><ThumbsUp size={16} color={item.feedback === 'positive' ? colors.primary : colors.muted} /></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.bad} accessibilityState={{ selected: item.feedback === 'negative', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('negative')}><ThumbsDown size={16} color={item.feedback === 'negative' ? colors.primary : colors.muted} /></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage?.totalTokens === undefined ? strings.messageActions.usageUnavailable : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>
     <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, flexShrink: 1 }}>{messageClock(item.nativeTime)}</Text>
+    </>}
   </View>
 }
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 44 },
-  icon: { minWidth: 40, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  userRow: { justifyContent: 'flex-end', gap: 8 },
+  icon: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   usage: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
 })

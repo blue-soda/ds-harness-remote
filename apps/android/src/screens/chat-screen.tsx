@@ -21,7 +21,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
@@ -43,6 +43,7 @@ import type { SkillEntry } from '../services/session-tools'
 import { SessionToolsPanel } from './session-tools-panel'
 import { MessageActions } from './message-actions'
 import { ChatTrajectory } from './chat-trajectory'
+import { processSegments, processDetail, toolActivity, completedProcessTitle, toolDisplayName, type ProcessActivity } from './chat-process'
 import { resolveSessionDisplayTitle } from './session-title'
 import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
 
@@ -204,12 +205,21 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
-  const visibleMessages = useMemo(() => mergeReplyReasoning(messages).filter(item =>
+  const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
     item.kind !== 'message' || (item.role !== 'system' && !item.context && (
       hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
-      || (item.images?.length ?? 0) > 0))), [messages])
+      || (item.images?.length ?? 0) > 0))), [messages, session?.backend])
   const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
+  const interleavedTurns = useMemo(() => {
+    const seen = new Set<string>()
+    const interleaved = new Set<string>()
+    for (const section of visibleSections) if (section.kind === 'process') {
+      if (seen.has(section.turn)) interleaved.add(section.turn)
+      seen.add(section.turn)
+    }
+    return interleaved
+  }, [visibleSections])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
@@ -324,9 +334,9 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} foldAllowed={!interleavedTurns.has(item.turn)} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion])
+  [busy, respondApproval, respondQuestion, interleavedTurns])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -561,12 +571,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     if (reconnectingSession) return
     setReconnectingSession(true)
     try {
-      if (!await reconnect()) return
-      const currentState = useAppStore.getState()
-      const currentSession = currentState.sessions.find(item => item.sessionId === session.sessionId)
-        ?? currentState.selectedSession
-        ?? session
-      await openSession(currentSession)
+      await reconnect()
     } finally {
       setReconnectingSession(false)
     }
@@ -614,10 +619,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
   }
 
-  const pickToolMode = (mode: 'files' | 'terminal' | 'trajectory') => {
+  const pickToolMode = (mode: 'files' | 'terminal' | 'prompts') => {
     setToolPickerOpen(false)
-    if (mode === 'trajectory') {
-      setTrajectory(value => !value)
+    if (mode === 'prompts') {
+      setPromptsPickerOpen(true)
       return
     }
     setToolsMode(mode)
@@ -844,8 +849,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         titleLines={2}
         onBack={handleBack}
         action={<>
-          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
-          {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
+          <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
+            icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
+            onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
+          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
+          {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
       {!connected && (
@@ -855,7 +863,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         </View>
       )}
 
-      {trajectory ? <ChatTrajectory key={session.sessionId} items={messages} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
+      {trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
         key={session.sessionId}
         style={styles.list}
@@ -927,6 +935,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
             accessibilityLiveRegion="polite"
             style={styles.replyStatus}
           >
+            <Svg width={18} height={18} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}><Path d={FISH_LOGO_PATH} fill={colors.accent} /></Svg>
             <Text style={styles.replyStatusText}>{stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : zhCN.chat.generating}</Text>
             {!stopping && <ReplyStatusDots />}
           </View>
@@ -1128,7 +1137,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
-      <ToolAccessPicker visible={toolPickerOpen} trajectory={trajectory} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+      <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
         visible={promptsPickerOpen}
         prompts={customPrompts ?? BUILT_IN_PROMPTS}
@@ -1314,11 +1323,10 @@ function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend
   )
 }
 
-function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
+function ToolAccessPicker({ visible, onClose, onPick }: {
   visible: boolean
-  trajectory: boolean
   onClose: () => void
-  onPick: (mode: 'files' | 'terminal' | 'trajectory') => void
+  onPick: (mode: 'files' | 'terminal' | 'prompts') => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1326,7 +1334,7 @@ function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
   const options = [
     { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
     { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
-    { id: 'trajectory' as const, icon: ListTree, name: zhCN.trajectory.title, description: trajectory ? zhCN.trajectory.close : zhCN.trajectory.open },
+    { id: 'prompts' as const, icon: OfficialMenuIcons.sliders, name: zhCN.chat.toolPrompts, description: zhCN.chat.toolPromptsDescription },
   ]
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -1788,9 +1796,10 @@ function sessionTitle(session: RemoteSession): string {
   return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
 }
 
-/** Match the Web turn disclosure: process first, final answer always visible. */
-const ChatProcessGroup = memo(function ChatProcessGroup({ items, busyAction, onApproval, onQuestion }: {
+/** ui-chat has two independent folds: activity ranges, then a normally ended whole Turn. */
+const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllowed, busyAction, onApproval, onQuestion }: {
   items: ChatItem[]
+  foldAllowed: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
@@ -1798,45 +1807,83 @@ const ChatProcessGroup = memo(function ChatProcessGroup({ items, busyAction, onA
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [open, setOpen] = useState(false)
+  const backend = useAppStore(state => state.selectedSession?.backend)
   const last = items.at(-1)
-  const running = items.some(isActiveChatItem)
-  const pendingDecision = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
-  const hasAnswer = !running && last?.kind === 'message' && last.role === 'assistant'
-    && (hasVisibleMessageText(last.text) || (last.images?.length ?? 0) > 0)
-  const failed = !hasAnswer && last?.kind === 'tool' && last.state === 'failed'
-  const answer = hasAnswer && !failed ? last : undefined
-  const processItems = answer === undefined ? items : items.slice(0, -1)
-  const answerReasoning = answer?.kind === 'message' && hasVisibleMessageText(answer.reasoning ?? '') ? answer : undefined
-  const hasDetails = processItems.length > 0 || answerReasoning !== undefined
-  if (!hasDetails && answer !== undefined) return <MessageBubble item={answer} compact />
-  const alwaysOpen = failed || pendingDecision || (!running && answer === undefined)
-  const expanded = alwaysOpen || open
-  const summaryItem = [...processItems, ...(answerReasoning === undefined ? [] : [answerReasoning])].at(-1)
-  const summary = running
-    ? summaryItem?.kind === 'tool' ? compactActivityText(summaryItem.summary ?? summaryItem.arguments)
-      : summaryItem?.kind === 'message' ? compactActivityText(summaryItem.reasoning)
-        : undefined
-    : undefined
-  const label = running ? zhCN.chat.processRunning : failed ? zhCN.chat.failed : zhCN.chat.completed
+  const codexClosed = backend === 'codex' && !items.some(isActiveChatItem)
+    && last?.kind === 'message' && last.role === 'assistant'
+  const end = items.find(item => item.turnEnd !== undefined)?.turnEnd
+    ?? (codexClosed ? { reason: 'completed' as const, time: 0 } : undefined)
+  const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
+  const canFold = end?.reason === 'completed' && foldAllowed && !pending
+  const answer = end?.reason === 'completed' && last?.kind === 'message' && last.role === 'assistant'
+    && (hasVisibleMessageText(last.text) || (last.images?.length ?? 0) > 0) ? last : undefined
+  const process: ChatItem[] = answer === undefined ? items : [
+    ...items.slice(0, -1),
+    ...(hasVisibleMessageText(answer.reasoning ?? '') ? [{ ...answer, text: '', images: undefined }] : []),
+  ]
+  const segments = useMemo(() => processSegments(process), [items, answer])
+  const expanded = !canFold || open
+  const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
+    : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   return <View style={styles.processGroup}>
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ expanded, disabled: alwaysOpen || !hasDetails }}
-      disabled={alwaysOpen || !hasDetails}
+    {end !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={label}
+      accessibilityState={{ expanded, disabled: !canFold || process.length === 0 }}
+      disabled={!canFold || process.length === 0} onPress={() => setOpen(value => !value)}
+      style={({ pressed }) => [styles.turnProcessHeader, pressed && styles.reasoningHeaderPressed]}>
+      <Text style={styles.turnProcessLabel}>{label}</Text>
+      {canFold && process.length > 0 && (expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />)}
+    </Pressable>}
+    {expanded && segments.map((segment, index) => segment.kind === 'response'
+      ? <MessageBubble key={segment.key} item={segment.item} compact />
+      : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
+          busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+    {answer !== undefined && <MessageBubble item={{ ...answer, reasoning: undefined }} compact />}
+  </View>
+})
+
+const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, busyAction, onApproval, onQuestion }: {
+  items: ChatItem[]
+  closed: boolean
+  busyAction?: string
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const { height } = useWindowDimensions()
+  const [open, setOpen] = useState(false)
+  const body = useRef<ScrollView>(null)
+  const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
+  const expanded = pending || open
+  const tools = items.filter((item): item is ToolActivity => item.kind === 'tool')
+  const activeTool = closed ? undefined : tools.findLast(item => item.state === 'running')
+  const runningReasoning = closed ? undefined : items.findLast(item => item.kind === 'message' && item.streamingPhase === 'reasoning')
+  const running = activeTool !== undefined || runningReasoning !== undefined
+  const counts = new Map<ProcessActivity, number>()
+  for (const tool of tools) counts.set(toolActivity(tool), (counts.get(toolActivity(tool)) ?? 0) + 1)
+  const ranked = [...counts].sort((a, b) => b[1] - a[1]).map(([kind]) => kind)
+  const labels = zhCN.chatProcess.processActivity
+  const label = pending ? labels.questions.running
+    : running ? labels[activeTool === undefined ? 'thinking' : toolActivity(activeTool)].running
+      : completedProcessTitle(ranked)
+  const detail = activeTool !== undefined ? processDetail(activeTool)
+    : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
+  return <View style={styles.processGroup}>
+    <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
+      accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
-      style={({ pressed }) => [styles.processHeader, pressed && styles.reasoningHeaderPressed]}
-    >
-      <Sparkles size={16} color={running ? colors.accent : colors.muted} />
-      <Text style={[styles.reasoningLabel, running && styles.reasoningLabelActive]}>{label}</Text>
-      {summary !== undefined && <Text style={styles.reasoningPreview} numberOfLines={1}>{summary}</Text>}
-      {hasDetails && !alwaysOpen && (expanded ? <ChevronDown size={17} color={colors.muted} /> : <ChevronRight size={17} color={colors.muted} />)}
+      style={({ pressed }) => [styles.processHeader, pressed && styles.reasoningHeaderPressed]}>
+      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+      <Text style={styles.processLabel} numberOfLines={1}>{label}{detail === undefined ? '' : ` · ${detail}`}</Text>
     </Pressable>
-    {expanded && <View style={styles.processBody}>
-      {processItems.map(item => <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
-      {answerReasoning !== undefined && <ReasoningDisclosure key={`${answerReasoning.id}:reasoning`} item={answerReasoning} />}
-    </View>}
-    {answer !== undefined && <MessageBubble item={answer} compact />}
+    {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      onLayout={() => { if (running) body.current?.scrollToEnd({ animated: false }) }}
+      contentContainerStyle={styles.processBody}>
+      {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text)
+        ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>
+        : <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+    </ScrollView>}
   </View>
 })
 
@@ -1866,22 +1913,10 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
 
-  // Assistant replies keep the avatar on the identity row only, so reasoning /
-  // answer text share the same first-level left edge as tool rows.
+  // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
     return (
       <View style={styles.assistantBlock}>
-        <View style={styles.messageRow}>
-          <View style={[styles.avatar, styles.avatarAssistant]}>
-            <Image
-              source={require('../../assets/android-icon-foreground-adaptive.png')}
-              style={styles.remoteAvatarLogo}
-              resizeMode="contain"
-              accessible={false}
-            />
-          </View>
-          <Text style={styles.messageLabel}>Remote</Text>
-        </View>
         {showReasoning && <ReasoningDisclosure item={item} />}
         {showImages && <ChatImages images={item.images!} />}
         {showText && (
@@ -1898,6 +1933,14 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
       </View>
     )
   }
+
+  if (user) return <View style={styles.userBlock}>
+    <View style={styles.userBubble}>
+      {showImages && <ChatImages images={item.images!} alignEnd />}
+      {showText && <NativeMarkdown text={item.text} />}
+    </View>
+    <MessageActions item={item} />
+  </View>
 
   return (
     <View style={[styles.messageRow, user && styles.messageRowUser]}>
@@ -1935,9 +1978,7 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
         onPress={() => setExpanded(value => !value)}
         style={({ pressed }) => [styles.reasoningHeader, pressed && styles.reasoningHeaderPressed]}
       >
-        {active
-          ? <ActivityIndicator size="small" color={colors.accent} />
-          : <Sparkles size={16} color={colors.muted} />}
+        <Sparkles size={16} color={active ? colors.accent : colors.muted} />
         <Text style={[styles.reasoningLabel, active && styles.reasoningLabelActive]}>{label}</Text>
         <Text style={styles.activitySeparator}>·</Text>
         <Text style={styles.reasoningPreview} numberOfLines={1}>{preview}</Text>
@@ -1955,28 +1996,27 @@ function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
   const styles = useThemedStyles(createStyles)
   const [expanded, setExpanded] = useState(false)
   const stateText = item.state === 'running' ? zhCN.status.running : item.state === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
-  const detail = compactActivityText(item.summary ?? item.arguments)
+  const detail = processDetail(item)
+  const name = toolDisplayName(item)
   const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
       <Pressable
         accessibilityRole={hasDetail ? 'button' : undefined}
-        accessibilityLabel={hasDetail ? (expanded ? zhCN.chat.toolCollapse(item.toolName) : zhCN.chat.toolExpand(item.toolName)) : undefined}
+        accessibilityLabel={hasDetail ? (expanded ? zhCN.chat.toolCollapse(name) : zhCN.chat.toolExpand(name)) : undefined}
         accessibilityState={hasDetail ? { expanded } : undefined}
         disabled={!hasDetail}
         onPress={() => setExpanded(value => !value)}
         style={({ pressed }) => [styles.toolRow, pressed && hasDetail && styles.toolRowPressed]}
       >
-        <View style={styles.toolIcon}><Code2 size={18} color={colors.muted} /></View>
+        <View style={styles.toolIcon}>{/command|bash|shell|命令|终端/i.test(item.toolName)
+          ? <Terminal size={16} color={colors.muted} /> : <Code2 size={16} color={colors.muted} />}</View>
         <View style={styles.toolCopy}>
-          <Text style={styles.toolName} numberOfLines={1}>{item.toolName}</Text>
+          <Text style={styles.toolName} numberOfLines={1}>{name}</Text>
           {detail !== undefined && <Text style={styles.activitySeparator}>·</Text>}
           {detail !== undefined && <Text style={styles.toolSummary} numberOfLines={1}>{detail}</Text>}
         </View>
-        {item.state !== 'finished' && <View style={styles.toolStateGroup}>
-          {item.state === 'running' && <ActivityIndicator size="small" color={colors.success} />}
-          <Text style={[styles.toolState, item.state === 'failed' && styles.toolFailed]}>{stateText}</Text>
-        </View>}
+        {item.state === 'failed' && <Text style={styles.toolFailed}>{stateText}</Text>}
         {hasDetail && (expanded
           ? <ChevronDown size={17} color={colors.muted} />
           : <ChevronRight size={17} color={colors.muted} />)}
@@ -2218,6 +2258,7 @@ function ReplyStatusDots() {
 }
 
 function isActiveChatItem(item: ChatItem): boolean {
+  if (item.turnEnd !== undefined) return false
   if (item.kind === 'message') return item.streaming === true
   if (item.kind === 'tool') return item.state === 'running'
   if (item.kind === 'approval' || item.kind === 'question') return item.outcome === undefined
@@ -2264,7 +2305,9 @@ function createStyles(colors: ThemeColors) {
   messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginVertical: spacing.xs },
   messageRowUser: { flexDirection: 'row-reverse' },
   assistantBlock: { alignSelf: 'stretch', gap: spacing.xxs, marginVertical: spacing.xs },
-  assistantText: { paddingHorizontal: spacing.xs },
+  assistantText: { paddingHorizontal: 0 },
+  userBlock: { alignSelf: 'flex-end', maxWidth: '88%', marginVertical: spacing.sm },
+  userBubble: { backgroundColor: colors.surfaceStrong, borderRadius: radius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   avatar: { width: 32, height: 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   avatarUser: { backgroundColor: colors.primary },
   avatarAssistant: { backgroundColor: colors.primarySoft },
@@ -2287,8 +2330,12 @@ function createStyles(colors: ThemeColors) {
   activitySeparator: { ...type.small, color: colors.subtle },
   reasoningBody: { backgroundColor: colors.surface, padding: spacing.sm, marginHorizontal: spacing.xs, marginBottom: spacing.xs, borderRadius: radius.sm },
   processGroup: { alignSelf: 'stretch' },
-  processHeader: { minHeight: 48, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  processBody: { paddingLeft: spacing.xs, gap: spacing.xxs },
+  processHeader: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: radius.sm },
+  processLabel: { ...type.small, color: colors.muted, flex: 1 },
+  turnProcessHeader: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  turnProcessLabel: { ...type.small, color: colors.muted },
+  activityReasoning: { paddingVertical: spacing.xs },
+  processBody: { gap: spacing.xxs },
   streamingCursor: { width: 7, height: 16, backgroundColor: colors.accent, borderRadius: 2, marginTop: 3 },
   toolCard: { borderRadius: radius.md, overflow: 'hidden' },
   toolCardExpanded: { backgroundColor: colors.surface },
@@ -2296,7 +2343,7 @@ function createStyles(colors: ThemeColors) {
   toolRowPressed: { backgroundColor: colors.surfaceStrong },
   toolIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   toolCopy: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  toolName: { ...type.smallStrong, color: colors.muted },
+  toolName: { ...type.small, color: colors.muted, flexShrink: 1 },
   toolSummary: { ...type.small, color: colors.muted, flex: 1 },
   toolStateGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   toolState: { ...type.caption, color: colors.success },
@@ -2336,8 +2383,8 @@ function createStyles(colors: ThemeColors) {
   mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
   composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
 
-  replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
-  replyStatusText: { ...type.caption, color: colors.accent },
+  replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: spacing.xs, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  replyStatusText: { ...type.small, color: colors.accent },
   replyDots: { flexDirection: 'row', alignItems: 'center', marginLeft: -spacing.xs },
   replyDot: { ...type.caption, fontSize: 18, lineHeight: 18, fontWeight: '700' },
   imageTray: { gap: spacing.xs, paddingBottom: spacing.xs },

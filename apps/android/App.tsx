@@ -258,13 +258,11 @@ function AppNavigator() {
         || current.connection.phase === 'connecting'
         || current.connection.phase === 'reconnecting') return
       void (async () => {
-        if (!await reconnect()) return
-        const session = useAppStore.getState().selectedSession
-        if (routeRef.current.name === 'chat' && session !== undefined) await openSession(session)
+        await reconnect()
       })()
     })
     return () => subscription.remove()
-  }, [openSession, reconnect])
+  }, [reconnect])
 
   if (bootPhase === 'loading') return <LoadingScreen />
   if (bootPhase === 'error') return <BootError onRetry={() => void bootstrap()} message={error} />

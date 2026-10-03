@@ -30,7 +30,7 @@ describe('store authoritative feedback', () => {
   it('applies the official rating after merging a stale live cache and retains it for pagination', async () => {
     useAppStore.setState({ messages: { s1: [cached('new', 'positive')] } })
     expect(await useAppStore.getState().openSession(session)).toBe(true)
-    expect(useAppStore.getState().messages.s1![0]).toMatchObject({ text: 'live', feedback: 'negative' })
+    expect(useAppStore.getState().messages.s1![0]).toMatchObject({ text: 'history', feedback: 'negative' })
     proxy.sessionHistory.mockResolvedValueOnce(page('old', 1))
     await useAppStore.getState().loadOlderHistory()
     expect(useAppStore.getState().messages.s1![0]).toMatchObject({ id: 'old', feedback: 'positive' })

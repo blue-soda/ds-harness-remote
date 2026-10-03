@@ -5,7 +5,7 @@ class FakeCore {
   private readonly eventHandlers = new Set<(event: unknown) => void>()
   readonly rpcCalls: Array<{ method: string; params?: unknown }> = []
 
-  async connect(): Promise<void> {}
+  async connect(): Promise<void> { await testState.connectGate?.() }
 
   async rpc(method: string, params?: unknown): Promise<unknown> {
     this.rpcCalls.push({ method, params })
@@ -34,6 +34,10 @@ class FakeCore {
     return () => this.closeHandlers.delete(handler)
   }
 
+  emit(event: unknown): void {
+    for (const handler of this.eventHandlers) handler(event)
+  }
+
   getStats() { return { mode: 'Relay', connected: true } }
 
   async close(): Promise<void> {
@@ -44,6 +48,7 @@ class FakeCore {
 const testState = vi.hoisted(() => ({
   capabilities: ['harness.api.v1'] as string[],
   cores: [] as FakeCore[],
+  connectGate: undefined as undefined | (() => Promise<void>),
 }))
 
 vi.mock('@dsh-remote/client-core', async () => {
@@ -88,6 +93,40 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
   beforeEach(() => {
     testState.capabilities = ['harness.api.v1']
     testState.cores.length = 0
+    testState.connectGate = undefined
+  })
+
+  it('does not let a late connection attempt overwrite or close its replacement', async () => {
+    const connection = new AndroidRemoteConnection()
+    let release!: () => void
+    testState.connectGate = () => new Promise<void>(resolve => { release = resolve })
+    const first = connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
+      .then(() => undefined, error => error)
+    await vi.waitFor(() => expect(testState.cores).toHaveLength(1))
+    testState.connectGate = undefined
+    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
+    const latest = connection.requireProxy()
+    release()
+    expect(await first).toBeInstanceOf(Error)
+    expect(connection.requireProxy()).toBe(latest)
+    await connection.close()
+  })
+
+  it('marks a failed native event stream offline instead of keeping a silent connected channel', async () => {
+    testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+    const connection = new AndroidRemoteConnection()
+    const closed = vi.fn()
+    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true, onClose: closed })
+    const core = testState.cores[0]!
+    const opening = core.rpcCalls.find(call => call.method === 'harness.remote.stream.open'
+      && (call.params as { endpoint?: string }).endpoint === '$events')!
+    core.emit({ event: 'harness.remote.stream.closed', data: {
+      streamId: (opening.params as { streamId: string }).streamId, reason: 'failed',
+      failure: { code: 'TRANSPORT_CLOSED', message: 'synthetic', details: {} },
+    } })
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(1))
+    expect(() => connection.requireProxy()).toThrow()
+    await connection.close()
   })
 
   it('opens the legacy ApiProxy mux for older Hosts', async () => {

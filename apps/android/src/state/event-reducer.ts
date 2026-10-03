@@ -68,6 +68,16 @@ export function applyMuxFrameToMessages(
 function applyNativeEvent(
   current: ChatItem[], event: NativeSessionEvent, sessionId: string, view?: HistoryEntry['view'], captureContext = false,
 ): ChatItem[] {
+  if (event.type === 'turn/end') {
+    const turn = replyGroup(event.data)
+    if (turn === undefined) return current
+    const reasonData = event.data.reason
+    const kind = isRecord(reasonData) ? reasonData.kind : reasonData
+    const reason = kind === 'aborted' ? 'stopped' : kind === 'error' ? 'failed' : 'completed'
+    return settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
+      ? { ...item, turnEnd: { reason, time: event.time } } : item)
+  }
+  if (event.type === 'turn/start') return reduceNativeEvent(current, event, sessionId, view)
   const contextEvent = event.type === 'system/message' || event.type === 'developer/message' || (event.type === 'user/message' && !isHumanUserMessage(event.data))
   const next = captureContext && contextEvent
     ? current.some(item => item.id === messageId(event.data)) ? current : [...current, {
@@ -77,12 +87,20 @@ function applyNativeEvent(
     : reduceNativeEvent(current, event, sessionId, view)
   const time = typeof event.time === 'number' && Number.isFinite(event.time) && event.time > 0 ? event.time : undefined
   const usage = nativeUsage(event.data)
-  return next.map(item => current.includes(item) ? item : {
-    ...item,
-    ...(Number.isSafeInteger(event.seq) && event.seq >= 0 ? { nativeSeq: event.seq } : {}),
-    ...(time === undefined ? {} : { createdAt: time, nativeTime: time }),
-    ...(replyGroup(event.data) === undefined ? {} : { turn: replyGroup(event.data) }),
-    ...(item.kind === 'message' && usage !== undefined ? { usage } : {}),
+  return next.map(item => {
+    if (current.includes(item)) return item
+    const previous = current.find(old => old.id === item.id)
+    const previousSeq = previous?.nativeRevisionSeq ?? previous?.nativeSeq
+    if (previousSeq !== undefined && event.seq <= previousSeq) return previous!
+    return {
+      ...item,
+      ...(Number.isSafeInteger(event.seq) && event.seq >= 0 ? { nativeSeq: event.seq } : {}),
+      ...(Number.isFinite(event.seq) && event.seq >= 0 ? { nativeOrderSeq: item.nativeOrderSeq ?? event.seq } : {}),
+      ...(Number.isFinite(event.seq) && event.seq >= 0 ? { nativeRevisionSeq: event.seq } : {}),
+      ...(time === undefined ? {} : { createdAt: time, nativeTime: time }),
+      ...(replyGroup(event.data) === undefined ? {} : { turn: item.turn ?? replyGroup(event.data) }),
+      ...(item.kind === 'message' && usage !== undefined ? { usage } : {}),
+    }
   })
 }
 
@@ -118,12 +136,31 @@ function reduceNativeEvent(
   view?: HistoryEntry['view'],
 ): ChatItem[] {
   const data = isRecord(event.data) ? event.data : {}
+  if (event.type === 'turn/end') return settleTurnItems(current, replyGroup(data))
+  if (event.type === 'turn/start') {
+    const turn = replyGroup(data)
+    return turn === undefined ? current : settleTurnItems(current, undefined, turn)
+  }
   if (event.type === 'user/message') return addUserMessage(current, data, sessionId)
   if (event.type === 'assistant/message') return addAssistantMessage(current, data, sessionId, event)
   if (event.type === 'assistant/chunk') return applyAssistantChunk(current, data, sessionId, event)
   if (event.type === 'tool/call') return applyToolCall(current, data, sessionId, 'running', view)
   if (event.type === 'tool/result') return applyToolCall(current, data, sessionId, 'finished', view)
   return current
+}
+
+/** A closed turn must not leave stale streams or actionable approvals behind. */
+export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?: string): ChatItem[] {
+  return current.map(item => {
+    const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+    if ((turn !== undefined && owner !== undefined && owner !== turn) || (exceptTurn !== undefined && owner === exceptTurn)) return item
+    if (item.kind === 'message' && item.streaming) return { ...item, streaming: false, streamingPhase: undefined }
+    // Without a result we cannot claim a tool succeeded.
+    if (item.kind === 'tool' && item.state === 'running') return { ...item, state: 'failed' }
+    if (item.kind === 'approval' && item.outcome === undefined) return { ...item, outcome: 'unavailable' }
+    if (item.kind === 'question' && item.outcome === undefined) return { ...item, outcome: 'cancelled' }
+    return item
+  })
 }
 
 function addUserMessage(current: ChatItem[], data: UnknownRecord, sessionId: string): ChatItem[] {
@@ -145,6 +182,7 @@ function addUserMessage(current: ChatItem[], data: UnknownRecord, sessionId: str
     : persistedImages
   const message: ChatMessage = {
     kind: 'message', id, sessionId, role: 'user', text, createdAt: now(data),
+    ...(rpcId === undefined ? {} : { requestRpcId: rpcId }),
     ...(images.length === 0 ? {} : { images }),
   }
   if (optimisticIndex >= 0) {
@@ -260,6 +298,7 @@ function applyToolCall(
     id,
     sessionId,
     toolName: name,
+    ...(stringValue(data.name) ?? stringValue(data.toolName) ? { toolKey: stringValue(data.name) ?? stringValue(data.toolName) } : {}),
     ...(argumentsText.length > 0 ? { arguments: argumentsText } : {}),
     ...(summary === undefined ? {} : { summary }),
     ...(state === 'running' && detail !== undefined ? { callDetail: detail } : {}),
@@ -273,6 +312,7 @@ function applyToolCall(
     ? {
         ...item,
         toolName: name === 'Tool' ? item.toolName : name,
+        ...(next.toolKey === undefined ? {} : { toolKey: next.toolKey }),
         ...(summary === undefined ? {} : { summary }),
         ...(next.callDetail === undefined ? {} : { callDetail: next.callDetail }),
         ...(next.resultDetail === undefined ? {} : { resultDetail: next.resultDetail }),

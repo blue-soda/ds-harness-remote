@@ -137,6 +137,7 @@ export interface HarnessHistoryEntry {
 export interface HarnessSessionHistoryPage {
   events: HarnessHistoryEntry[]
   hasMore: boolean
+  throughSeq?: number
 }
 
 type RemoteEventKind = 'approval/request' | 'user-questions/request'
@@ -180,6 +181,7 @@ export class HarnessAlphaClient {
   private events?: StreamHandle
   private control?: StreamHandle
   private sessionFollow?: SessionFollowHandle
+  private followGeneration = 0
   private eventClientId?: string
   private eventHostHome?: string
 
@@ -205,6 +207,7 @@ export class HarnessAlphaClient {
   }
 
   async close(notifyRemote = true): Promise<void> {
+    ++this.followGeneration
     await Promise.all([
       this.closeHandle(this.sessionFollow, notifyRemote),
       this.closeHandle(this.events, notifyRemote),
@@ -360,10 +363,13 @@ export class HarnessAlphaClient {
       return {
         events: historyEntriesFromRecords(Array.isArray(page.records) ? page.records : []),
         hasMore: page.hasMore === true,
+        throughSeq,
       }
     }
 
+    const generation = ++this.followGeneration
     await this.closeSessionFollow()
+    if (generation !== this.followGeneration) throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
     const handle: SessionFollowHandle = { sessionId, controller: new AbortController() }
     this.sessionFollow = handle
     const source = await this.gateway.open('session/follow', {
@@ -376,9 +382,16 @@ export class HarnessAlphaClient {
       },
     }, handle.controller.signal)
     handle.stream = source
+    if (this.sessionFollow !== handle || handle.controller.signal.aborted) {
+      await this.closeHandle(handle, false)
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
+    }
     const iterator = source[Symbol.asyncIterator]()
     handle.iterator = iterator
     const first = await iterator.next()
+    if (this.sessionFollow !== handle || handle.controller.signal.aborted) {
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
+    }
     if (first.done || !isRecord(first.value) || first.value.type !== 'snapshot') {
       await this.closeSessionFollow()
       throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid session follow snapshot.')
@@ -392,6 +405,7 @@ export class HarnessAlphaClient {
     return {
       events: historyEntriesFromRecords(Array.isArray(snapshot.records) ? snapshot.records : []),
       hasMore: snapshot.hasMore === true,
+      ...(cursor === undefined ? {} : { throughSeq: cursor }),
     }
   }
 
@@ -566,6 +580,7 @@ export class HarnessAlphaClient {
   ): Promise<void> {
     while (this.sessionFollow === handle) {
       const next = await iterator.next()
+      if (this.sessionFollow !== handle || handle.controller.signal.aborted) return
       if (next.done) return
       for (const entry of this.entriesFromSessionFollow(handle, next.value)) {
         this.emitFrame({

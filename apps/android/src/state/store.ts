@@ -100,7 +100,7 @@ import type {
   WorkspaceList,
   WorkspaceView,
 } from '../types'
-import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
+import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame, settleTurnItems } from './event-reducer'
 import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
 
 function applyFeedback(items: ChatItem[], ratings?: Map<string, ChatMessage['feedback']>): ChatItem[] {
@@ -132,6 +132,8 @@ interface AppState {
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   messages: Record<string, ChatItem[]>
+  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string }>
+  sessionProjectionSeqs: Record<string, Record<string, number>>
   feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels
   modelSelecting: boolean
@@ -176,7 +178,7 @@ interface AppState {
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
   connectDevice(device: RemoteDevice, options?: { forceRelay?: boolean }): Promise<boolean>
-  reconnect(options?: { forceRelay?: boolean }): Promise<boolean>
+  reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
   sendMessage(text: string, images?: PromptImage[]): Promise<boolean>
@@ -226,6 +228,9 @@ export const requireSessionTools = () => connection.requireSessionTools()
 let activeCodexStream: CodexStream | undefined
 let activeCodexTimeline: CodexTimelineState | undefined
 const codexModelSelections = new Map<string, ModelSelection>()
+let connectionGeneration = 0
+let sessionLoadGeneration = 0
+let reconnectFlight: Promise<boolean> | undefined
 
 export const useAppStore = create<AppState>((set, get) => ({
   bootPhase: 'loading',
@@ -239,6 +244,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   archivedSessionIds: [],
   sessions: [],
   messages: {},
+  sessionLifecycles: {},
+  sessionProjectionSeqs: {},
   feedbackBySession: {},
   modelSelecting: false,
   permissionSelecting: false,
@@ -467,7 +474,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   async connectDevice(device, options = {}) {
     const { config, identity } = get()
     if (config === undefined || identity === undefined) return false
+    const generation = ++connectionGeneration
+    ++sessionLoadGeneration
+    const sameDevice = get().selectedDevice?.deviceId === device.deviceId
     set({
+      ...(!sameDevice ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
+      sessionLifecycles: {},
+      sessionProjectionSeqs: {},
+      permissionSelecting: false,
+      modelSelecting: false,
+      busyAction: undefined,
       selectedDevice: device,
       connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
       connectionStage: 'authenticating',
@@ -489,34 +505,39 @@ export const useAppStore = create<AppState>((set, get) => ({
         : preference === 'turn'
           ? ['turn', 'relay'] as const
           : await resolveAutomaticPreferredTransports()
+      if (generation !== connectionGeneration) return false
       set({ connectionStage: 'transport', connectionProbeOrder: initialProbeTransports(preferredTransports) })
       await connection.connect(
         config.baseUrl,
         identity,
         device,
         credentials.accessToken,
-        frame => get().handleMuxFrame(frame),
+        frame => { if (generation === connectionGeneration) get().handleMuxFrame(frame) },
         {
           fetchIceServers: async connectionId => api.turnCredentials(connectionId),
           preferredTransports: [...preferredTransports],
           forceRelay,
-          onSecureHandshake: () => set(state => ({
-            connectionStage: 'secure',
-            connection: {
-              ...state.connection,
-              stats: connection.getStats() ?? state.connection.stats,
-            },
-          })),
+          onSecureHandshake: () => {
+            if (generation !== connectionGeneration) return
+            set(state => ({ connectionStage: 'secure', connection: {
+              ...state.connection, stats: connection.getStats() ?? state.connection.stats,
+            } }))
+          },
           onClose: () => {
-            if (get().connection.phase === 'connected' || get().connection.phase === 'reconnecting') {
+            if (generation !== connectionGeneration) return
+            if (get().connection.phase !== 'disconnected') {
+              ++connectionGeneration
+              ++sessionLoadGeneration
               set({
                 connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed },
                 codexAvailable: false,
+                busyAction: undefined,
               })
             }
           },
         },
       )
+      if (generation !== connectionGeneration) return false
       set({ connectionStage: 'loading' })
       const proxy = connection.requireProxy()
       const [hostDescriptor, workspaceList, sessions] = await Promise.all([
@@ -535,6 +556,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
       const connectionNetworkDetails = await connection.getNetworkDetails().catch(() => undefined)
+      if (generation !== connectionGeneration) return false
       set(state => {
         const codexSessions = codexCatalog.sessions.map(session => {
           const previous = state.sessions.find(item => item.sessionId === session.sessionId)
@@ -547,6 +569,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           workspaces: [...workspaceList.items, ...codexCatalog.workspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: [...sessions, ...codexSessions],
+          selectedSession: state.selectedSession === undefined ? undefined
+            : [...sessions, ...codexSessions].find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
           connectionStage: 'ready',
           connectionNetworkDetails,
           lastConnectedDeviceId: device.deviceId,
@@ -558,6 +582,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await saveLastConnectedDeviceId(device.deviceId)
       return true
     } catch (error) {
+      if (generation !== connectionGeneration) return false
       await connection.close()
       if (isSessionAuthError(error)) {
         await get().requireReauth(friendlyError(error))
@@ -579,12 +604,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     return deviceId
   },
 
-  async reconnect(options = {}) {
+  reconnect(options = {}) {
+    if (reconnectFlight !== undefined) return reconnectFlight
     const device = get().selectedDevice
     const phase = get().connection.phase
-    if (device === undefined || phase === 'connecting' || phase === 'reconnecting') return false
+    if (device === undefined || phase === 'connecting' || phase === 'reconnecting') return Promise.resolve(false)
     set(state => ({ connection: { ...state.connection, phase: 'reconnecting', error: undefined } }))
-    return get().connectDevice(device, options)
+    const task = (async () => {
+      if (!await get().connectDevice(device, options)) return false
+      const session = get().selectedSession
+      if (options.restoreSession !== false && session !== undefined) return get().openSession(session)
+      return true
+    })()
+    reconnectFlight = task
+    void task.finally(() => { if (reconnectFlight === task) reconnectFlight = undefined })
+    return task
   },
 
   async refreshConnectionNetworkDetails() {
@@ -599,6 +633,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async disconnect() {
+    ++connectionGeneration
+    ++sessionLoadGeneration
+    reconnectFlight = undefined
     await closeActiveCodexStream(false)
     await connection.close()
     codexModelSelections.clear()
@@ -614,6 +651,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       archivedSessionIds: [],
       sessions: [],
       selectedSession: undefined,
+      sessionLifecycles: {},
+      sessionProjectionSeqs: {},
       sessionModels: undefined,
       historyHasMore: false,
       historyLoadingOlder: false,
@@ -622,6 +661,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSession(session) {
+    let loadGeneration = ++sessionLoadGeneration
+    const current = () => loadGeneration === sessionLoadGeneration
     set({ busyAction: `session:${session.sessionId}`, error: undefined })
     const load = async () => {
       if (session.backend === 'codex') {
@@ -635,6 +676,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           readCodexSession(client, threadId, permission),
           readCodexHistoryPage(client, threadId),
         ])
+        if (!current()) return
         const timeline = createCodexTimelineState({ ...read.thread, turns: [] })
         if (timeline === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
         activeCodexTimeline = withActiveCodexTurn(timeline, history.activeTurnId)
@@ -655,6 +697,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             }))
           },
         )
+        if (!current()) { await stream.close().catch(() => undefined); return }
         activeCodexStream = stream
         const items = foldHistory(history.events, session.sessionId, true)
         const nextSession = {
@@ -682,39 +725,60 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Older carriers may not expose feedback; history must remain usable.
         connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
       ])
+      if (!current()) return
       const ratings = feedback === undefined ? undefined : new Map(feedback.map(row => [row.messageId, row.rating]))
       const items = foldHistory(history.events, session.sessionId, true)
-      set(state => ({
-        selectedSession: session,
-        historyLoadingOlder: false,
-        feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
-        messages: {
-          ...state.messages,
-          [session.sessionId]: applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []), ratings),
-        },
-        historyHasMore: history.hasMore,
-        oldestLoadedSeq: oldestSeq(history.events),
-        busyAction: undefined,
-      }))
+      set(state => {
+        const latest = state.sessions.find(item => item.sessionId === session.sessionId)
+          ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : session)
+        const lifecycle = latestHistoryLifecycle(history.events)
+        const liveLifecycle = state.sessionLifecycles[session.sessionId]
+        const authoritativeLifecycle = liveLifecycle !== undefined && liveLifecycle.seq > (history.throughSeq ?? lifecycle?.seq ?? -1)
+          ? liveLifecycle : lifecycle
+        const nextSession = { ...latest, running: authoritativeLifecycle?.running ?? latest.running }
+        const merged = applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? [], history.throughSeq), ratings)
+        const restored = nextSession.running === false ? settleTurnItems(merged)
+          : authoritativeLifecycle?.turn === undefined ? merged : settleTurnItems(merged, undefined, authoritativeLifecycle.turn)
+        return {
+          selectedSession: nextSession,
+          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
+          ...(authoritativeLifecycle === undefined ? {} : { sessionLifecycles: { ...state.sessionLifecycles, [session.sessionId]: authoritativeLifecycle } }),
+          historyLoadingOlder: false,
+          feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
+          messages: { ...state.messages, [session.sessionId]: restored },
+          historyHasMore: history.hasMore,
+          oldestLoadedSeq: oldestSeq(history.events),
+          busyAction: undefined,
+        }
+      })
       void refreshSessionModels(session.sessionId)
     }
     try {
       await load()
+      if (!current()) return false
       await rememberRecentWorkspace(session)
       return true
     } catch (error) {
+      if (!current()) return false
       if (isRpcTimeoutError(error) || isRecoverableTransportError(error)) {
+        if (reconnectFlight !== undefined) {
+          set({ busyAction: undefined, error: friendlyError(error) })
+          return false
+        }
         // session.history is read-only, so it is safe to recover the stale
         // path with a fresh Relay-only connection and retry exactly once.
         // Mutating ApiProxy calls deliberately do not use this path because a
         // timeout leaves their result unknown.
-        const recovered = await get().reconnect({ forceRelay: true })
+        const recovered = await get().reconnect({ forceRelay: true, restoreSession: false })
         if (recovered) {
+          loadGeneration = ++sessionLoadGeneration
           try {
             await load()
+            if (!current()) return false
             await rememberRecentWorkspace(session)
             return true
           } catch (retryError) {
+            if (!current()) return false
             set({ busyAction: undefined, error: friendlyError(retryError) })
             return false
           }
@@ -873,7 +937,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectPermission(preset) {
     const session = get().selectedSession
-    if (session === undefined || get().connection.phase !== 'connected') return false
+    if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
+    const generation = connectionGeneration
     set({ permissionSelecting: true, error: undefined })
     try {
       if (session.backend === 'codex') {
@@ -884,6 +949,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (hostDeviceId === undefined) throw new Error(zhCN.runtime.connectHostFirst)
         const threadId = codexThreadId(session)
         const result = await connection.requireCodex().request('thread/resume', { threadId, permissionPreset: preset })
+        if (generation !== connectionGeneration) return false
         const effectivePreset = codexPermissionPresetFromResponse(result) ?? preset
         await saveCodexPermissionPreset(hostDeviceId, threadId, effectivePreset)
         set(state => ({
@@ -892,15 +958,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return true
       }
-      await connection.requireProxy().sessionSelectPermission(session.sessionId, preset)
+      const proxy = connection.requireProxy()
+      await proxy.sessionSelectPermission(session.sessionId, preset)
+      // Read back the official projection; never fabricate an accepted grant.
+      const confirmed = (await proxy.sessionList()).find(item => item.sessionId === session.sessionId)
+      if (generation !== connectionGeneration) return false
+      const permissions = confirmed?.projections?.values?.permissions
+      if (typeof permissions !== 'object' || permissions === null || !('currentValue' in permissions) || permissions.currentValue !== preset) {
+        throw new Error('The Host did not confirm the selected permission preset.')
+      }
       set(state => {
         const update = (item: RemoteSession): RemoteSession => {
-          if (item.sessionId !== session.sessionId || item.projections?.values === undefined) return item
-          const permissions = item.projections.values.permissions
-          if (typeof permissions !== 'object' || permissions === null) return item
+          if (item.sessionId !== session.sessionId) return item
           return {
             ...item,
-            projections: { values: { ...item.projections.values, permissions: { ...permissions, currentValue: preset } } },
+            projections: { ...item.projections, values: { ...item.projections?.values, permissions } },
           }
         }
         return {
@@ -1440,9 +1512,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setOffline() {
     if (get().connection.phase !== 'disconnected') {
+      ++sessionLoadGeneration
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,
+        busyAction: undefined,
       })
     }
   },
@@ -1454,7 +1528,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   handleMuxFrame(frame) {
     set(state => {
       const sessionId = frame.payload.sessionId
+      if (frame.payload.type === 'session/projection' && sessionId !== undefined && typeof frame.payload.key === 'string') {
+        const { key, value, seq } = frame.payload
+        const previous = state.sessionProjectionSeqs[sessionId]?.[key]
+        if (seq !== undefined && previous !== undefined && seq < previous) return {}
+        const update = (session: RemoteSession): RemoteSession => session.sessionId !== sessionId ? session : {
+          ...session,
+          projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
+        }
+        return {
+          sessions: state.sessions.map(update),
+          selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+          ...(seq === undefined ? {} : { sessionProjectionSeqs: {
+            ...state.sessionProjectionSeqs,
+            [sessionId]: { ...state.sessionProjectionSeqs[sessionId], [key]: seq },
+          } }),
+        }
+      }
       const running = sessionRunningForMuxFrame(frame)
+      const seq = frame.payload.event?.seq
+      const previousLifecycle = sessionId === undefined ? undefined : state.sessionLifecycles[sessionId]
+      if (running !== undefined && seq !== undefined && previousLifecycle !== undefined && seq < previousLifecycle.seq) return {}
       const releasePrompt = state.busyAction === 'send-message'
         && sessionId !== undefined
         && state.selectedSession?.sessionId === sessionId
@@ -1469,6 +1563,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...(sessionId === undefined || running === undefined ? {} : {
           sessions: state.sessions.map(updateRunning),
           selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
+          ...(seq === undefined ? {} : { sessionLifecycles: {
+            ...state.sessionLifecycles,
+            [sessionId]: { seq, running, ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }) },
+          } }),
         }),
         ...(releasePrompt ? { busyAction: undefined } : {}),
       }
@@ -1506,6 +1604,17 @@ async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
   activeCodexStream = undefined
   activeCodexTimeline = undefined
   if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
+}
+
+function latestHistoryLifecycle(events: HistoryEntry[]): AppState['sessionLifecycles'][string] | undefined {
+  let latest: AppState['sessionLifecycles'][string] | undefined
+  for (const { event } of events) {
+    if (event.type !== 'turn/start' && event.type !== 'turn/end') continue
+    if (latest !== undefined && event.seq < latest.seq) continue
+    latest = { seq: event.seq, running: event.type === 'turn/start',
+      ...(event.data.turn === undefined ? {} : { turn: String(event.data.turn) }) }
+  }
+  return latest
 }
 
 async function loadSavedCodexPermissions(hostDeviceId: string | undefined): Promise<Record<string, CodexPermissionPreset>> {
@@ -1692,7 +1801,7 @@ function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
-  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult'> {
+  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
     config: undefined,
     account: undefined,
@@ -1710,6 +1819,8 @@ function initialData(): Pick<AppState,
     sessions: [],
     selectedSession: undefined,
     messages: {},
+    sessionLifecycles: {},
+    sessionProjectionSeqs: {},
     feedbackBySession: {},
     commandResult: undefined,
     sessionModels: undefined,

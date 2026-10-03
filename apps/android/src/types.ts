@@ -218,6 +218,7 @@ export interface SessionHistoryPage {
   events: HistoryEntry[]
   hasMore: boolean
   activeTurnId?: string
+  throughSeq?: number
 }
 
 export interface ChatItemBase {
@@ -227,7 +228,13 @@ export interface ChatItemBase {
   /** Authoritative event coordinates; absent on optimistic/non-timestamped frames. */
   nativeSeq?: number
   nativeTime?: number
+  /** First event position, retained when a tool result updates the same row. */
+  nativeOrderSeq?: number
+  /** Latest update, including the carrier's fractional transient chunk positions. */
+  nativeRevisionSeq?: number
   turn?: string
+  /** Authoritative turn/end evidence; no reply sequence is replaced by this event. */
+  turnEnd?: { reason: 'completed' | 'stopped' | 'failed'; time: number }
 }
 
 export interface ChatMessage extends ChatItemBase {
@@ -278,6 +285,8 @@ export interface ImageAttachmentLimits {
 export interface ToolActivity extends ChatItemBase {
   kind: 'tool'
   toolName: string
+  /** Original official tool name, separate from its localized display title. */
+  toolKey?: string
   images?: ChatImage[]
   arguments?: string
   summary?: string
@@ -348,6 +357,9 @@ export interface NativeSessionEvent {
 export interface MuxFrame {
   type: string
   sessionId?: string
+  key?: string
+  value?: unknown
+  seq?: number
   event?: NativeSessionEvent
   view?: unknown
   lastSeq?: number

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { ChatItem, MuxStreamFrame, NativeSessionEvent } from '../src/types'
 import { applyMuxFrame, applyMuxFrameToMessages, foldHistory, sessionRunningForMuxFrame } from '../src/state/event-reducer'
 
+let syntheticSeq = 0
 function sessionEvent(event: Partial<NativeSessionEvent> & { type: string; data: Record<string, unknown> }): NativeSessionEvent {
+  const seq = event.seq ?? syntheticSeq
+  syntheticSeq = Math.max(syntheticSeq, seq + 1)
   return {
-    seq: 0,
+    seq,
     time: 1786000000000,
     ...event,
   } as NativeSessionEvent
@@ -46,6 +49,34 @@ describe('remote mux frame reducer', () => {
     })
     expect(sessionRunningForMuxFrame(step)).toBeUndefined()
   })
+
+  it('settles an older stream at turn/start without changing its reply anchor', () => {
+    const original: ChatItem[] = [{ kind: 'message', id: 'old', sessionId: 's1', role: 'assistant',
+      text: 'partial', streaming: true, turn: '3', createdAt: 1000, nativeSeq: 10, nativeTime: 1000 }]
+    const start = sessionEvent({ type: 'turn/start', seq: 20, time: 2000, data: { turn: 4 } })
+    expect(applyMuxFrame(original, frame('', { type: 'session/event', sessionId: 's1', event: start }))[0])
+      .toMatchObject({ streaming: false, nativeSeq: 10, nativeTime: 1000, turn: '3' })
+  })
+
+  it.each([['completed', 'completed'], ['aborted', 'stopped'], ['error', 'failed']] as const)(
+    'retains %s turn-end evidence without moving message and tool sequence anchors', (kind, reason) => {
+      const events = [
+        sessionEvent({ type: 'assistant/message', seq: 10, time: 1000, data: { turn: 3, step: 1, message: { id: 'reply', content: [{ type: 'text', text: 'Working' }] } } }),
+        sessionEvent({ type: 'tool/call', seq: 11, time: 1100, data: { turn: 3, name: 'bash', callId: 'call', arguments: '{"command":"true"}' } }),
+        sessionEvent({ type: 'assistant/message', seq: 12, time: 1200, data: { turn: 4, step: 1, message: { id: 'other', content: [{ type: 'text', text: 'Another turn' }] } } }),
+      ]
+      const original = foldHistory(events.map(event => ({ event })), 's1')
+      const end = sessionEvent({ type: 'turn/end', seq: 13, time: 1300, data: { turn: 3, reason: { kind } } })
+      const live = applyMuxFrame(original, frame('', { type: 'session/event', sessionId: 's1', event: end }))
+      const history = foldHistory([...events, end].map(event => ({ event })), 's1')
+      expect(live).toEqual(history)
+      expect(live.slice(0, 2).map(item => item.turnEnd)).toEqual([{ reason, time: 1300 }, { reason, time: 1300 }])
+      expect(live.map(item => item.nativeSeq)).toEqual([10, 11, 12])
+      expect(live.map(item => item.nativeTime)).toEqual([1000, 1100, 1200])
+      expect(live[2]).toBe(original[2])
+      expect(live[1]).toMatchObject({ toolKey: 'bash', state: 'failed' })
+    },
+  )
 
   it('assembles streaming assistant chunks into a finalized message', () => {
     const chunk: MuxStreamFrame = frame('', {

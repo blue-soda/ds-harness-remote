@@ -42,13 +42,39 @@ function mapItems(
   return Object.fromEntries(Object.entries(messages).map(([sessionId, items]) => [sessionId, items.map(map)]))
 }
 
-export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[]): ChatItem[] {
+export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throughSeq?: number): ChatItem[] {
   const liveById = new Map(live.map(item => [item.id, item]))
   const historyIds = new Set(history.map(item => item.id))
-  return [
-    ...history.map(item => liveById.get(item.id) ?? item),
-    ...live.filter(item => !historyIds.has(item.id)),
+  const boundary = throughSeq ?? Math.max(-1, ...history.map(item => item.nativeSeq ?? item.nativeOrderSeq ?? -1))
+  const requests = new Set(history.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
+  const result = [
+    ...history.map(item => {
+      const cached = liveById.get(item.id)
+      if (cached === undefined) return item
+      const historySeq = item.nativeRevisionSeq ?? item.nativeSeq ?? item.nativeOrderSeq ?? -1
+      const liveSeq = cached.nativeRevisionSeq ?? cached.nativeSeq ?? cached.nativeOrderSeq ?? -1
+      const authoritative = liveSeq > historySeq ? cached : item
+      return authoritative.kind === 'message' && cached.kind === 'message'
+        ? { ...authoritative, ...(authoritative.feedback === undefined && cached.feedback !== undefined ? { feedback: cached.feedback } : {}),
+            ...(authoritative.role === 'user' && cached.images !== undefined ? { images: cached.images } : {}) }
+        : authoritative
+    }),
+    ...live.filter(item => {
+      if (historyIds.has(item.id)) return false
+      if (item.kind === 'message' && item.requestRpcId !== undefined && requests.has(item.requestRpcId)) return false
+      // A follow snapshot replaces transient chunks already covered by its cursor.
+      if (item.kind === 'message' && item.streaming && (item.nativeRevisionSeq ?? item.nativeSeq ?? item.nativeOrderSeq ?? Infinity) <= boundary) return false
+      return true
+    }),
   ]
+  return result.sort((a, b) => {
+    const left = a.nativeOrderSeq ?? a.nativeSeq
+    const right = b.nativeOrderSeq ?? b.nativeSeq
+    if (left === undefined && right === undefined) return 0
+    if (left === undefined) return 1
+    if (right === undefined) return -1
+    return left - right
+  })
 }
 
 export type ChatSection =
@@ -171,8 +197,7 @@ function joinReasoning(parts: string[]): string {
 
 /** Prepend an older history page in front of the current chat items, deduplicated by id. */
 export function prependHistory(older: ChatItem[], current: ChatItem[]): ChatItem[] {
-  const currentIds = new Set(current.map(item => item.id))
-  return [...older.filter(item => !currentIds.has(item.id)), ...current]
+  return mergeHistoryAndLive(older, current)
 }
 
 /** Smallest event seq in a history page; drives the next `session.history` beforeSeq. */

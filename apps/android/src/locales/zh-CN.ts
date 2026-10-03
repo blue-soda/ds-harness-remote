@@ -114,7 +114,7 @@ const zhCN = {
   chat: {
     quickCheckChanges: '检查改动', quickCheckChangesPrompt: '检查当前代码改动并指出问题。', quickCommit: '提交代码', quickCommitPrompt: '检查当前改动并直接提交代码，不要再询问确认。', quickViewScreenshot: '查看截图', quickViewScreenshotPrompt: '查看最新截图并检查界面问题。',
     fullAccessTitle: '开启完全访问权限？', fullAccessBody: '开启后，DeepSeek Harness 可以直接修改文件和运行命令。只建议在你信任当前任务时使用。', codexFullAccessTitle: '允许 CodeX 完全访问电脑？', codexFullAccessBody: '开启后，CodeX 可访问电脑上的全部文件，并在后续回合中不再逐次请求命令或文件修改确认。只建议在你完全信任当前任务时使用。', enable: '开启完全访问', stop: '停止回复', selectModel: '选择模型', selectReasoningEffort: '选择思考程度', reasoningEffortLabel: (name: string) => `思考程度：${name}`, approvalMode: '操作权限', approvalModeLabel: (name: string) => `操作权限：${name}`, reconnect: '重新连接当前对话', reconnecting: '正在恢复当前对话…', offline: '与设备的连接已断开，点击右上角重新连接并继续当前对话。', hostOperation: (name: string) => `${name}（电脑端）`,
-    processRunning: '正在分析请求', older: '查看更早的消息', messageLabel: '给 DeepSeek Harness 发消息', codexMessageLabel: '给 CodeX 发消息', placeholder: '输入消息…', codexPlaceholder: '给 CodeX 安排任务…', send: '发送', addImages: '添加图片', removeImage: (name: string) => `移除图片“${name}”`, unnamedImage: '图片', imageLimitTitle: '无法添加图片', tooManyImages: (max: number) => `每条消息最多添加 ${max} 张图片。`, unsupportedImage: (name: string) => `“${name}”的格式不受支持，请选择 PNG、JPEG、WebP 或 GIF 图片。`, imageTooLarge: (name: string, max: string) => `“${name}”超过单张图片 ${max} 的限制。`, imagesTooLarge: (max: string) => `这些图片合计超过 ${max} 的限制。`, imageDimensionsTooLarge: (name: string, max: number) => `“${name}”的宽或高超过 ${max} 像素。`, imagePixelsTooLarge: (name: string) => `“${name}”的像素数量超过限制。`, imagePickerFailedTitle: '无法读取图片', imagePickerFailedBody: '请选择 PNG、JPEG、WebP 或 GIF 图片后重试。', policyHint: '对话全程加密，远程操作受 DeepSeek Harness 权限控制。', codexPolicyHint: '对话全程加密，远程操作受 CodeX 权限控制。', you: '你', system: '系统', generating: '深度求索中', codexGenerating: '正在思考', stopping: '正在停止', reasoning: '思考', reasoningActive: '思考中', reasoningExpand: '展开思考过程', reasoningCollapse: '收起思考过程', failed: '未完成', completed: '已完成', toolCall: '调用内容', toolResult: '执行结果', toolExpand: (name: string) => `查看“${name}”详情`, toolCollapse: (name: string) => `收起“${name}”详情`, toolTruncated: '内容过长，仅显示前 64 KB。', denied: '已拒绝', allowedOnce: '已允许本次操作', approvalHandled: '已在其他设备处理', permissionTitle: '是否允许这次操作？', permissionScope: '允许后仅对当前请求生效，其他操作仍需要你确认。', allowOnce: '允许这一次', deny: '不允许', answered: '已回答', questionCancelled: '问题已取消', questionTitle: 'DeepSeek Harness 需要你确认', answerToContinue: '回答后将继续执行', submitAnswer: '提交回答', welcomeSlogan: '探索未至之境', moreActions: '更多操作', openWorkspaces: '工作区', welcomeBadge: '预览版', takePhoto: '拍照', photos: '相册', files: '文件', mode: '模式', selectMode: '选择模式', modeDefault: '默认', reasoningEffort: '推理强度', reasoningEffortDefault: '默认', toolAccess: '工具访问', quickPrompts: '快捷提示词', toolPrompts: '提示词', toolFilesDescription: '查看电脑上的文件和目录', toolTerminalDescription: '在电脑上运行命令', toolPromptsDescription: '常用提示词，点一下直接发送', toolPromptEdit: '编辑提示词', toolPromptEditDescription: '增加、删除或修改常用提示词', toolPromptAdd: '新建提示词', toolPromptEditTitle: (title: string) => `编辑“${title}”`, toolPromptTitlePlaceholder: '提示词名称', toolPromptTextPlaceholder: '提示词内容', toolPromptSave: '保存', toolPromptSaveFailedTitle: '无法保存提示词', toolPromptSaveFailedBody: '本地存储写入失败，请重试。', toolPromptDeleteTitle: (title: string) => `删除“${title}”？`, toolPromptDeleteBody: '删除后不能恢复。', toolPromptEmptyTitle: '没有提示词', toolPromptEmptyBody: '点击「编辑提示词」增加常用提示词。', toolPromptSent: (title: string) => `已发送“${title}”`, toolPromptSendFailed: '发送失败，请检查连接后重试。', newChat: '新对话', newChatFailedTitle: '无法新建对话', newChatFailedBody: '请检查连接后重试。', selectWorkspace: '选择工作区', moveSessionHint: '把当前对话移到所选工作区', workspaceNone: '未分组', workspacePickerEmptyTitle: '还没有可用的工作区', workspacePickerEmptyBody: '在电脑端 DeepSeek Harness 中添加项目目录后，就可以把对话移进工作区。', manageWorkspaces: '管理工作区', moveStartedTitle: '这段对话不能直接移动', moveStartedBody: (name: string) => `这段对话已经在其他目录开始，工作目录不能更改。要在“${name}”中新建对话继续吗？`, moveStartedConfirm: '在该工作区新建对话', moveFailedTitle: '无法在该工作区新建对话', moveFailedBody: '请检查连接后重试。', modeLockedTitle: '无法切换模式', modeLockedBody: '这段对话已经开始，模式只能在开始之前更改。请新建对话后再选择。', modeSelectFailedBody: '模式切换没有成功，请检查连接后重试。', modeLoadFailed: '模式列表加载失败，请重新打开「更多操作」重试。', cameraPermissionTitle: '无法使用相机', cameraPermissionBody: '请在系统设置中允许 DSH Remote 使用相机。', filePickerFailedTitle: '无法读取文件', filePickerFailedBody: '请选择 PNG、JPEG、WebP 或 GIF 图片后重试。', permissionReadOnly: '仅可查看', permissionReadOnlyDescription: '只能读取；修改文件和运行命令都需要你逐次确认。', permissionWorkspaceWrite: '工作区内修改', permissionWorkspaceWriteDescription: '可在当前工作区内写入文件和运行命令；更广泛的访问仍需确认。', permissionFullAccess: '完全权限', permissionFullAccessDescription: '不再逐次确认，可直接修改文件和运行命令。只建议在你信任当前任务时使用。', presetStandardName: '标准模式', presetStandardDescription: '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。', presetPtcName: 'PTC 模式', presetPtcDescription: '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。', presetMinimalName: '极简模式', presetMinimalDescription: 'Agent 仅使用终端工具完成任务，适合测试和对比其基础表现。', presetCordisName: '创造模式', presetCordisDescription: '用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。', welcomeTitle: '继续这段对话', welcomeBody: '告诉 DeepSeek Harness 你想检查、解释或修改什么，也可以添加图片。如果需要你确认操作，会直接显示在对话中。', codexWelcomeTitle: '继续 CodeX 对话', codexWelcomeBody: '告诉 CodeX 你想检查、解释或修改什么，也可以添加图片。命令或文件修改需要确认时，会直接显示在对话中。',
+    toolRunning: (name: string) => `正在${name}`, processRunning: '正在分析请求', older: '查看更早的消息', messageLabel: '给 DeepSeek Harness 发消息', codexMessageLabel: '给 CodeX 发消息', placeholder: '输入消息…', codexPlaceholder: '给 CodeX 安排任务…', send: '发送', addImages: '添加图片', removeImage: (name: string) => `移除图片“${name}”`, unnamedImage: '图片', imageLimitTitle: '无法添加图片', tooManyImages: (max: number) => `每条消息最多添加 ${max} 张图片。`, unsupportedImage: (name: string) => `“${name}”的格式不受支持，请选择 PNG、JPEG、WebP 或 GIF 图片。`, imageTooLarge: (name: string, max: string) => `“${name}”超过单张图片 ${max} 的限制。`, imagesTooLarge: (max: string) => `这些图片合计超过 ${max} 的限制。`, imageDimensionsTooLarge: (name: string, max: number) => `“${name}”的宽或高超过 ${max} 像素。`, imagePixelsTooLarge: (name: string) => `“${name}”的像素数量超过限制。`, imagePickerFailedTitle: '无法读取图片', imagePickerFailedBody: '请选择 PNG、JPEG、WebP 或 GIF 图片后重试。', policyHint: '对话全程加密，远程操作受 DeepSeek Harness 权限控制。', codexPolicyHint: '对话全程加密，远程操作受 CodeX 权限控制。', you: '你', system: '系统', generating: '深度求索中', codexGenerating: '正在思考', stopping: '正在停止', reasoning: '思考', reasoningActive: '思考中', reasoningExpand: '展开思考过程', reasoningCollapse: '收起思考过程', failed: '未完成', completed: '已完成', toolCall: '调用内容', toolResult: '执行结果', toolExpand: (name: string) => `查看“${name}”详情`, toolCollapse: (name: string) => `收起“${name}”详情`, toolTruncated: '内容过长，仅显示前 64 KB。', denied: '已拒绝', allowedOnce: '已允许本次操作', approvalHandled: '已在其他设备处理', permissionTitle: '是否允许这次操作？', permissionScope: '允许后仅对当前请求生效，其他操作仍需要你确认。', allowOnce: '允许这一次', deny: '不允许', answered: '已回答', questionCancelled: '问题已取消', questionTitle: 'DeepSeek Harness 需要你确认', answerToContinue: '回答后将继续执行', submitAnswer: '提交回答', welcomeSlogan: '探索未至之境', moreActions: '更多操作', openWorkspaces: '工作区', welcomeBadge: '预览版', takePhoto: '拍照', photos: '相册', files: '文件', mode: '模式', selectMode: '选择模式', modeDefault: '默认', reasoningEffort: '推理强度', reasoningEffortDefault: '默认', toolAccess: '工具访问', quickPrompts: '快捷提示词', toolPrompts: '提示词', toolFilesDescription: '查看电脑上的文件和目录', toolTerminalDescription: '在电脑上运行命令', toolPromptsDescription: '常用提示词，点一下直接发送', toolPromptEdit: '编辑提示词', toolPromptEditDescription: '增加、删除或修改常用提示词', toolPromptAdd: '新建提示词', toolPromptEditTitle: (title: string) => `编辑“${title}”`, toolPromptTitlePlaceholder: '提示词名称', toolPromptTextPlaceholder: '提示词内容', toolPromptSave: '保存', toolPromptSaveFailedTitle: '无法保存提示词', toolPromptSaveFailedBody: '本地存储写入失败，请重试。', toolPromptDeleteTitle: (title: string) => `删除“${title}”？`, toolPromptDeleteBody: '删除后不能恢复。', toolPromptEmptyTitle: '没有提示词', toolPromptEmptyBody: '点击「编辑提示词」增加常用提示词。', toolPromptSent: (title: string) => `已发送“${title}”`, toolPromptSendFailed: '发送失败，请检查连接后重试。', newChat: '新对话', newChatFailedTitle: '无法新建对话', newChatFailedBody: '请检查连接后重试。', selectWorkspace: '选择工作区', moveSessionHint: '把当前对话移到所选工作区', workspaceNone: '未分组', workspacePickerEmptyTitle: '还没有可用的工作区', workspacePickerEmptyBody: '在电脑端 DeepSeek Harness 中添加项目目录后，就可以把对话移进工作区。', manageWorkspaces: '管理工作区', moveStartedTitle: '这段对话不能直接移动', moveStartedBody: (name: string) => `这段对话已经在其他目录开始，工作目录不能更改。要在“${name}”中新建对话继续吗？`, moveStartedConfirm: '在该工作区新建对话', moveFailedTitle: '无法在该工作区新建对话', moveFailedBody: '请检查连接后重试。', modeLockedTitle: '无法切换模式', modeLockedBody: '这段对话已经开始，模式只能在开始之前更改。请新建对话后再选择。', modeSelectFailedBody: '模式切换没有成功，请检查连接后重试。', modeLoadFailed: '模式列表加载失败，请重新打开「更多操作」重试。', cameraPermissionTitle: '无法使用相机', cameraPermissionBody: '请在系统设置中允许 DSH Remote 使用相机。', filePickerFailedTitle: '无法读取文件', filePickerFailedBody: '请选择 PNG、JPEG、WebP 或 GIF 图片后重试。', permissionReadOnly: '仅可查看', permissionReadOnlyDescription: '只能读取；修改文件和运行命令都需要你逐次确认。', permissionWorkspaceWrite: '工作区内修改', permissionWorkspaceWriteDescription: '可在当前工作区内写入文件和运行命令；更广泛的访问仍需确认。', permissionFullAccess: '完全权限', permissionFullAccessDescription: '不再逐次确认，可直接修改文件和运行命令。只建议在你信任当前任务时使用。', presetStandardName: '标准模式', presetStandardDescription: '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。', presetPtcName: 'PTC 模式', presetPtcDescription: '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。', presetMinimalName: '极简模式', presetMinimalDescription: 'Agent 仅使用终端工具完成任务，适合测试和对比其基础表现。', presetCordisName: '创造模式', presetCordisDescription: '用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。', welcomeTitle: '继续这段对话', welcomeBody: '告诉 DeepSeek Harness 你想检查、解释或修改什么，也可以添加图片。如果需要你确认操作，会直接显示在对话中。', codexWelcomeTitle: '继续 CodeX 对话', codexWelcomeBody: '告诉 CodeX 你想检查、解释或修改什么，也可以添加图片。命令或文件修改需要确认时，会直接显示在对话中。',
     codexWorkspaceWrite: '工作区写入', codexWorkspaceWriteDescription: '可写入当前项目；更广泛的命令和文件访问仍需单次确认。', codexFullAccess: '完全访问', codexFullAccessDescription: '允许 CodeX 访问电脑上的全部文件，后续操作不再逐次确认。', codexCommand: 'CodeX 命令', codexFileChange: 'CodeX 文件修改', codexWebSearch: 'CodeX 网页搜索', codexSubagent: 'CodeX 子 Agent', codexPlan: 'CodeX 计划', codexOperation: 'CodeX 操作', codexError: 'CodeX 执行失败。',
   },
   mention: {
@@ -144,7 +144,78 @@ const zhCN = {
     usageUnavailable: '用量不可用', timeUnavailable: '时间不可用', usage: '真实用量', input: '输入', output: '输出',
     cacheRead: '缓存读取', cacheWrite: '缓存写入', reasoning: '推理', total: '总计',
   },
+  chatProcess: {
+    processActivity: {
+      "thinking": {
+        "running": "正在分析请求",
+        "done": "已完成分析"
+      },
+      "read": {
+        "running": "正在读取文件",
+        "done": "已读取文件"
+      },
+      "readImage": {
+        "running": "正在读取图片",
+        "done": "已读取图片"
+      },
+      "write": {
+        "running": "正在写入文件",
+        "done": "已写入文件"
+      },
+      "search": {
+        "running": "正在搜索代码",
+        "done": "已搜索代码"
+      },
+      "edit": {
+        "running": "正在编辑文件",
+        "done": "修改了文件"
+      },
+      "commands": {
+        "running": "正在运行命令",
+        "done": "执行了命令"
+      },
+      "code": {
+        "running": "正在运行代码",
+        "done": "运行了代码"
+      },
+      "webSearch": {
+        "running": "正在搜索网页",
+        "done": "已搜索网页"
+      },
+      "webFetch": {
+        "running": "正在访问网页",
+        "done": "已访问网页"
+      },
+      "subagents": {
+        "running": "正在协调子智能体",
+        "done": "已协调子智能体"
+      },
+      "plan": {
+        "running": "正在更新计划",
+        "done": "更新了计划"
+      },
+      "questions": {
+        "running": "等待你的操作",
+        "done": "向用户提出了问题"
+      },
+      "tools": {
+        "running": "正在调用工具",
+        "done": "已调用工具"
+      }
+    },
+    stopped: "已停止",
+    join: "，",
+    more: "等",
+    sharedPrefix: '已',
+    joinTwo: (first: string, second: string) => `${first}并${second}`,
+    toolTitles: {
+      bash: '运行命令', pwsh: '运行命令', read: '读取', read_image: '读取图片', write: '写入', edit: '编辑',
+      apply_patch: '编辑', grep: '搜索文件内容', glob: '查找文件', run_code: '代码', web_search: '网页搜索', web_fetch: '网页获取',
+    },
+  },
   trajectory: {
+    expand: '展开记录', collapse: '收起记录', clearSearch: '清空搜索', attachments: (count: number) => `${count} 张图片`,
+    noText: '无文本内容',
     open: '切换到轨迹模式', close: '切换到对话模式', title: '轨迹', all: '全部', system: '系统', user: '用户',
     context: '上下文', assistant: '助手', tool: '工具', search: '搜索消息、工具或轮次', turn: '轮次', empty: '没有匹配的已加载轨迹',
     loadedOnly: '仅显示已加载的真实消息；加载更早记录可扩展轨迹。',

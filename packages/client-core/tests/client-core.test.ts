@@ -623,6 +623,27 @@ class ScriptedCore {
 }
 
 describe('HarnessAlphaClient', () => {
+  it('ignores a superseded follow snapshot and restores only the latest subscription', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, frame => frames.push(frame))
+    const first = client.sessionHistory('old').then(value => value, error => error)
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const oldId = core.streamIdFor('session/follow')
+    const second = client.sessionHistory('new')
+    await vi.waitFor(() => expect(core.rpcCalls.filter(call => call.method === 'harness.remote.stream.open')).toHaveLength(2))
+    const latest = core.rpcCalls.filter(call => call.method === 'harness.remote.stream.open').at(-1)!.params as { streamId: string }
+    core.emit({ event: 'harness.remote.frame', data: { streamId: oldId, hasValue: true,
+      value: { type: 'snapshot', cursor: 1, records: [], projections: { asOfSeq: 1, values: { permissions: { currentValue: 'stale' } } } } } })
+    core.emit({ event: 'harness.remote.frame', data: { streamId: latest.streamId, hasValue: true,
+      value: { type: 'snapshot', cursor: 10, records: [], hasMore: false, projections: { asOfSeq: 10, values: { permissions: { currentValue: 'read-only' } } } } } })
+    expect(await first).toMatchObject({ code: 'CANCELLED' })
+    expect(await second).toEqual({ events: [], hasMore: false, throughSeq: 10 })
+    expect(frames).toMatchObject([{ payload: { sessionId: 'new', key: 'permissions', value: { currentValue: 'read-only' } } }])
+    expect(frames).toHaveLength(1)
+    await client.close()
+  })
+
   it('normalizes legacy code preset in session list projections', async () => {
     const core = new ScriptedCore()
     const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
@@ -749,6 +770,7 @@ describe('HarnessAlphaClient', () => {
 
     await expect(history).resolves.toEqual({
       hasMore: false,
+      throughSeq: 9,
       events: [
         { event: { type: 'assistant/chunk', seq: 2, time: 100, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'hel' } } } },
         { event: { type: 'assistant/chunk', seq: 3, time: 105, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'lo' } } } },
@@ -785,7 +807,7 @@ describe('HarnessAlphaClient', () => {
     await expect(history).resolves.toEqual({ events: [{ event: {
       type: 'tool/result', seq: 4, time: 100, data: {}, sourceEventSeqs: [3],
       surfaceOp: { op: 'replace', startSeq: 3, endSeq: 3 },
-    } }], hasMore: false })
+    } }], hasMore: false, throughSeq: 4 })
 
     core.emit({ event: 'harness.remote.frame', data: { streamId, hasValue: true, value: {
       type: 'assistant-stream', frame: {
