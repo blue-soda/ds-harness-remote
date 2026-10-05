@@ -83,8 +83,19 @@ describe('QR OAuth login', () => {
     // The minted account token authenticates the profile endpoint…
     const me = await fetch(`${base}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${completed.token}` } })
     expect(me.status).toBe(200)
-    // …and the claim is single-use.
-    expect((await fetch(`${base}/api/v1/auth/oauth/qr/${encodeURIComponent(session.qrId)}`)).status).toBe(404)
+    // …the claim is single-use: a second poll reports an expired session, never a token.
+    const replayed = await (await fetch(`${base}/api/v1/auth/oauth/qr/${encodeURIComponent(session.qrId)}`)).json() as { status: string; token?: string }
+    expect(replayed.status).toBe('expired')
+    expect(replayed.token).toBeUndefined()
+  })
+
+  it('reports an unknown QR id as expired rather than a protocol error', async () => {
+    await start({ oauth: { provider: 'mock' } })
+    // The pending map is in-memory, so a restart loses sessions; the client must
+    // still get an actionable answer instead of a raw METHOD_NOT_FOUND.
+    const response = await fetch(`${base}/api/v1/auth/oauth/qr/${encodeURIComponent('github-qr-never-issued-0000000000000000')}`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'expired' })
   })
 
   it('does not create an account for an unbound identity unless explicitly enabled', async () => {

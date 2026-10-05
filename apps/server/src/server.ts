@@ -257,7 +257,11 @@ export function createRemoteServer(config: Config) {
       if (oauth === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
       const qrId = decodeURIComponent(path.slice('/api/v1/auth/oauth/qr/'.length))
       const session = qrSessions.get(qrId)
-      if (session === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
+      // An unknown id is reported as expired rather than as a protocol error: the
+      // pending map is in-memory, so a restart drops sessions, and a client that
+      // polls a second time after an expiry would otherwise surface a raw
+      // METHOD_NOT_FOUND. Answering "expired" leaks nothing an id probe could use.
+      if (session === undefined) { json(res, 200, { status: 'expired' }); return }
       if (session.expires <= Date.now()) { qrSessions.delete(qrId); json(res, 200, { status: 'expired' }); return }
       if (session.claimed === undefined) { json(res, 200, { status: 'pending' }); return }
       // Claim once: the account token is minted on the first poll after completion.
