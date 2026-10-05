@@ -488,6 +488,7 @@ const en = {
   signInClientDescription: 'Connect once. Available anytime.',
   deepseekSignIn: 'Sign in with DeepSeek account',
   deepseekSignInWaiting: 'Finish signing in to DeepSeek in the browser tab that just opened.',
+  deepseekSignInOpen: 'Open the sign-in page',
   deepseekSignInTimeout: 'DeepSeek sign-in was not completed. Try again.',
   changeServerUrl: 'Change address',
   startSignIn: 'Start sign-in',
@@ -736,6 +737,7 @@ const zh: Record<keyof typeof en, string> = {
   signInClientDescription: '一次连接，随时可用。',
   deepseekSignIn: '使用 DeepSeek 账号登录',
   deepseekSignInWaiting: '请在弹出的浏览器标签页中完成 DeepSeek 登录。',
+  deepseekSignInOpen: '手动打开登录页',
   deepseekSignInTimeout: 'DeepSeek 登录未完成，请重试。',
   changeServerUrl: '修改地址',
   startSignIn: '开始登录',
@@ -1978,17 +1980,24 @@ window.__ModuleLoader__.load({
         // Sign in with the DeepSeek account DSH is already using. The Server
         // verifies the grant against the platform instead of trusting this client.
         if (loginServerUrl.trim() === '') return
+        // The tab is opened while the click is still being handled, because a
+        // window opened after an await is treated as an unwanted popup and
+        // silently dropped. It is closed again when no sign-in is needed.
+        const tab = window.open('', '_blank')
+        if (tab !== null) { try { tab.opener = null } catch { /* cross-origin handle */ } }
         setBusy(true)
         setError(undefined)
         try {
           let state = await requestDeepSeekSignIn()
           if (state.pending) {
-            // The page is opened here, but browsers may treat a window opened
-            // after an await as an unwanted popup, so the link stays on screen
-            // until the flow settles either way.
             if (state.authorizeUrl !== undefined) {
+              // Keep the address on screen: if the tab was blocked after all,
+              // a click on this link is a user gesture and always allowed.
               setPendingAuthorizeUrl(state.authorizeUrl)
-              window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+              if (tab === null || tab.closed) window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+              else tab.location.replace(state.authorizeUrl)
+            } else {
+              tab?.close()
             }
             setAwaitingDeepSeek(true)
             try {
@@ -2001,6 +2010,9 @@ window.__ModuleLoader__.load({
               setPendingAuthorizeUrl(undefined)
             }
             if (state.pending) throw new Error(t('deepseekSignInTimeout'))
+          } else {
+            // No authorization was needed, so the blank tab must not be left behind.
+            tab?.close()
           }
           setDevices(await props.control<RemoteDevice[]>('devices'))
           setStatus(await props.control<RemoteStatus>('status'))
@@ -2252,7 +2264,8 @@ window.__ModuleLoader__.load({
                       t('deepseekSignInWaiting'),
                       pendingAuthorizeUrl === undefined ? null : React.createElement('a', {
                         href: pendingAuthorizeUrl, target: '_blank', rel: 'noreferrer',
-                      }, t('openInBrowser'))) : null)) : null,
+                        style: { marginLeft: '6px', color: 'var(--dsw-alias-brand-primary)' },
+                      }, t('deepseekSignInOpen'))) : null)) : null,
                 needsAuthorization ? null : React.createElement(React.Fragment, null,
                 selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading' },

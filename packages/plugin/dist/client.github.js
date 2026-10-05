@@ -1986,6 +1986,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClientDescription: "Connect once. Available anytime.",
     deepseekSignIn: "Sign in with DeepSeek account",
     deepseekSignInWaiting: "Finish signing in to DeepSeek in the browser tab that just opened.",
+    deepseekSignInOpen: "Open the sign-in page",
     deepseekSignInTimeout: "DeepSeek sign-in was not completed. Try again.",
     changeServerUrl: "Change address",
     startSignIn: "Start sign-in",
@@ -2231,6 +2232,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClientDescription: "\u4E00\u6B21\u8FDE\u63A5\uFF0C\u968F\u65F6\u53EF\u7528\u3002",
     deepseekSignIn: "\u4F7F\u7528 DeepSeek \u8D26\u53F7\u767B\u5F55",
     deepseekSignInWaiting: "\u8BF7\u5728\u5F39\u51FA\u7684\u6D4F\u89C8\u5668\u6807\u7B7E\u9875\u4E2D\u5B8C\u6210 DeepSeek \u767B\u5F55\u3002",
+    deepseekSignInOpen: "\u624B\u52A8\u6253\u5F00\u767B\u5F55\u9875",
     deepseekSignInTimeout: "DeepSeek \u767B\u5F55\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u3002",
     changeServerUrl: "\u4FEE\u6539\u5730\u5740",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
@@ -3102,28 +3104,34 @@ Minimum version required to store current data is: ` + bestVersion + `.
           });
           return result?.status === "deepseek-sign-in-required" ? { pending: !0, ...typeof result.authorizeUrl == "string" ? { authorizeUrl: result.authorizeUrl } : {} } : { pending: !1 };
         }, signInClient = async () => {
-          if (loginServerUrl.trim() !== "") {
-            setBusy(!0), setError(void 0);
+          if (loginServerUrl.trim() === "") return;
+          let tab = window.open("", "_blank");
+          if (tab !== null)
             try {
-              let state = await requestDeepSeekSignIn();
-              if (state.pending) {
-                state.authorizeUrl !== void 0 && (setPendingAuthorizeUrl(state.authorizeUrl), window.open(state.authorizeUrl, "_blank", "noopener,noreferrer")), setAwaitingDeepSeek(!0);
-                try {
-                  for (let poll = 0; poll < 40 && state.pending; poll++)
-                    await new Promise((resolve) => {
-                      setTimeout(resolve, 3e3);
-                    }), state = await requestDeepSeekSignIn();
-                } finally {
-                  setAwaitingDeepSeek(!1), setPendingAuthorizeUrl(void 0);
-                }
-                if (state.pending) throw new Error(t("deepseekSignInTimeout"));
-              }
-              setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
-            } catch (reason) {
-              setError(messageOf(reason));
-            } finally {
-              setBusy(!1);
+              tab.opener = null;
+            } catch {
             }
+          setBusy(!0), setError(void 0);
+          try {
+            let state = await requestDeepSeekSignIn();
+            if (state.pending) {
+              state.authorizeUrl !== void 0 ? (setPendingAuthorizeUrl(state.authorizeUrl), tab === null || tab.closed ? window.open(state.authorizeUrl, "_blank", "noopener,noreferrer") : tab.location.replace(state.authorizeUrl)) : tab?.close(), setAwaitingDeepSeek(!0);
+              try {
+                for (let poll = 0; poll < 40 && state.pending; poll++)
+                  await new Promise((resolve) => {
+                    setTimeout(resolve, 3e3);
+                  }), state = await requestDeepSeekSignIn();
+              } finally {
+                setAwaitingDeepSeek(!1), setPendingAuthorizeUrl(void 0);
+              }
+              if (state.pending) throw new Error(t("deepseekSignInTimeout"));
+            } else
+              tab?.close();
+            setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
+          } catch (reason) {
+            setError(messageOf(reason));
+          } finally {
+            setBusy(!1);
           }
         }, openLocalWorkspaces = async () => {
           setBusy(!0), setError(void 0);
@@ -3366,8 +3374,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
                       pendingAuthorizeUrl === void 0 ? null : React.createElement("a", {
                         href: pendingAuthorizeUrl,
                         target: "_blank",
-                        rel: "noreferrer"
-                      }, t("openInBrowser"))
+                        rel: "noreferrer",
+                        style: { marginLeft: "6px", color: "var(--dsw-alias-brand-primary)" }
+                      }, t("deepseekSignInOpen"))
                     ) : null
                   )
                 ) : null,
