@@ -181,6 +181,14 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 锁不按时间强行抢占；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。
 核心测试覆盖多进程刷新互斥与鉴权恢复状态机，Windows 双实例实机验证仍待完成。
 
+**登出会消耗一个设备身份**：`clearClientAuthorization()` 先 `revokeCurrentDevice()` 再
+`identities.reset()`，所以每次登出都会吊销当前设备**并轮换本机身份**（新 `deviceId` 与密钥对），
+下次登录必然注册成新设备。换身份是必需的——被吊销的设备用原 `identityKey` 重新注册会被
+`DEVICE_REVOKED` 拒绝。自部署 Server 只置位 `revoked`、**不自动清理**，也没有每账号设备数上限，
+所以反复登出不会锁死任何人，但 `state.json` 会持续累积（每次登出留下 host/client 各一条死记录），
+且身份更换会使已 pin 该设备的对端信任失效。不要把"登出再登录"当排障手段；运行期间不要直接编辑
+`state.json`（会被内存状态覆盖）。机制与代价见 `docs/plugin-integration.md` §6.1。
+
 ## Native sidebar and development preview (2026-09-20)
 
 开发依赖升级到 Harness `0.2.0-rc.1`（同时兼容 `0.1.7-rc.1`），运行时按能力检测同时支持 ≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径（`typeof settings.register === 'function'` 分流）。终端与 loopback 设置只能在 Host 本地修改，`settings/update|replace|mutate` 禁止远程修改 `ds-harness-remote` 和 `dsh-remote`。终端默认开启；loopback 默认无端口。「远程终端」开关切换即保存并立即更新运行时拦截，「保存访问设置」按钮只提交 Loopback 端口（位于端口输入框右侧）；两者都无需重启 Host。预览入口位于 Remote Header「预览服务」，第一版限 Desktop / 连接本机 Harness 的浏览器；不把本机预览 URL 作为远程 Web 或 Android 可用地址。跨机、Windows 和真实网络热更新回归仍需另行验证。
