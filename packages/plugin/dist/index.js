@@ -19118,7 +19118,7 @@ function nodeBinaryCandidates() {
   };
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
-  add3(process.execPath);
+  if (process.versions.electron === void 0) add3(process.execPath);
   for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join3(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");

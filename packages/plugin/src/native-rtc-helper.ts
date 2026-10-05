@@ -119,7 +119,12 @@ function nodeBinaryCandidates(): string[] {
   }
   add(process.env.DSH_REMOTE_NODE)
   add(process.env.NODE)
-  add(process.execPath)
+  // The helper refuses to run under Electron by construction, so the running
+  // executable is only a candidate when it is a plain Node build. Relying on the
+  // probe alone was not enough: an Electron that slips past it is spawned with
+  // node-only flags, and Electron then reads the helper *source* as the app path
+  // and fails with an unrelated "Unable to find Electron app" dialog.
+  if (process.versions.electron === undefined) add(process.execPath)
   for (const part of (process.env.PATH ?? '').split(delimiter)) add(join(part, process.platform === 'win32' ? 'node.exe' : 'node'))
   add('/opt/homebrew/bin/node')
   add('/usr/local/bin/node')
