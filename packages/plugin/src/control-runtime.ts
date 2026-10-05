@@ -30,6 +30,18 @@ export interface PluginAssociation {
 }
 
 /**
+ * Host-side source of the DSH DeepSeek account grant.
+ *
+ * The grant is read from the account service on demand and never cached here:
+ * it is a bearer credential for the user's DeepSeek account, so the plugin
+ * forwards it once and forgets it.
+ */
+export interface DeepSeekSessionSource {
+  /** The signed-in account's platform grant, or undefined when signed out. */
+  read(): Promise<{ token: string } | undefined>
+}
+
+/**
  * Live read/write face of the plugin's profile-owned entry Config.
  *
  * DSH 0.1.7-rc.1 (DSH-0.1.7-RC1-04) removed the settings-namespace registry
@@ -53,6 +65,7 @@ export class PluginControlRuntime {
     private readonly settings: PluginSettingsBinding | undefined,
     private readonly client: ClientModeRuntime | undefined,
     private readonly host: HostAuthorizationControl | undefined,
+    private readonly deepseekSession: DeepSeekSessionSource | undefined = undefined,
   ) {}
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -154,6 +167,17 @@ export class PluginControlRuntime {
     let authorization
     if (value.role === 'host' && typeof value.registrationCode === 'string' && value.registrationCode.trim() !== '') {
       authorization = await api.authorizeHostWithCode(identity, value.registrationCode)
+    } else if (value.provider === 'deepseek') {
+      // Sign in with the DeepSeek account DSH is already using. The Server
+      // confirms the grant with the platform, so it never trusts this claim.
+      if (this.deepseekSession === undefined) {
+        throw new ClientModeError('METHOD_NOT_ALLOWED', 'DeepSeek account sign-in is unavailable in this profile.')
+      }
+      const session = await this.deepseekSession.read()
+      if (session === undefined) {
+        throw new ClientModeError('AUTH_INVALID', 'Sign in to your DeepSeek account in DSH, then try again.')
+      }
+      authorization = await api.authorizeWithDeepSeek(identity, session.token)
     } else {
       if (typeof value.email !== 'string' || typeof value.password !== 'string') {
         throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required for account authorization.')

@@ -129,6 +129,12 @@ type OAuthProvider = 'wechat' | 'zhihu' | 'github'
  * so the browser bundle never pulls in the Node-side server client.
  */
 const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['github']
+/**
+ * QR sign-in is not offered: this deployment signs in with the DeepSeek account
+ * that DSH is already using. The provider machinery stays intact behind this
+ * switch so the QR path can be restored without rewriting the effects.
+ */
+const QR_LOGIN_ENABLED = false
 type EnabledQrProvider = (typeof ENABLED_QR_PROVIDERS)[number]
 type LoginMethod = OAuthProvider | 'password'
 
@@ -480,6 +486,7 @@ const en = {
   clientSignInHint: 'Sign in to this Server to list your remote Hosts.',
   signInClient: 'DeepSeek Harness Remote',
   signInClientDescription: 'Connect once. Available anytime.',
+  deepseekSignIn: 'Sign in with DeepSeek account',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
   allowControlDevice: 'Allow control of device',
@@ -724,6 +731,7 @@ const zh: Record<keyof typeof en, string> = {
   clientSignInHint: '登录 Server 后即可查看自己的远端主机。',
   signInClient: 'DeepSeek Harness Remote',
   signInClientDescription: '一次连接，随时可用。',
+  deepseekSignIn: '使用 DeepSeek 账号登录',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
   allowControlDevice: '允许控制设备',
@@ -1649,12 +1657,12 @@ window.__ModuleLoader__.load({
       }
 
       React.useEffect(() => {
-        if (!open || !needsAuthorization || loginMethod === 'password' || qrSession !== undefined || qrExpired) return
+        if (!QR_LOGIN_ENABLED || !open || !needsAuthorization || loginMethod === 'password' || qrSession !== undefined || qrExpired) return
         void startQrLogin(loginMethod)
       }, [open, needsAuthorization, loginMethod, qrSession, qrExpired])
 
       React.useEffect(() => {
-        if (!open || loginMethod === 'password' || qrSession === undefined) return
+        if (!QR_LOGIN_ENABLED || !open || loginMethod === 'password' || qrSession === undefined) return
         let active = true
         let polling = false
         let settled = false
@@ -1922,15 +1930,16 @@ window.__ModuleLoader__.load({
       }
 
       const signInClient = async (): Promise<void> => {
-        if (email.trim() === '' || password === '' || loginServerUrl.trim() === '') return
+        // Sign in with the DeepSeek account DSH is already using. The Server
+        // verifies the grant against the platform instead of trusting this client.
+        if (loginServerUrl.trim() === '') return
         setBusy(true)
         setError(undefined)
         try {
           await props.control('settings.configure', {
             role: 'client',
             serverUrl: loginServerUrl.trim(),
-            email: email.trim(),
-            password,
+            provider: 'deepseek',
           })
           setDevices(await props.control<RemoteDevice[]>('devices'))
           setStatus(await props.control<RemoteStatus>('status'))
@@ -2157,54 +2166,13 @@ window.__ModuleLoader__.load({
                   React.createElement('div', { className: 'dshRemoteLoginHeading' },
                     React.createElement('strong', { className: 'dshRemoteLoginTitle' }, t('signInClient')),
                     React.createElement('span', null, t('signInClientDescription'))),
-                  React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
-                    ...orderedQrProviders.map(qrLoginTab)),
-                  loginMethod !== 'password'
-                    ? React.createElement('div', {
-                      className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
-                      'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
-                    },
-                      qrImage === undefined
-                        ? React.createElement('div', { className: 'dshRemoteQrPlaceholder', 'aria-busy': busy },
-                          qrExpired ? React.createElement('p', null, t('qrLoginExpired')) : React.createElement('span', null, t('checkingConnection')))
-                        : qrSession !== undefined
-                          ? React.createElement('a', {
-                            className: 'dshRemoteQrOpen', href: qrSession.scanUrl,
-                            target: '_blank', rel: 'noopener noreferrer',
-                            'aria-label': t('openInBrowser'),
-                          },
-                          React.createElement('img', {
-                            src: qrImage, width: 184, height: 184,
-                            alt: t(QR_PROVIDER_SCAN_LABELS[loginMethod]),
-                          }),
-                          React.createElement('span', null, t('openInBrowser'), ' ↗'))
-                          : null,
-                      React.createElement('strong', null, t(QR_PROVIDER_SCAN_LABELS[loginMethod])),
-                      React.createElement('p', null, t('scanLoginHint')),
-                      status?.serverUrl === undefined ? null : React.createElement('p', { className: 'dshRemoteServiceAddress' },
-                        t('currentServiceAddress'), ' ', React.createElement('a', {
-                          href: status.serverUrl, target: '_blank', rel: 'noreferrer',
-                        }, status.serverUrl)),
-                      qrExpired ? React.createElement('button', {
-                        type: 'button', disabled: busy, onClick: () => setQrExpired(false),
-                      }, t('refreshQrCode')) : null)
-                    : React.createElement('div', {
-                      className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
-                      'aria-labelledby': 'dsh-remote-password-tab',
-                    },
-                      React.createElement('input', {
-                        type: 'url', value: loginServerUrl, disabled: busy, autoComplete: 'url', placeholder: t('serverUrl'),
-                        'aria-label': t('serverUrl'), onChange: (event: Event) => setLoginServerUrl((event.target as HTMLInputElement).value),
-                      }),
-                      React.createElement('input', {
-                        type: 'email', value: email, disabled: busy, autoComplete: 'username', placeholder: t('account'),
-                        'aria-label': t('account'), onChange: (event: Event) => setEmail((event.target as HTMLInputElement).value),
-                      }),
-                      React.createElement('input', {
-                        type: 'password', value: password, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
-                        'aria-label': t('password'), onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
-                      }),
-                      React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')))) : null,
+                  React.createElement('div', { className: 'dshRemoteClientLogin' },
+                    React.createElement('input', {
+                      type: 'url', value: loginServerUrl, disabled: busy, autoComplete: 'url', placeholder: t('serverUrl'),
+                      'aria-label': t('serverUrl'), onChange: (event: Event) => setLoginServerUrl((event.target as HTMLInputElement).value),
+                    }),
+                    React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '', onClick: () => void signInClient() },
+                      t(busy ? 'signingIn' : 'deepseekSignIn')))) : null,
                 needsAuthorization ? null : React.createElement(React.Fragment, null,
                 selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading' },

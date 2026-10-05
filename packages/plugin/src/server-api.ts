@@ -155,6 +155,35 @@ export class HostServerApi {
     }
   }
 
+  /**
+   * Authorize this device with the DSH DeepSeek account grant.
+   *
+   * The grant is forwarded once so the Server can ask the account platform who
+   * it belongs to; the Server then discards it and issues its own account
+   * session, exactly like a password sign-in.
+   */
+  async authorizeWithDeepSeek(identity: HostIdentity, token: string): Promise<DeviceAuthorization> {
+    this.bindIdentity(identity)
+    if (token.trim().length === 0) {
+      throw new ServerApiError('INVALID_MESSAGE', 'A DeepSeek account grant is required.', false)
+    }
+    const login = validateWebLogin(await this.publicRequest<unknown>('/api/v1/auth/deepseek', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }))
+    await this.register(identity, {
+      accountToken: login.token,
+      account: login.account,
+      authorizationMethod: 'account',
+    })
+    return {
+      method: 'account',
+      account: login.account,
+      expiresAt: login.expiresAt,
+      isAdmin: login.isAdmin,
+    }
+  }
+
   async startOAuthQrLogin(provider: OAuthProvider = 'wechat'): Promise<OAuthQrSession> {
     const value = requireRecord(await this.publicRequest<unknown>(`/api/v1/auth/oauth/qr/start?provider=${provider}`, {
       method: 'POST',

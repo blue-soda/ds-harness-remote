@@ -8,6 +8,7 @@ import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@ds
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 import { resolveOAuthProvider, type OAuthProvider, type OAuthProviderConfig } from './oauth.js'
+import { createDeepSeekVerifier, type DeepSeekLoginOptions } from './deepseek.js'
 
 export interface Config {
   /** Bootstrap account seeded on every start; its password change rotates that account's tokens. */
@@ -36,8 +37,15 @@ export interface Config {
   passwordLoginDisabled?: boolean
   /** Overrides fetch for the WeChat token exchange; used by tests. */
   oauthFetch?: typeof fetch
+  /**
+   * DeepSeek account login. Absent (the default) leaves the endpoint unmounted;
+   * the grant a client presents is verified against the platform and discarded.
+   */
+  deepseek?: DeepSeekLoginOptions
 }
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
+/** A platform account grant, treated as an opaque bearer value. */
+const deepseekSchema = z.object({ token: z.string().min(1).max(4096) }).strict()
 const registerSchema = z.object({
   email: z.string().min(1).max(254),
   password: z.string().min(12).max(1024),
@@ -80,6 +88,7 @@ export function createRemoteServer(config: Config) {
   const oauth = config.oauth === undefined
     ? undefined
     : resolveOAuthProvider(config.oauth, config.oauthFetch)
+  const deepseek = config.deepseek === undefined ? undefined : createDeepSeekVerifier(config.deepseek)
   /** Pending QR authorizations: qrId -> expiry and the origin that started it. */
   const qrSessions = new Map<string, { expires: number; origin: string; claimed?: string }>()
   /** Web sessions: digest -> owning account and expiry. */
@@ -220,6 +229,30 @@ export function createRemoteServer(config: Config) {
       if (!store.verifyAccount(accountName, credentials.password)) throw new ApiError('AUTH_INVALID', 401)
       const session = issueSession(res, accountName)
       json(res, 200, { ...profile(accountName), ...session }); return
+    }
+    if (method === 'POST' && path === '/api/v1/auth/deepseek') {
+      if (deepseek === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
+      rate(`deepseek:${req.socket.remoteAddress ?? ''}`, 30)
+      const { token } = deepseekSchema.parse(await body(req))
+      // The grant is only ever used to ask the platform who it belongs to. It is
+      // not stored, so a compromised Server yields accounts, not DeepSeek access.
+      let identity
+      try {
+        identity = await deepseek.verify(token)
+      } catch {
+        throw new ApiError('CONNECTION_FAILED', 502)
+      }
+      if (identity === undefined) throw new ApiError('AUTH_INVALID', 401)
+      const link = `deepseek:${identity.subject}`
+      let accountName = store.findAccountByOAuth(link)
+      if (accountName === undefined) {
+        if (config.deepseek?.createsAccounts !== true) throw new ApiError('AUTH_INVALID', 403)
+        if (store.listAccounts().length >= ACCOUNT_LIMIT) throw new ApiError('RATE_LIMITED', 429)
+        accountName = link
+        store.upsertAccount(accountName, secret())
+      }
+      store.linkOAuth(accountName, link)
+      json(res, 200, { ...profile(accountName), ...issueSession(res, accountName) }); return
     }
     if (method === 'POST' && path === '/api/v1/auth/register') {
       rate(`register:${req.socket.remoteAddress ?? ''}`, 10)

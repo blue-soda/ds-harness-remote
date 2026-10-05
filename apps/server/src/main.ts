@@ -39,6 +39,17 @@ const app = createRemoteServer({
   oauthCreatesAccounts: process.env.DSH_SERVER_OAUTH_CREATES_ACCOUNTS === 'true',
   // QR-only deployments keep one sign-in path, so no password can diverge.
   passwordLoginDisabled: process.env.DSH_SERVER_PASSWORD_LOGIN === 'off',
+  // DeepSeek account login is opt-in: it mounts an endpoint and calls the
+  // account platform, so it stays off until an operator asks for it.
+  ...(process.env.DSH_SERVER_DEEPSEEK_LOGIN === 'on'
+    ? {
+      deepseek: {
+        ...(process.env.DSH_SERVER_DEEPSEEK_PLATFORM?.trim() ? { platformOrigin: process.env.DSH_SERVER_DEEPSEEK_PLATFORM.trim() } : {}),
+        // A first-time grant creates its account only when explicitly allowed.
+        createsAccounts: process.env.DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS === 'true',
+      },
+    }
+    : {}),
 })
 app.server.listen(port, process.env.DSH_SERVER_HOST ?? '127.0.0.1', () => console.info(`Remote Server listening on port ${port}`))
 app.server.on('error', () => { console.error('Remote Server could not listen. Check address and port.'); process.exitCode = 1; app.gateway.close() })

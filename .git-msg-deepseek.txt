@@ -1,0 +1,25 @@
+feat: sign in with the DeepSeek account DSH already uses
+
+Self-hosted Server:
+- Add POST /api/v1/auth/deepseek: a client presents the platform grant DSH holds,
+  the Server asks the account platform who it belongs to, binds the account and
+  issues its own session. The grant is used only for that lookup and is never
+  persisted, so compromising the Server yields Server accounts, not DeepSeek
+  access.
+- Verified against the live platform: /auth-api/v0/users/current answers
+  {"code":40003} for a bad grant, and the WAF in front of it returns 429 to any
+  request without a browser User-Agent. A browser-shaped UA is therefore part of
+  the protocol, and a test asserts it so the regression cannot return silently.
+- Account creation for an unbound grant is off by default; a verified grant for
+  an unknown account is refused unless the operator opts in.
+
+Plugin:
+- Read the account session through the official deepseekAccount service and send
+  it through settings.configure, so the existing device registration and Host
+  auto-authorization path is reused unchanged.
+- Sign-in is now the DeepSeek account: the QR tabs, the password panel and its
+  effects are gone. QR machinery stays behind QR_LOGIN_ENABLED, and that switch
+  matters because the old effects fired on mount and would still call the Server.
+
+Verified: server check and 38 tests, plugin build, plugin tests 294 passed with
+the 5 pre-existing codex-domain Windows failures.

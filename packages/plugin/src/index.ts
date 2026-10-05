@@ -12,7 +12,7 @@ import {
   type EntryConfig,
   type ResolvedConfig,
 } from './config.js'
-import { PluginControlRuntime, type PluginSettingsBinding } from './control-runtime.js'
+import { PluginControlRuntime, type DeepSeekSessionSource, type PluginSettingsBinding } from './control-runtime.js'
 import type { HostWebServerLike } from './control-route.js'
 import { IdentityStore, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
@@ -22,6 +22,17 @@ import { ServerCredentialStore } from './server-credentials.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
+
+/**
+ * The official DeepSeek account service as this plugin needs it.
+ *
+ * Only the platform session is read; the grant it carries is forwarded to the
+ * Server for verification and is never stored by the plugin.
+ */
+interface DeepSeekAccountLike {
+  getPlatformSession(): Promise<{ token: string } | null>
+}
+
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
 import {
   installTuiRemoteCommand,
@@ -207,6 +218,18 @@ async function activate(
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
+  // The official DeepSeek account service owns the browser-issued account grant.
+  // It is optional: profiles without it simply offer no DeepSeek sign-in, and the
+  // grant is read per call rather than held.
+  const deepseekAccount = ctx.get('deepseekAccount', false) as DeepSeekAccountLike | undefined
+  const deepseekSession: DeepSeekSessionSource | undefined = deepseekAccount === undefined
+    ? undefined
+    : {
+      read: async () => {
+        const session = await deepseekAccount.getPlatformSession()
+        return session === null || session.token.length === 0 ? undefined : { token: session.token }
+      },
+    }
   const runtime = new HostPluginRuntime(
     config,
     hostIdentities,
@@ -236,7 +259,7 @@ async function activate(
 
   const controlRuntime = connection === undefined
     ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl)
+    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl, deepseekSession)
 
   ctx.provide('dshRemote', runtime)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)

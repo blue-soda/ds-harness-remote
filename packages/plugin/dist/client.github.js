@@ -1751,15 +1751,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
   }
 
   // src/client.ts
-  var clientModuleId = "ds-harness-remote", pendingWorkspaceSelectionKey = "dsh-remote:pending-workspace-selection", deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC", ENABLED_QR_PROVIDERS = ["github"], QR_PROVIDER_LABELS = {
+  var clientModuleId = "ds-harness-remote", pendingWorkspaceSelectionKey = "dsh-remote:pending-workspace-selection", deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC", ENABLED_QR_PROVIDERS = ["github"], QR_LOGIN_ENABLED = !1, QR_PROVIDER_LABELS = {
     wechat: "wechatLogin",
     github: "githubLogin",
     zhihu: "zhihuLogin"
-  }, QR_PROVIDER_SCAN_LABELS = {
-    wechat: "scanWithWeChat",
-    github: "scanWithGitHub",
-    zhihu: "scanWithZhihu"
-  }, defaultQrProvider = ENABLED_QR_PROVIDERS[0] ?? "wechat";
+  };
+  var defaultQrProvider = ENABLED_QR_PROVIDERS[0] ?? "wechat";
   function isEnabledQrProvider(provider) {
     return ENABLED_QR_PROVIDERS.includes(provider);
   }
@@ -1987,6 +1984,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     clientSignInHint: "Sign in to this Server to list your remote Hosts.",
     signInClient: "DeepSeek Harness Remote",
     signInClientDescription: "Connect once. Available anytime.",
+    deepseekSignIn: "Sign in with DeepSeek account",
     startSignIn: "Start sign-in",
     allowControlCurrentDevice: "Allow control of this device",
     allowControlDevice: "Allow control of device",
@@ -2228,6 +2226,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     clientSignInHint: "\u767B\u5F55 Server \u540E\u5373\u53EF\u67E5\u770B\u81EA\u5DF1\u7684\u8FDC\u7AEF\u4E3B\u673A\u3002",
     signInClient: "DeepSeek Harness Remote",
     signInClientDescription: "\u4E00\u6B21\u8FDE\u63A5\uFF0C\u968F\u65F6\u53EF\u7528\u3002",
+    deepseekSignIn: "\u4F7F\u7528 DeepSeek \u8D26\u53F7\u767B\u5F55",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
     allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
     allowControlDevice: "\u5141\u8BB8\u63A7\u5236\u8BBE\u5907",
@@ -2964,9 +2963,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
           }
         };
         React.useEffect(() => {
-          !open || !needsAuthorization || loginMethod === "password" || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod);
+          !QR_LOGIN_ENABLED || !open || !needsAuthorization || loginMethod === "password" || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod);
         }, [open, needsAuthorization, loginMethod, qrSession, qrExpired]), React.useEffect(() => {
-          if (!open || loginMethod === "password" || qrSession === void 0) return;
+          if (!QR_LOGIN_ENABLED || !open || loginMethod === "password" || qrSession === void 0) return;
           let active = !0, polling = !1, settled = !1, run = qrFlowRun.current, timer, poll = () => {
             polling || settled || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then(async (result) => {
               if (!(!active || settled || run !== qrFlowRun.current))
@@ -3086,14 +3085,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
         let chooseAnotherHost = () => {
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
         }, signInClient = async () => {
-          if (!(email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
+          if (loginServerUrl.trim() !== "") {
             setBusy(!0), setError(void 0);
             try {
               await props.control("settings.configure", {
                 role: "client",
                 serverUrl: loginServerUrl.trim(),
-                email: email.trim(),
-                password
+                provider: "deepseek"
               }), setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
             } catch (reason) {
               setError(messageOf(reason));
@@ -3302,64 +3300,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   ),
                   React.createElement(
                     "div",
-                    { className: "dshRemoteLoginTabs", role: "tablist" },
-                    ...orderedQrProviders.map(qrLoginTab)
-                  ),
-                  loginMethod !== "password" ? React.createElement(
-                    "div",
-                    {
-                      className: "dshRemoteQrLogin",
-                      role: "tabpanel",
-                      id: `dsh-remote-${loginMethod}-panel`,
-                      "aria-labelledby": `dsh-remote-${loginMethod}-tab`
-                    },
-                    qrImage === void 0 ? React.createElement(
-                      "div",
-                      { className: "dshRemoteQrPlaceholder", "aria-busy": busy },
-                      qrExpired ? React.createElement("p", null, t("qrLoginExpired")) : React.createElement("span", null, t("checkingConnection"))
-                    ) : qrSession !== void 0 ? React.createElement(
-                      "a",
-                      {
-                        className: "dshRemoteQrOpen",
-                        href: qrSession.scanUrl,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        "aria-label": t("openInBrowser")
-                      },
-                      React.createElement("img", {
-                        src: qrImage,
-                        width: 184,
-                        height: 184,
-                        alt: t(QR_PROVIDER_SCAN_LABELS[loginMethod])
-                      }),
-                      React.createElement("span", null, t("openInBrowser"), " \u2197")
-                    ) : null,
-                    React.createElement("strong", null, t(QR_PROVIDER_SCAN_LABELS[loginMethod])),
-                    React.createElement("p", null, t("scanLoginHint")),
-                    status?.serverUrl === void 0 ? null : React.createElement(
-                      "p",
-                      { className: "dshRemoteServiceAddress" },
-                      t("currentServiceAddress"),
-                      " ",
-                      React.createElement("a", {
-                        href: status.serverUrl,
-                        target: "_blank",
-                        rel: "noreferrer"
-                      }, status.serverUrl)
-                    ),
-                    qrExpired ? React.createElement("button", {
-                      type: "button",
-                      disabled: busy,
-                      onClick: () => setQrExpired(!1)
-                    }, t("refreshQrCode")) : null
-                  ) : React.createElement(
-                    "div",
-                    {
-                      className: "dshRemoteClientLogin",
-                      role: "tabpanel",
-                      id: "dsh-remote-password-panel",
-                      "aria-labelledby": "dsh-remote-password-tab"
-                    },
+                    { className: "dshRemoteClientLogin" },
                     React.createElement("input", {
                       type: "url",
                       value: loginServerUrl,
@@ -3369,25 +3310,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
                       "aria-label": t("serverUrl"),
                       onChange: (event) => setLoginServerUrl(event.target.value)
                     }),
-                    React.createElement("input", {
-                      type: "email",
-                      value: email,
-                      disabled: busy,
-                      autoComplete: "username",
-                      placeholder: t("account"),
-                      "aria-label": t("account"),
-                      onChange: (event) => setEmail(event.target.value)
-                    }),
-                    React.createElement("input", {
-                      type: "password",
-                      value: password,
-                      disabled: busy,
-                      autoComplete: "current-password",
-                      placeholder: t("password"),
-                      "aria-label": t("password"),
-                      onChange: (event) => setPassword(event.target.value)
-                    }),
-                    React.createElement("button", { type: "button", disabled: busy || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn"))
+                    React.createElement(
+                      "button",
+                      { type: "button", disabled: busy || loginServerUrl.trim() === "", onClick: () => void signInClient() },
+                      t(busy ? "signingIn" : "deepseekSignIn")
+                    )
                   )
                 ) : null,
                 needsAuthorization ? null : React.createElement(

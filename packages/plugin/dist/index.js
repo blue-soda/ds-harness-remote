@@ -18487,6 +18487,34 @@ var HostServerApi = class {
       isAdmin: login2.isAdmin
     };
   }
+  /**
+   * Authorize this device with the DSH DeepSeek account grant.
+   *
+   * The grant is forwarded once so the Server can ask the account platform who
+   * it belongs to; the Server then discards it and issues its own account
+   * session, exactly like a password sign-in.
+   */
+  async authorizeWithDeepSeek(identity, token) {
+    this.bindIdentity(identity);
+    if (token.trim().length === 0) {
+      throw new ServerApiError("INVALID_MESSAGE", "A DeepSeek account grant is required.", false);
+    }
+    const login2 = validateWebLogin(await this.publicRequest("/api/v1/auth/deepseek", {
+      method: "POST",
+      body: JSON.stringify({ token })
+    }));
+    await this.register(identity, {
+      accountToken: login2.token,
+      account: login2.account,
+      authorizationMethod: "account"
+    });
+    return {
+      method: "account",
+      account: login2.account,
+      expiresAt: login2.expiresAt,
+      isAdmin: login2.isAdmin
+    };
+  }
   async startOAuthQrLogin(provider = "wechat") {
     const value = requireRecord(await this.publicRequest(`/api/v1/auth/oauth/qr/start?provider=${provider}`, {
       method: "POST",
@@ -21561,12 +21589,13 @@ var ControlStatusStream = class {
 
 // src/control-runtime.ts
 var PluginControlRuntime = class {
-  constructor(config, identityDirectory, settings, client, host) {
+  constructor(config, identityDirectory, settings, client, host, deepseekSession = void 0) {
     this.config = config;
     this.identityDirectory = identityDirectory;
     this.settings = settings;
     this.client = client;
     this.host = host;
+    this.deepseekSession = deepseekSession;
   }
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
@@ -21660,6 +21689,15 @@ var PluginControlRuntime = class {
     let authorization;
     if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
       authorization = await api.authorizeHostWithCode(identity, value.registrationCode);
+    } else if (value.provider === "deepseek") {
+      if (this.deepseekSession === void 0) {
+        throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
+      }
+      const session = await this.deepseekSession.read();
+      if (session === void 0) {
+        throw new ClientModeError("AUTH_INVALID", "Sign in to your DeepSeek account in DSH, then try again.");
+      }
+      authorization = await api.authorizeWithDeepSeek(identity, session.token);
     } else {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
@@ -28207,6 +28245,13 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   const nativeTypertGateway = ctx.get("typertGateway");
   const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local();
   const subprocess = ctx.get("subprocess", false);
+  const deepseekAccount = ctx.get("deepseekAccount", false);
+  const deepseekSession = deepseekAccount === void 0 ? void 0 : {
+    read: async () => {
+      const session = await deepseekAccount.getPlatformSession();
+      return session === null || session.token.length === 0 ? void 0 : { token: session.token };
+    }
+  };
   const runtime = new HostPluginRuntime(
     config,
     hostIdentities,
@@ -28232,7 +28277,7 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       hostControl
     );
   }
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl);
+  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl, deepseekSession);
   ctx.provide("dshRemote", runtime);
   if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
   const tuiTarget = { runtime, config };
