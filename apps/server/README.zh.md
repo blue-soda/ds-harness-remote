@@ -94,7 +94,41 @@ DSH_SERVER_GITHUB_CLIENT_SECRET=...
 
 ### 无凭据时如何验证
 
-设 `DSH_SERVER_OAUTH_PROVIDER=mock`（当前部署即为该值）启用等价的本地 provider：`scanUrl` 指向本机确认页，确认后回调写入身份，整条 QR 轮询链路与真实 GitHub 完全一致。核心测试覆盖该路径与 GitHub 的 code→token→user 交换。
+设 `DSH_SERVER_OAUTH_PROVIDER=mock` 启用等价的本地 provider：`scanUrl` 指向本机确认页，确认后回调写入身份，整条 QR 轮询链路与真实 GitHub 完全一致。核心测试覆盖该路径与 GitHub 的 code→token→user 交换。
+
+### 中国大陆部署：必须解决 GitHub 出网
+
+授权码换 token 只能在 `github.com` 上完成（`api.github.com` 没有该端点），所以**服务器必须能出网访问 `github.com`**。大陆机器上这一步常会失败，症状是：
+
+- 用户在 GitHub 授权后跳回回调地址，浏览器**长时间挂起**，最终报"响应时间太长"；
+- 服务端日志没有明确错误（请求卡在出网，直到 provider 超时）。
+
+**根因**：GitHub 的 GeoDNS 会给大陆服务器返回亚洲节点（例如 `20.205.243.166`），而该节点在部分网络下**不可达**；换用 `223.5.5.5`、`119.29.29.29`、`8.8.8.8` 等解析器**得到的仍是同一个 IP**，因此没有 DNS 层面的解法。
+
+**处理办法**：把 `github.com` 与 `api.github.com` 钉定到一个实测可用的 IP。
+
+```bash
+# 1. 找一个可用 IP（换成候选地址反复测，成功应稳定在 1 秒内）
+curl -sS -m 8 --resolve github.com:443:140.82.112.3 -o /dev/null \
+  -w "http=%{http_code} time=%{time_total}\n" https://github.com/login/oauth/access_token
+
+# 2. 备份后钉定
+cp /etc/hosts /etc/hosts.bak-$(date +%Y%m%d-%H%M%S)
+printf '140.82.112.3 github.com # dsh-remote github pin\n140.82.112.5 api.github.com # dsh-remote github pin\n' >> /etc/hosts
+
+# 3. 重启服务并验证（应返回 JSON 错误而非超时；HTTP 200/401 都算通）
+systemctl restart ds-harness-remote
+curl -sS -m 10 -X POST https://github.com/login/oauth/access_token \
+  -H 'Content-Type: application/json' -d '{"client_id":"probe","client_secret":"probe","code":"probe"}'
+curl -sS -o /dev/null -w "api=%{http_code}\n" https://api.github.com/user
+```
+
+注意事项：
+
+- **不降低安全性**：这里钉的是 IP，TLS 仍按证书校验（`openssl s_client` 应显示 `Verify return code: 0 (ok)`），不存在中间人风险。
+- **会失效**：GitHub 更换地址后需要重新测一个可用 IP；如登录突然失败，先查这里。
+- **别挡住 SSH**：钉定后 `git@github.com` 仍走 22 端口。改前先确认目标 IP 的 22 端口可达（`/dev/tcp/<ip>/22`），否则服务器的 `git fetch` 会一起断掉。
+- **长期方案**：把 Server 部署在境外（香港/新加坡等）可完全避免此问题，也无需 ICP 备案。
 
 ### 微信登录
 

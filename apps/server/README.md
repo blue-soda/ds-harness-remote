@@ -43,19 +43,78 @@ Open <http://localhost:8080>. Set the same Server URL on your Host and Client, t
 
 | Variable | Purpose / default |
 | --- | --- |
-| `DSH_SERVER_ACCOUNT` | Required login account |
-| `DSH_SERVER_PASSWORD` | Required; at least 12 characters |
+| `DSH_SERVER_ACCOUNT` | Required; the bootstrap account, re-applied on every start |
+| `DSH_SERVER_PASSWORD` | Required; at least 12 characters. Changing it rotates that account's device tokens |
+| `DSH_SERVER_REGISTRATION_CODE` | Optional; at least 12 characters. **Without it account registration is closed**; when set, `POST /api/v1/auth/register` accepts the code to create an account |
+| `DSH_SERVER_OAUTH_PROVIDER` | Optional: `auto` (default, prefers GitHub) / `github` / `wechat` / `mock` / `off` |
+| `DSH_SERVER_GITHUB_CLIENT_ID` | GitHub OAuth App client id |
+| `DSH_SERVER_GITHUB_CLIENT_SECRET` | Matching client secret (sent only to GitHub) |
+| `DSH_SERVER_WECHAT_APP_ID` / `DSH_SERVER_WECHAT_APP_SECRET` | Optional WeChat provider (needs enterprise verification and an ICP-filed callback domain) |
+| `DSH_SERVER_OAUTH_CREATES_ACCOUNTS` | Optional, default off. When `true`, a first-time scan creates an account |
+| `DSH_SERVER_PASSWORD_LOGIN` | Set to `off` to refuse password sign-in entirely (QR-only deployment) |
 | `DSH_SERVER_PUBLIC_URL` | Browser-facing URL; default `http://localhost:8080` |
 | `DSH_SERVER_HOST` | Listen / port-binding address; default `127.0.0.1`, use `0.0.0.0` for LAN access |
 | `DSH_SERVER_PORT` | Default `8080` |
 | `DSH_SERVER_DATA_FILE` | Default `data/state.json`, relative to the working directory |
 
+**Accounts and isolation**: devices and tokens are namespaced per account, so the same `deviceId` may exist on several accounts and one account's password change only rotates its own tokens. Device discovery, pairing and presence are all scoped to a single account; a cross-account lookup returns 404. `DSH_SERVER_ACCOUNT` is only the bootstrap account — other accounts survive restarts. Registration is closed unless `DSH_SERVER_REGISTRATION_CODE` is set.
+
+**State-file upgrade**: the older single-account layout (`version: 1`) cannot be merged losslessly (two accounts may legitimately hold the same `deviceId`). On detection the server renames it to `state.json.v1.bak` and starts with no accounts — it never crashes and never deletes data — at the cost of devices re-registering and reauthorizing.
+
 For public access, use an HTTPS reverse proxy and set `DSH_SERVER_PUBLIC_URL` to your domain. The proxy must support WebSocket Upgrade at `/ws/v1/connect` with an idle timeout above 75 seconds.
+
+## GitHub QR sign-in
+
+```text
+POST /api/v1/auth/oauth/qr/start?provider=github   -> { qrId, scanUrl, expiresIn, provider }
+GET  /api/v1/auth/oauth/qr/<qrId>                  -> { status: pending | expired | complete, token? }
+GET  /api/v1/auth/oauth/github/callback            -> GitHub callback (server exchanges the code)
+```
+
+Register an OAuth App under Settings → Developer settings → OAuth Apps and set the **Authorization callback URL** to `https://<your-host>/api/v1/auth/oauth/github/callback`. This needs no enterprise verification, no ICP filing, no review and no fee; GitHub only requires the callback URL to match the registered value. The binding uses the numeric account id, not the login name, so a rename never orphans it.
+
+**Binding rules**: a scan yields only a third-party identity. By default only an already-bound identity may sign in; with `DSH_SERVER_OAUTH_CREATES_ACCOUNTS=true` an unbound identity creates the account `github:<id>`. Such an account has **no usable password** (internally random), so it can only ever sign in by scanning again.
+
+**Without credentials**: `DSH_SERVER_OAUTH_PROVIDER=mock` runs an equivalent local provider whose `scanUrl` points at a confirmation page on this server, exercising the whole poll/bind/issue path. The core tests cover it plus the GitHub code→token→user exchange.
+
+### Deploying in mainland China
+
+The authorization-code exchange only exists on `github.com` (not `api.github.com`), so the server itself must reach `github.com`. On mainland machines this commonly fails: after authorizing, the browser hangs on the callback and finally reports a timeout, with nothing useful in the server log because the request is stuck on egress.
+
+**Cause**: GitHub's GeoDNS hands mainland servers an Asia endpoint (for example `20.205.243.166`) that is unreachable on some networks, and every public resolver tested (`223.5.5.5`, `119.29.29.29`, `8.8.8.8`) returns that same address, so there is no DNS-side fix.
+
+**Workaround**: pin `github.com` and `api.github.com` to a verified reachable address.
+
+```bash
+# 1. Find a working address (repeat with candidates; success should stay under a second)
+curl -sS -m 8 --resolve github.com:443:140.82.112.3 -o /dev/null \
+  -w "http=%{http_code} time=%{time_total}\n" https://github.com/login/oauth/access_token
+
+# 2. Back up, then pin
+cp /etc/hosts /etc/hosts.bak-$(date +%Y%m%d-%H%M%S)
+printf '140.82.112.3 github.com # dsh-remote github pin\n140.82.112.5 api.github.com # dsh-remote github pin\n' >> /etc/hosts
+
+# 3. Restart and verify (a JSON error is success; only a timeout is failure)
+systemctl restart ds-harness-remote
+curl -sS -m 10 -X POST https://github.com/login/oauth/access_token \
+  -H 'Content-Type: application/json' -d '{"client_id":"probe","client_secret":"probe","code":"probe"}'
+```
+
+Caveats: this pins an address, not a certificate — TLS validation still applies, so there is no man-in-the-middle exposure. It breaks if GitHub changes addresses, so check it first when sign-in suddenly fails. Confirm the target's port 22 is reachable before pinning, or the server's own `git fetch` will break with it. Deploying outside mainland China removes the problem entirely.
+
+### WeChat sign-in
+
+The `wechat` provider is still implemented (`DSH_SERVER_OAUTH_PROVIDER=wechat` plus `DSH_SERVER_WECHAT_APP_ID`/`SECRET`), but it requires enterprise verification on the WeChat Open Platform and a callback domain that has completed ICP filing. The plugin does not offer that entry.
+
+### When you have no third-party credentials
+
+Use **registration code plus password** instead: set `DSH_SERVER_REGISTRATION_CODE` and clients sign in with an account and password, with no third-party platform involved.
 
 ## Features
 
-- Device registration, credential refresh, device discovery, Control, and end-to-end encrypted Relay.
-- Single-process operation with persistent data. Device credentials survive restarts; Web users sign in again. Changing the password requires devices to reauthorize.
+- Multi-account device registration, credential refresh, device discovery, Control, and end-to-end encrypted Relay; accounts are fully isolated.
+- QR OAuth sign-in (GitHub implemented; WeChat available), closed-by-default registration and optional password sign-in.
+- Single-process operation with persistent data. Device credentials survive restarts; Web users sign in again. Changing an account's password requires that account's devices to reauthorize.
 
 Tests: `pnpm --filter @dsh-remote/server test`. Cross-machine and long-running validation remain pending. UI sources: [web/UPSTREAM.md](web/UPSTREAM.md).
 
