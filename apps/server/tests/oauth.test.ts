@@ -118,6 +118,29 @@ describe('QR OAuth login', () => {
     expect(completed.status).toBe('complete')
     expect(app.store.listAccounts()).toContain('mock:newcomer-openid')
   })
+
+  it('refuses password login entirely when the deployment is QR-only', async () => {
+    await start({ oauth: { provider: 'mock' }, oauthCreatesAccounts: true, passwordLoginDisabled: true })
+    const login = await fetch(`${base}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: account, password }),
+    })
+    expect(login.status).toBe(403)
+    expect((await login.json()).error.code).toBe('METHOD_NOT_ALLOWED')
+    // The QR path still works and still creates the account.
+    const session = await (await fetch(`${base}/api/v1/auth/oauth/qr/start`, { method: 'POST' })).json() as { qrId: string }
+    const confirm = await fetch(`${base}/api/v1/auth/oauth/mock/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ state: session.qrId, subject: 'qr-only-user' }).toString(),
+      redirect: 'manual',
+    })
+    await fetch(new URL(confirm.headers.get('location')!), { redirect: 'manual' })
+    const completed = await (await fetch(`${base}/api/v1/auth/oauth/qr/${encodeURIComponent(session.qrId)}`)).json() as { status: string; token: string }
+    expect(completed.status).toBe('complete')
+    expect(app.store.listAccounts()).toContain('mock:qr-only-user')
+  })
 })
 
 describe('WeChat provider', () => {

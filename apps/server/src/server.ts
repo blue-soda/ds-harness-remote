@@ -27,6 +27,13 @@ export interface Config {
    * unknown subject is refused so scanning a code cannot mint an account.
    */
   oauthCreatesAccounts?: boolean
+  /**
+   * Refuse `POST /api/v1/auth/login` for every account. Set this when QR OAuth
+   * is the only intended sign-in path, so no second credential can diverge from
+   * the bound identity. The bootstrap account is still seeded (it can hold
+   * devices and be reachable), it just cannot be entered by password.
+   */
+  passwordLoginDisabled?: boolean
   /** Overrides fetch for the WeChat token exchange; used by tests. */
   oauthFetch?: typeof fetch
 }
@@ -199,6 +206,9 @@ export function createRemoteServer(config: Config) {
     rate(`api:${req.socket.remoteAddress ?? ''}`, 240)
     if (method === 'POST' && path === '/api/v1/auth/login') {
       rate(`login:${req.socket.remoteAddress ?? ''}`, 20)
+      // A QR-only deployment refuses password entry outright, so the bound
+      // external identity stays the single source of truth for the account.
+      if (config.passwordLoginDisabled === true) throw new ApiError('METHOD_NOT_ALLOWED', 403)
       const credentials = loginSchema.parse(await body(req))
       const accountName = credentials.email.trim()
       if (!store.verifyAccount(accountName, credentials.password)) throw new ApiError('AUTH_INVALID', 401)

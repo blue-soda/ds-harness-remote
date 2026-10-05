@@ -37,6 +37,8 @@ const app = createRemoteServer({
   },
   // Scanning a code may create an account only when the operator opts in.
   oauthCreatesAccounts: process.env.DSH_SERVER_OAUTH_CREATES_ACCOUNTS === 'true',
+  // QR-only deployments keep one sign-in path, so no password can diverge.
+  passwordLoginDisabled: process.env.DSH_SERVER_PASSWORD_LOGIN === 'off',
 })
 app.server.listen(port, process.env.DSH_SERVER_HOST ?? '127.0.0.1', () => console.info(`Remote Server listening on port ${port}`))
 app.server.on('error', () => { console.error('Remote Server could not listen. Check address and port.'); process.exitCode = 1; app.gateway.close() })

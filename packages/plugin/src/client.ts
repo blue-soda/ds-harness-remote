@@ -2166,13 +2166,7 @@ window.__ModuleLoader__.load({
                     React.createElement('strong', { className: 'dshRemoteLoginTitle' }, t('signInClient')),
                     React.createElement('span', null, t('signInClientDescription'))),
                   React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
-                    ...orderedQrProviders.map(qrLoginTab),
-                    React.createElement('button', {
-                      type: 'button', role: 'tab', id: 'dsh-remote-password-tab',
-                      'aria-selected': loginMethod === 'password', 'aria-controls': 'dsh-remote-password-panel',
-                      className: loginMethod === 'password' ? 'isActive' : '', disabled: busy,
-                      onClick: () => selectLoginMethod('password'),
-                    }, t('accountPasswordLogin'))),
+                    ...orderedQrProviders.map(qrLoginTab)),
                   loginMethod !== 'password'
                     ? React.createElement('div', {
                       className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,

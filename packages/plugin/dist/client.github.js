@@ -3311,17 +3311,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   React.createElement(
                     "div",
                     { className: "dshRemoteLoginTabs", role: "tablist" },
-                    ...orderedQrProviders.map(qrLoginTab),
-                    React.createElement("button", {
-                      type: "button",
-                      role: "tab",
-                      id: "dsh-remote-password-tab",
-                      "aria-selected": loginMethod === "password",
-                      "aria-controls": "dsh-remote-password-panel",
-                      className: loginMethod === "password" ? "isActive" : "",
-                      disabled: busy,
-                      onClick: () => selectLoginMethod("password")
-                    }, t("accountPasswordLogin"))
+                    ...orderedQrProviders.map(qrLoginTab)
                   ),
                   loginMethod !== "password" ? React.createElement(
                     "div",
