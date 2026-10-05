@@ -20178,8 +20178,10 @@ var ClientModeRuntime = class {
     try {
       if (this.host === void 0) return;
       if (this.config.hostControl?.enabled === false) return;
-      if (this.host.hostStatus().authorized) return;
-      if (this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
+      const status2 = this.host.hostStatus();
+      if (status2.authorized) return;
+      const rejected = status2.error !== void 0 && HOST_AUTHORIZATION_ERRORS.has(status2.error);
+      if (!rejected && this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
       const credentials = await this.server.authenticate(this.requireIdentity());
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
     } catch (error) {

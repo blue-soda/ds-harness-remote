@@ -237,8 +237,14 @@ export class ClientModeRuntime {
     try {
       if (this.host === undefined) return
       if (this.config.hostControl?.enabled === false) return
-      if (this.host.hostStatus().authorized) return
-      if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
+      const status = this.host.hostStatus()
+      if (status.authorized) return
+      // Stored credentials the Server has already rejected must not block
+      // re-authorization. A credential left over from another account — for
+      // example after a Server state migration — would otherwise keep the Host
+      // unregistered while the UI keeps telling the user to authorize again.
+      const rejected = status.error !== undefined && HOST_AUTHORIZATION_ERRORS.has(status.error)
+      if (!rejected && this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
       const credentials = await this.server.authenticate(this.requireIdentity())
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
     } catch (error) {
