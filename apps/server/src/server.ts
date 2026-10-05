@@ -162,9 +162,15 @@ export function createRemoteServer(config: Config) {
     try {
       identity = await provider.complete(request.searchParams)
     } catch {
+      // Expire the pending session so the waiting client reports an expired code
+      // instead of polling forever after a provider that never answered.
+      session.expires = 0
       throw new ApiError('CONNECTION_FAILED', 502)
     }
-    if (identity === undefined) throw new ApiError('AUTH_INVALID', 403)
+    if (identity === undefined) {
+      session.expires = 0
+      throw new ApiError('AUTH_INVALID', 403)
+    }
 
     // Only the pending session's own origin is trustworthy for the redirect.
     const returnTo = sameOriginReturnTo(session.origin, request.searchParams.get('returnTo') ?? undefined)

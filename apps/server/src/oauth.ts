@@ -34,6 +34,22 @@ export interface OAuthProvider {
   complete(query: URLSearchParams): Promise<OAuthIdentity | undefined>
 }
 
+/**
+ * Bound every outbound provider call. Without this a blocked or slow provider
+ * leaves the browser waiting on the callback until the reverse proxy times it
+ * out, so the failure has to become a fast, reportable error instead.
+ */
+const PROVIDER_TIMEOUT_MS = 15_000
+
+/** `fetch` with a hard deadline; the caller turns a rejection into a 5xx. */
+function providerFetch(
+  doFetch: typeof fetch,
+  input: string,
+  init?: Parameters<typeof fetch>[1],
+): Promise<Response> {
+  return doFetch(input, { ...init, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) })
+}
+
 const WEIXIN_AUTHORIZE_URL = 'https://open.weixin.qq.com/connect/qrconnect'
 const WEIXIN_TOKEN_URL = 'https://api.weixin.qq.com/sns/oauth2/access_token'
 const WEIXIN_CALLBACK_PATH = '/api/v1/auth/oauth/wechat/callback'
@@ -73,7 +89,7 @@ export function createWeixinProvider(options: WeixinProviderOptions): OAuthProvi
       url.searchParams.set('secret', options.appSecret)
       url.searchParams.set('code', code)
       url.searchParams.set('grant_type', 'authorization_code')
-      const response = await doFetch(url)
+      const response = await providerFetch(doFetch, url.toString())
       if (!response.ok) return undefined
       const body = await response.json() as { openid?: unknown; nickname?: unknown }
       if (typeof body.openid !== 'string' || body.openid.length === 0) return undefined
@@ -129,7 +145,7 @@ export function createGithubProvider(options: GithubProviderOptions): OAuthProvi
     async complete(query) {
       const code = query.get('code')
       if (typeof code !== 'string' || code.length === 0) return undefined
-      const tokenResponse = await doFetch(GITHUB_TOKEN_URL, {
+      const tokenResponse = await providerFetch(doFetch, GITHUB_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -142,7 +158,7 @@ export function createGithubProvider(options: GithubProviderOptions): OAuthProvi
       const tokenBody = await tokenResponse.json() as { access_token?: unknown }
       if (typeof tokenBody.access_token !== 'string' || tokenBody.access_token.length === 0) return undefined
 
-      const userResponse = await doFetch(GITHUB_USER_URL, {
+      const userResponse = await providerFetch(doFetch, GITHUB_USER_URL, {
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${tokenBody.access_token}` },
       })
       if (!userResponse.ok) return undefined
