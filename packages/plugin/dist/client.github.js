@@ -2386,7 +2386,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         "slots",
         "locale",
         "workspaces",
-        "sessions"
+        "sessions",
+        "uiWorkspace"
       ];
       function RemoteProgressView(props) {
         let progress = props.progress;
@@ -4039,7 +4040,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             if (!workspacesReady(workspaceSnapshot) || !workspaceSnapshot.items.some((workspace) => workspace.workspaceId === pending.workspaceId)) return;
             let sessionSnapshot = ctx.sessions.list.getSnapshot();
             if (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
-            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
+            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.uiWorkspace.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
               disposed || (ctx.sessions.open(sessionId), window.sessionStorage.removeItem(pendingWorkspaceSelectionKey), await control("workspace.selection.consume", pending).catch(() => {
               }));
             }).catch((reason) => {

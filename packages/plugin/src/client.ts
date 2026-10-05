@@ -217,6 +217,14 @@ interface WorkspacesClientServiceLike {
     }
     subscribe(listener: () => void): () => void
   }
+}
+
+/**
+ * Workspace navigation lives on the core UI service, not on the workspaces
+ * store: connecting a workspace resolves or creates its Session and is owned by
+ * `uiWorkspace`, while `workspaces` only exposes the durable list.
+ */
+interface UiWorkspaceClientServiceLike {
   connectWorkspace(workspaceId: string): Promise<string>
 }
 
@@ -999,7 +1007,7 @@ window.__ModuleLoader__.load({
       ): T
     }
     const inject = [
-      'connection', 'slots', 'locale', 'workspaces', 'sessions',
+      'connection', 'slots', 'locale', 'workspaces', 'sessions', 'uiWorkspace',
     ]
 
     function RemoteProgressView(props: {
@@ -2917,6 +2925,7 @@ window.__ModuleLoader__.load({
       }) => void): void
       get<T = unknown>(name: string): T | undefined
       workspaces: WorkspacesClientServiceLike
+      uiWorkspace: UiWorkspaceClientServiceLike
       sessions: SessionsClientServiceLike
       locale: {
         bind(namespace: string): Translate
@@ -2991,8 +3000,8 @@ window.__ModuleLoader__.load({
           const open = pending.backend === 'codex' && pending.sessionId !== undefined
             ? sessionSnapshot.ids.includes(pending.sessionId)
               ? Promise.resolve(pending.sessionId)
-              : ctx.workspaces.connectWorkspace(pending.workspaceId)
-            : ctx.workspaces.connectWorkspace(pending.workspaceId)
+              : ctx.uiWorkspace.connectWorkspace(pending.workspaceId)
+            : ctx.uiWorkspace.connectWorkspace(pending.workspaceId)
           void open.then(async sessionId => {
             if (disposed) return
             ctx.sessions.open(sessionId)
