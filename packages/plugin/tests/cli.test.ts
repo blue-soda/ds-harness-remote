@@ -15,7 +15,7 @@ afterEach(async () => {
 
 describe('Remote CLI', () => {
   it('renders a high-contrast terminal QR with a four-module quiet zone', async () => {
-    const qr = await renderTerminalQr('https://dsh.r2049.cn/api/v1/auth/q/terminal-qr-test-session')
+    const qr = await renderTerminalQr('https://sakakibara.ink:8443/api/v1/auth/q/terminal-qr-test-session')
     const lines = qr.split('\n')
     const whiteLine = /^\u001B\[47m +\u001B\[0m$/
 
@@ -25,7 +25,7 @@ describe('Remote CLI', () => {
     expect(lines[4]).toMatch(/^\u001B\[47m {8}\u001B\[(?:40|47)m/)
     expect(lines[4]).toMatch(/\u001B\[47m {8}\u001B\[0m$/)
 
-    const compact = await renderCompactTerminalQr('https://dsh.r2049.cn/api/v1/auth/q/terminal-qr-test-session')
+    const compact = await renderCompactTerminalQr('https://sakakibara.ink:8443/api/v1/auth/q/terminal-qr-test-session')
     const compactLines = compact.split('\n')
     expect(compactLines.length).toBe(Math.ceil(lines.length / 2))
     expect(compactLines[0]).toMatch(/^\u001B\[30;47m +\u001B\[0m$/)
@@ -43,7 +43,7 @@ describe('Remote CLI', () => {
       calls.push({ url, init })
       if (url.endsWith('/auth/oauth/qr/start?provider=github')) return json({
         qrId: 'github-qr-session-1234567890',
-        scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
+        scanUrl: 'https://sakakibara.ink:8443/api/v1/auth/q/github-qr-session-1234567890',
         expiresIn: 600,
         provider: 'github',
       })
@@ -65,22 +65,22 @@ describe('Remote CLI', () => {
     })).resolves.toBe(0)
 
     expect(calls.map(call => call.url)).toEqual([
-      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/start?provider=github',
-      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/github-qr-session-1234567890',
-      'https://dsh.r2049.cn/api/v1/auth/me',
-      'https://dsh.r2049.cn/api/v1/devices/register',
+      'https://sakakibara.ink:8443/api/v1/auth/oauth/qr/start?provider=github',
+      'https://sakakibara.ink:8443/api/v1/auth/oauth/qr/github-qr-session-1234567890',
+      'https://sakakibara.ink:8443/api/v1/auth/me',
+      'https://sakakibara.ink:8443/api/v1/devices/register',
     ])
     expect(output.text).toContain('<terminal-qr>')
-    expect(output.text).toContain(`Authorization URL: \u001B]8;;https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u0007https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u001B]8;;\u0007`)
+    expect(output.text).toContain(`Authorization URL: \u001B]8;;https://sakakibara.ink:8443/api/v1/auth/q/github-qr-session-1234567890\u0007https://sakakibara.ink:8443/api/v1/auth/q/github-qr-session-1234567890\u001B]8;;\u0007`)
     expect(output.text).toContain('Remote Host login complete for host@example.com.')
     expect(output.text).toContain('Restart dsh-tui')
     expect(output.text).not.toContain('web-account-token-value')
     expect(output.text).not.toContain('access-token-value')
     expect(errors.text).toBe('')
 
-    const directory = serverStorageDirectory(join(dshHome, 'remote'), 'https://dsh.r2049.cn', 'host')
+    const directory = serverStorageDirectory(join(dshHome, 'remote'), 'https://sakakibara.ink:8443', 'host')
     const device = JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')) as { deviceId: string }
-    await expect(new ServerCredentialStore(directory).load('https://dsh.r2049.cn', device.deviceId))
+    await expect(new ServerCredentialStore(directory).load('https://sakakibara.ink:8443', device.deviceId))
       .resolves.toMatchObject({ authorizationMethod: 'account', account: 'host@example.com' })
   })
 
@@ -91,7 +91,7 @@ describe('Remote CLI', () => {
     const errors = writer()
     const start = vi.fn(async () => ({
       qrId: 'github-qr-session-1234567890',
-      scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
+      scanUrl: 'https://sakakibara.ink:8443/api/v1/auth/q/github-qr-session-1234567890',
       expiresIn: 600,
     }))
     const poll = vi.fn(async () => ({ status: 'expired' as const }))
@@ -121,11 +121,11 @@ describe('Remote CLI', () => {
     directories.push(dshHome)
     const env = { DSH_HOME: dshHome }
     const root = new IdentityStore({ env }).directory
-    const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const directory = serverStorageDirectory(root, 'https://sakakibara.ink:8443', 'host')
     const identities = new IdentityStore({ directory, env })
     const original = await identities.loadOrCreate('CLI test Host')
     await new ServerCredentialStore(directory).save({
-      serverUrl: 'https://dsh.r2049.cn',
+      serverUrl: 'https://sakakibara.ink:8443',
       deviceId: original.deviceId,
       authorizationMethod: 'account',
       account: 'host@example.com',
@@ -150,7 +150,7 @@ describe('Remote CLI', () => {
     expect(revoke).toHaveBeenCalledOnce()
     const rotated = JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')) as { deviceId: string }
     expect(rotated.deviceId).not.toBe(original.deviceId)
-    await expect(new ServerCredentialStore(directory).load('https://dsh.r2049.cn', rotated.deviceId))
+    await expect(new ServerCredentialStore(directory).load('https://sakakibara.ink:8443', rotated.deviceId))
       .resolves.toBeUndefined()
     expect(output.text).toContain('local device identity was rotated')
   })
@@ -160,10 +160,10 @@ describe('Remote CLI', () => {
     directories.push(dshHome)
     const env = { DSH_HOME: dshHome }
     const root = new IdentityStore({ env }).directory
-    const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const directory = serverStorageDirectory(root, 'https://sakakibara.ink:8443', 'host')
     const identity = await new IdentityStore({ directory, env }).loadOrCreate('CLI status Host')
     await new ServerCredentialStore(directory).save({
-      serverUrl: 'https://dsh.r2049.cn',
+      serverUrl: 'https://sakakibara.ink:8443',
       deviceId: identity.deviceId,
       authorizationMethod: 'account',
       account: 'status@example.com',
