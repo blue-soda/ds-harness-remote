@@ -41,13 +41,13 @@ describe('Remote CLI', () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
       calls.push({ url, init })
-      if (url.endsWith('/auth/oauth/qr/start?provider=wechat')) return json({
-        qrId: 'wechat-qr-session-1234567890',
-        scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/wechat-qr-session-1234567890',
+      if (url.endsWith('/auth/oauth/qr/start?provider=github')) return json({
+        qrId: 'github-qr-session-1234567890',
+        scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
         expiresIn: 600,
-        provider: 'wechat',
+        provider: 'github',
       })
-      if (url.endsWith('/auth/oauth/qr/wechat-qr-session-1234567890')) return json({
+      if (url.endsWith('/auth/oauth/qr/github-qr-session-1234567890')) return json({
         status: 'complete',
         token: 'web-account-token-value',
       })
@@ -56,7 +56,7 @@ describe('Remote CLI', () => {
       throw new Error(`unexpected request: ${url}`)
     }) as unknown as typeof fetch
 
-    await expect(runCli(['login', 'wechat'], {
+    await expect(runCli(['login', 'github'], {
       env: { DSH_HOME: dshHome },
       stdout: output,
       stderr: errors,
@@ -65,13 +65,13 @@ describe('Remote CLI', () => {
     })).resolves.toBe(0)
 
     expect(calls.map(call => call.url)).toEqual([
-      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/start?provider=wechat',
-      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/wechat-qr-session-1234567890',
+      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/start?provider=github',
+      'https://dsh.r2049.cn/api/v1/auth/oauth/qr/github-qr-session-1234567890',
       'https://dsh.r2049.cn/api/v1/auth/me',
       'https://dsh.r2049.cn/api/v1/devices/register',
     ])
     expect(output.text).toContain('<terminal-qr>')
-    expect(output.text).toContain(`Authorization URL: \u001B]8;;https://dsh.r2049.cn/api/v1/auth/q/wechat-qr-session-1234567890\u0007https://dsh.r2049.cn/api/v1/auth/q/wechat-qr-session-1234567890\u001B]8;;\u0007`)
+    expect(output.text).toContain(`Authorization URL: \u001B]8;;https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u0007https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u001B]8;;\u0007`)
     expect(output.text).toContain('Remote Host login complete for host@example.com.')
     expect(output.text).toContain('Restart dsh-tui')
     expect(output.text).not.toContain('web-account-token-value')
@@ -84,14 +84,14 @@ describe('Remote CLI', () => {
       .resolves.toMatchObject({ authorizationMethod: 'account', account: 'host@example.com' })
   })
 
-  it('defaults login to WeChat and reports an expired QR session', async () => {
+  it('defaults login to GitHub and reports an expired QR session', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-expired-${crypto.randomUUID()}`)
     directories.push(dshHome)
     const output = writer()
     const errors = writer()
     const start = vi.fn(async () => ({
-      qrId: 'wechat-qr-session-1234567890',
-      scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/wechat-qr-session-1234567890',
+      qrId: 'github-qr-session-1234567890',
+      scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
       expiresIn: 600,
     }))
     const poll = vi.fn(async () => ({ status: 'expired' as const }))
@@ -100,7 +100,7 @@ describe('Remote CLI', () => {
       env: { DSH_HOME: dshHome },
       stdout: output,
       stderr: errors,
-      renderQr: async () => '<wechat-qr>',
+      renderQr: async () => '<github-qr>',
       createHostApi: () => ({
         startOAuthQrLogin: start,
         pollOAuthQrLogin: poll,
@@ -111,8 +111,8 @@ describe('Remote CLI', () => {
       }),
     })).resolves.toBe(1)
 
-    expect(start).toHaveBeenCalledWith('wechat')
-    expect(output.text).toContain('<wechat-qr>')
+    expect(start).toHaveBeenCalledWith('github')
+    expect(output.text).toContain('<github-qr>')
     expect(errors.text).toContain('QR login expired')
   })
 

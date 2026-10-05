@@ -33,7 +33,7 @@ export type OAuthProvider = 'wechat' | 'zhihu' | 'github'
  * WeChat; Zhihu and GitHub remain implemented for the hosted server but are not
  * offered here. This is the one place to enable or retire a provider.
  */
-export const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['wechat']
+export const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['github']
 
 /**
  * Whether a caller-supplied string names an offered provider. Narrows the value

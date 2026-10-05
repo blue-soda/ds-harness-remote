@@ -7,10 +7,15 @@ const registrationCode = process.env.DSH_SERVER_REGISTRATION_CODE
 if (registrationCode !== undefined && registrationCode.trim().length < 12) {
   throw new Error('DSH_SERVER_REGISTRATION_CODE must be at least 12 characters when set.')
 }
-/** QR OAuth: `auto` uses WeChat when both credentials are present, else disabled. */
+/** QR OAuth: `auto` prefers GitHub, then WeChat, and is otherwise disabled. */
 const oauthProvider = (process.env.DSH_SERVER_OAUTH_PROVIDER ?? 'auto').trim()
-if (!['auto', 'wechat', 'mock', 'off'].includes(oauthProvider)) {
-  throw new Error('DSH_SERVER_OAUTH_PROVIDER must be one of: auto, wechat, mock, off.')
+if (!['auto', 'github', 'wechat', 'mock', 'off'].includes(oauthProvider)) {
+  throw new Error('DSH_SERVER_OAUTH_PROVIDER must be one of: auto, github, wechat, mock, off.')
+}
+const githubClientId = process.env.DSH_SERVER_GITHUB_CLIENT_ID?.trim()
+const githubClientSecret = process.env.DSH_SERVER_GITHUB_CLIENT_SECRET?.trim()
+if (oauthProvider === 'github' && (githubClientId === undefined || githubClientId === '' || githubClientSecret === undefined || githubClientSecret === '')) {
+  throw new Error('DSH_SERVER_GITHUB_CLIENT_ID and DSH_SERVER_GITHUB_CLIENT_SECRET are required when DSH_SERVER_OAUTH_PROVIDER=github.')
 }
 const wechatAppId = process.env.DSH_SERVER_WECHAT_APP_ID?.trim()
 const wechatAppSecret = process.env.DSH_SERVER_WECHAT_APP_SECRET?.trim()
@@ -24,7 +29,9 @@ const app = createRemoteServer({
   dataFile: resolve(process.env.DSH_SERVER_DATA_FILE ?? 'data/state.json'),
   ...(registrationCode === undefined || registrationCode.trim() === '' ? {} : { registrationCode: registrationCode.trim() }),
   oauth: {
-    provider: oauthProvider as 'auto' | 'wechat' | 'mock' | 'off',
+    provider: oauthProvider as 'auto' | 'github' | 'wechat' | 'mock' | 'off',
+    ...(githubClientId === undefined || githubClientId === '' ? {} : { githubClientId }),
+    ...(githubClientSecret === undefined || githubClientSecret === '' ? {} : { githubClientSecret }),
     ...(wechatAppId === undefined || wechatAppId === '' ? {} : { appId: wechatAppId }),
     ...(wechatAppSecret === undefined || wechatAppSecret === '' ? {} : { appSecret: wechatAppSecret }),
   },

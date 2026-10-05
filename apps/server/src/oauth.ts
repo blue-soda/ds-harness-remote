@@ -91,6 +91,75 @@ export function createWeixinProvider(options: WeixinProviderOptions): OAuthProvi
   }
 }
 
+const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
+const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
+const GITHUB_USER_URL = 'https://api.github.com/user'
+const GITHUB_CALLBACK_PATH = '/api/v1/auth/oauth/github/callback'
+
+export interface GithubProviderOptions {
+  clientId: string
+  clientSecret: string
+  /** Overrides the fetch implementation in tests. */
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * GitHub OAuth App login.
+ *
+ * Unlike WeChat this needs no enterprise verification, no ICP-filed domain and
+ * no fee: any GitHub account may register an OAuth App, and GitHub only requires
+ * the callback URL to match the one registered on the app.
+ *
+ * The stable subject is the numeric account id, not the login name, so renaming
+ * a GitHub user never orphans the binding.
+ */
+export function createGithubProvider(options: GithubProviderOptions): OAuthProvider {
+  const doFetch = options.fetchImpl ?? fetch
+  return {
+    name: 'github',
+    scanUrl(request) {
+      const url = new URL(GITHUB_AUTHORIZE_URL)
+      url.searchParams.set('client_id', options.clientId)
+      url.searchParams.set('redirect_uri', callbackUrl(request))
+      url.searchParams.set('scope', 'read:user')
+      url.searchParams.set('state', request.qrId)
+      return url.toString()
+    },
+    callbackUrl,
+    async complete(query) {
+      const code = query.get('code')
+      if (typeof code !== 'string' || code.length === 0) return undefined
+      const tokenResponse = await doFetch(GITHUB_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          client_id: options.clientId,
+          client_secret: options.clientSecret,
+          code,
+        }),
+      })
+      if (!tokenResponse.ok) return undefined
+      const tokenBody = await tokenResponse.json() as { access_token?: unknown }
+      if (typeof tokenBody.access_token !== 'string' || tokenBody.access_token.length === 0) return undefined
+
+      const userResponse = await doFetch(GITHUB_USER_URL, {
+        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${tokenBody.access_token}` },
+      })
+      if (!userResponse.ok) return undefined
+      const user = await userResponse.json() as { id?: unknown; login?: unknown; name?: unknown }
+      if (typeof user.id !== 'number' || !Number.isFinite(user.id)) return undefined
+      const displayName = typeof user.name === 'string' && user.name.length > 0
+        ? user.name
+        : typeof user.login === 'string' && user.login.length > 0 ? user.login : `github:${user.id}`
+      return { subject: String(user.id), displayName }
+    },
+  }
+
+  function callbackUrl(request: QrAuthorizationRequest): string {
+    return new URL(GITHUB_CALLBACK_PATH, request.origin).toString()
+  }
+}
+
 const MOCK_CALLBACK_PATH = '/api/v1/auth/oauth/mock/callback'
 const MOCK_CONFIRM_PATH = '/api/v1/auth/oauth/mock/confirm'
 
@@ -113,16 +182,19 @@ export function createMockProvider(): OAuthProvider {
 }
 
 export interface OAuthProviderConfig {
-  /** `auto` uses WeChat when credentials are present and is otherwise off. */
-  provider: 'auto' | 'wechat' | 'mock' | 'off'
+  /** `auto` uses GitHub when configured, then WeChat, and is otherwise off. */
+  provider: 'auto' | 'github' | 'wechat' | 'mock' | 'off'
+  githubClientId?: string
+  githubClientSecret?: string
   appId?: string
   appSecret?: string
 }
 
 /**
  * Resolve the configured provider, or undefined when QR login is unavailable.
- * Default `auto` requires both WeChat credentials, so a server without them
- * simply does not advertise QR login.
+ *
+ * `auto` prefers GitHub (no enterprise verification and no ICP-filed callback
+ * domain needed) and falls back to WeChat when only WeChat credentials exist.
  */
 export function resolveOAuthProvider(
   config: OAuthProviderConfig,
@@ -130,16 +202,22 @@ export function resolveOAuthProvider(
 ): OAuthProvider | undefined {
   if (config.provider === 'off') return undefined
   if (config.provider === 'mock') return createMockProvider()
-  const hasCredentials = config.appId !== undefined && config.appSecret !== undefined
-  if (config.provider === 'wechat' && !hasCredentials) {
-    throw new Error('DSH_SERVER_WECHAT_APP_ID and DSH_SERVER_WECHAT_APP_SECRET are required when DSH_SERVER_OAUTH_PROVIDER=wechat.')
+
+  const github = { id: config.githubClientId, secret: config.githubClientSecret }
+  const wechat = { id: config.appId, secret: config.appSecret }
+  const githubReady = github.id !== undefined && github.secret !== undefined
+  const wechatReady = wechat.id !== undefined && wechat.secret !== undefined
+
+  if (config.provider === 'github') {
+    if (!githubReady) throw new Error('DSH_SERVER_GITHUB_CLIENT_ID and DSH_SERVER_GITHUB_CLIENT_SECRET are required when DSH_SERVER_OAUTH_PROVIDER=github.')
+    return createGithubProvider({ clientId: github.id!, clientSecret: github.secret!, ...(fetchImpl === undefined ? {} : { fetchImpl }) })
   }
-  if (!hasCredentials) return undefined
-  const { appId, appSecret } = config
-  if (appId === undefined || appSecret === undefined) return undefined
-  return createWeixinProvider({
-    appId,
-    appSecret,
-    ...(fetchImpl === undefined ? {} : { fetchImpl }),
-  })
+  if (config.provider === 'wechat') {
+    if (!wechatReady) throw new Error('DSH_SERVER_WECHAT_APP_ID and DSH_SERVER_WECHAT_APP_SECRET are required when DSH_SERVER_OAUTH_PROVIDER=wechat.')
+    return createWeixinProvider({ appId: wechat.id!, appSecret: wechat.secret!, ...(fetchImpl === undefined ? {} : { fetchImpl }) })
+  }
+
+  if (githubReady) return createGithubProvider({ clientId: github.id!, clientSecret: github.secret!, ...(fetchImpl === undefined ? {} : { fetchImpl }) })
+  if (wechatReady) return createWeixinProvider({ appId: wechat.id!, appSecret: wechat.secret!, ...(fetchImpl === undefined ? {} : { fetchImpl }) })
+  return undefined
 }

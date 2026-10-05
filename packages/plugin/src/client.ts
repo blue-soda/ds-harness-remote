@@ -128,7 +128,7 @@ type OAuthProvider = 'wechat' | 'zhihu' | 'github'
  * `ENABLED_QR_PROVIDERS` in server-api.ts (server half); this copy stays local
  * so the browser bundle never pulls in the Node-side server client.
  */
-const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['wechat']
+const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['github']
 type EnabledQrProvider = (typeof ENABLED_QR_PROVIDERS)[number]
 type LoginMethod = OAuthProvider | 'password'
 

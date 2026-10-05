@@ -18410,7 +18410,7 @@ function normalizeServerUrl(value) {
 var PLUGIN_VERSION = "0.4.27";
 
 // src/server-api.ts
-var ENABLED_QR_PROVIDERS = ["wechat"];
+var ENABLED_QR_PROVIDERS = ["github"];
 function isEnabledQrProvider(value) {
   return ENABLED_QR_PROVIDERS.includes(value);
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { createRemoteServer } from '../src/server.js'
-import { createWeixinProvider } from '../src/oauth.js'
+import { createGithubProvider, createWeixinProvider } from '../src/oauth.js'
 
 const account = 'owner@example.com', password = 'local-test-password'
 let app: ReturnType<typeof createRemoteServer> | undefined, dir: string, base: string
@@ -149,5 +149,49 @@ describe('WeChat provider', () => {
       fetchImpl: (async () => new Response(JSON.stringify({ errcode: 40029 }), { status: 200 })) as unknown as typeof fetch,
     })
     await expect(failing.complete(new URLSearchParams({ code: 'bad' }))).resolves.toBeUndefined()
+  })
+})
+
+describe('GitHub provider', () => {
+  it('builds an authorize URL with the callback GitHub must have registered', () => {
+    const provider = createGithubProvider({ clientId: 'gh-client-id', clientSecret: 'gh-secret-value' })
+    const url = new URL(provider.scanUrl({ qrId: 'session-2', origin: 'https://sakakibara.ink:8443' }))
+    expect(url.origin + url.pathname).toBe('https://github.com/login/oauth/authorize')
+    expect(url.searchParams.get('client_id')).toBe('gh-client-id')
+    expect(url.searchParams.get('state')).toBe('session-2')
+    expect(url.searchParams.get('redirect_uri')).toBe('https://sakakibara.ink:8443/api/v1/auth/oauth/github/callback')
+  })
+
+  it('exchanges the code and identifies the account by numeric id, not the login name', async () => {
+    const calls: string[] = []
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      calls.push(url)
+      if (url === 'https://github.com/login/oauth/access_token') {
+        // The secret is posted server-side and never appears in a URL.
+        expect(String(init?.body)).toContain('gh-secret-value')
+        return new Response(JSON.stringify({ access_token: 'gh-token' }), { status: 200 })
+      }
+      if (url === 'https://api.github.com/user') {
+        expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer gh-token')
+        return new Response(JSON.stringify({ id: 4242, login: 'octocat', name: 'Mona' }), { status: 200 })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    const provider = createGithubProvider({
+      clientId: 'gh-client-id', clientSecret: 'gh-secret-value', fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    await expect(provider.complete(new URLSearchParams({ code: 'one-time-code' })))
+      .resolves.toEqual({ subject: '4242', displayName: 'Mona' })
+    expect(calls).toEqual(['https://github.com/login/oauth/access_token', 'https://api.github.com/user'])
+
+    // A cancel, a refused token and a payload without an id all yield no identity.
+    await expect(provider.complete(new URLSearchParams({}))).resolves.toBeUndefined()
+    const refused = createGithubProvider({
+      clientId: 'gh-client-id', clientSecret: 'gh-secret-value',
+      fetchImpl: (async () => new Response(JSON.stringify({ error: 'bad_verification_code' }), { status: 200 })) as unknown as typeof fetch,
+    })
+    await expect(refused.complete(new URLSearchParams({ code: 'bad' }))).resolves.toBeUndefined()
   })
 })
