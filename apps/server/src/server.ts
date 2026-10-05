@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
+import { resolveOAuthProvider, type OAuthProvider, type OAuthProviderConfig } from './oauth.js'
 
 export interface Config {
   /** Bootstrap account seeded on every start; its password change rotates that account's tokens. */
@@ -19,6 +20,15 @@ export interface Config {
    * registration entirely, so accounts can only be seeded from configuration.
    */
   registrationCode?: string
+  /** QR OAuth provider selection; `auto` needs WeChat credentials to be active. */
+  oauth?: OAuthProviderConfig
+  /**
+   * Whether a first-time QR login may create an account. Off by default: an
+   * unknown subject is refused so scanning a code cannot mint an account.
+   */
+  oauthCreatesAccounts?: boolean
+  /** Overrides fetch for the WeChat token exchange; used by tests. */
+  oauthFetch?: typeof fetch
 }
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
 const registerSchema = z.object({
@@ -60,6 +70,11 @@ export function createRemoteServer(config: Config) {
   // and a changed password only rotates that one account's tokens.
   store.upsertAccount(bootstrapAccount, config.password)
   const assets = readAssets()
+  const oauth = config.oauth === undefined
+    ? undefined
+    : resolveOAuthProvider(config.oauth, config.oauthFetch)
+  /** Pending QR authorizations: qrId -> expiry and the origin that started it. */
+  const qrSessions = new Map<string, { expires: number; origin: string; claimed?: string }>()
   /** Web sessions: digest -> owning account and expiry. */
   const sessions = new Map<string, { account: string; expires: number }>()
   const limits = new Map<string, { count: number; until: number }>()
@@ -119,6 +134,53 @@ export function createRemoteServer(config: Config) {
       account: d.account,
     }
   }
+  /**
+   * Finish a provider callback: bind the external identity to an account, mark
+   * the pending session claimed, and send the browser to the waiting client.
+   *
+   * An unknown subject is refused unless account creation from QR login was
+   * explicitly enabled, so scanning a code can never mint an account silently.
+   */
+  async function finishOAuthCallback(
+    provider: OAuthProvider,
+    request: URL,
+    res: ServerResponse,
+  ): Promise<void> {
+    const state = request.searchParams.get('state')
+    const session = state === null ? undefined : qrSessions.get(state)
+    if (state === null || session === undefined || session.expires <= Date.now()) {
+      throw new ApiError('METHOD_NOT_FOUND', 404)
+    }
+    let identity
+    try {
+      identity = await provider.complete(request.searchParams)
+    } catch {
+      throw new ApiError('CONNECTION_FAILED', 502)
+    }
+    if (identity === undefined) throw new ApiError('AUTH_INVALID', 403)
+
+    // Only the pending session's own origin is trustworthy for the redirect.
+    const returnTo = sameOriginReturnTo(session.origin, request.searchParams.get('returnTo') ?? undefined)
+    const redirect = new URL(returnTo)
+    redirect.searchParams.set('signedIn', '1')
+
+    const link = `${provider.name}:${identity.subject}`
+    let accountName = store.findAccountByOAuth(link)
+    if (accountName === undefined) {
+      if (config.oauthCreatesAccounts !== true) {
+        redirect.searchParams.set('error', 'oauth-unlinked')
+        res.writeHead(303, { Location: redirect.toString() }); res.end(); return
+      }
+      const accounts = store.listAccounts()
+      if (accounts.length >= ACCOUNT_LIMIT) throw new ApiError('RATE_LIMITED', 429)
+      accountName = `${provider.name}:${identity.subject}`
+      store.upsertAccount(accountName, secret())
+    }
+    store.linkOAuth(accountName, link)
+    session.claimed = accountName
+    res.writeHead(303, { Location: redirect.toString() }); res.end()
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse) {
     const path = new URL(req.url ?? '/', url).pathname
     const method = req.method
@@ -156,6 +218,61 @@ export function createRemoteServer(config: Config) {
       store.upsertAccount(accountName, registration.password)
       const session = issueSession(res, accountName)
       json(res, 200, { ...profile(accountName), ...session }); return
+    }
+    if (method === 'POST' && path === '/api/v1/auth/oauth/qr/start') {
+      if (oauth === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
+      const requested = new URL(req.url ?? '/', url).searchParams.get('provider')
+      // The provider reports its own name; a mismatch is a client bug worth surfacing.
+      if (requested !== null && requested !== oauth.name) throw new ApiError('METHOD_NOT_FOUND', 404)
+      rate(`oauth:${req.socket.remoteAddress ?? ''}`, 60)
+      for (const [key, session] of qrSessions) if (session.expires <= Date.now()) qrSessions.delete(key)
+      if (qrSessions.size >= 256) throw new ApiError('RATE_LIMITED', 429)
+      const qrId = `${oauth.name}-qr-${secret()}`
+      const expiresIn = 600
+      qrSessions.set(qrId, { expires: Date.now() + expiresIn * 1_000, origin: url.origin })
+      json(res, 200, {
+        qrId,
+        scanUrl: oauth.scanUrl({ qrId, origin: url.origin }),
+        expiresIn,
+        provider: oauth.name,
+      }); return
+    }
+    if (method === 'GET' && path.startsWith('/api/v1/auth/oauth/qr/')) {
+      if (oauth === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
+      const qrId = decodeURIComponent(path.slice('/api/v1/auth/oauth/qr/'.length))
+      const session = qrSessions.get(qrId)
+      if (session === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
+      if (session.expires <= Date.now()) { qrSessions.delete(qrId); json(res, 200, { status: 'expired' }); return }
+      if (session.claimed === undefined) { json(res, 200, { status: 'pending' }); return }
+      // Claim once: the account token is minted on the first poll after completion.
+      const accountName = session.claimed
+      qrSessions.delete(qrId)
+      json(res, 200, { status: 'complete', ...issueSession(res, accountName) }); return
+    }
+    if (oauth?.name === 'mock' && path === '/api/v1/auth/oauth/mock/confirm') {
+      if (method === 'GET') {
+        const state = new URL(req.url ?? '/', url).searchParams.get('state') ?? ''
+        const session = qrSessions.get(state)
+        if (session === undefined || session.expires <= Date.now()) throw new ApiError('METHOD_NOT_FOUND', 404)
+        sendHtml(res, 200, mockConfirmPage('operator', state)); return
+      }
+      if (method === 'POST') {
+        const form = await readForm(req)
+        const state = form.get('state') ?? ''
+        const subject = (form.get('subject') ?? '').trim()
+        const session = qrSessions.get(state)
+        if (session === undefined || session.expires <= Date.now()) throw new ApiError('METHOD_NOT_FOUND', 404)
+        if (subject === '') throw new ApiError('INVALID_MESSAGE')
+        const callback = new URL(oauth.callbackUrl({ qrId: state, origin: session.origin }))
+        callback.searchParams.set('subject', subject)
+        callback.searchParams.set('returnTo', `${session.origin}/app/remote`)
+        res.writeHead(303, { Location: callback.toString() }); res.end(); return
+      }
+    }
+    const callbackPath = oauth === undefined ? undefined : new URL(oauth.callbackUrl({ qrId: 'x', origin: url.origin })).pathname
+    const activeProvider = oauth
+    if (method === 'GET' && callbackPath !== undefined && path === callbackPath && activeProvider !== undefined) {
+      await finishOAuthCallback(activeProvider, new URL(req.url ?? '/', url), res); return
     }
     if (method === 'GET' && path === '/api/v1/auth/me') { const accountName = sessionAccount(req); json(res, 200, profile(accountName)); return }
     if (method === 'POST' && path === '/api/v1/auth/logout') {
@@ -204,4 +321,41 @@ export function createRemoteServer(config: Config) {
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value))
+}
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => (
+    character === '&' ? '&amp;'
+      : character === '<' ? '&lt;'
+        : character === '>' ? '&gt;'
+          : character === '"' ? '&quot;'
+            : '&#39;'
+  ))
+}
+function sendHtml(res: ServerResponse, status: number, html: string): void {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' })
+  res.end(html)
+}
+/** Only the pending session's own origin may receive the confirmation redirect. */
+function sameOriginReturnTo(origin: string, value: string | undefined): string {
+  if (value === undefined) return `${origin}/`
+  try {
+    const url = new URL(value, origin)
+    return url.origin === origin ? url.toString() : `${origin}/`
+  } catch { return `${origin}/` }
+}
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
+}
+/** Minimal local confirmation page used by the mock provider only. */
+function mockConfirmPage(subject: string, state: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Confirm QR login</title></head>`
+    + `<body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem">`
+    + `<h1 style="font-size:1.25rem">Confirm QR login</h1>`
+    + `<p>This page stands in for WeChat while no credentials are configured. Confirming signs in as `
+    + `<strong>${escapeHtml(subject)}</strong> and finishes the QR login in the waiting client.</p>`
+    + `<form method="post"><input type="hidden" name="state" value="${escapeHtml(state)}">`
+    + `<label>Subject <input name="subject" value="${escapeHtml(subject)}" required maxlength="128"></label> `
+    + `<button type="submit">Confirm</button></form></body></html>`
 }

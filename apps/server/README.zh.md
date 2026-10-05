@@ -46,6 +46,10 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_ACCOUNT` | 必填，启动时的种子账号（每次启动按此变量校正该账号） |
 | `DSH_SERVER_PASSWORD` | 必填，至少 12 字符；修改后该账号的设备令牌失效，设备需重新授权 |
 | `DSH_SERVER_REGISTRATION_CODE` | 可选，至少 12 字符。**不设置时账号注册完全关闭**；设置后可用 `POST /api/v1/auth/register` 携带该注册码自助建号 |
+| `DSH_SERVER_OAUTH_PROVIDER` | 可选：`auto`（默认）/ `wechat` / `mock` / `off`。`auto` 仅在同时提供微信凭据时启用扫码登录 |
+| `DSH_SERVER_WECHAT_APP_ID` | 微信开放平台网站应用的 AppID |
+| `DSH_SERVER_WECHAT_APP_SECRET` | 对应 AppSecret |
+| `DSH_SERVER_OAUTH_CREATES_ACCOUNTS` | 可选，默认关。设为 `true` 时，首次扫码的外部身份会自动建号；否则未绑定的身份会被拒绝 |
 | `DSH_SERVER_PUBLIC_URL` | 浏览器访问地址，默认 `http://localhost:8080` |
 | `DSH_SERVER_HOST` | 监听/端口映射地址，默认 `127.0.0.1`；局域网设为 `0.0.0.0` |
 | `DSH_SERVER_PORT` | 默认 `8080` |
@@ -55,9 +59,29 @@ node --env-file=.env dist/main.js
 
 **状态文件升级**：旧版单账号格式（`version: 1`）无法无损并入按账号隔离的结构（两个账号可以合法持有同一 `deviceId`）。检测到旧格式时服务会将其重命名为 `state.json.v1.bak` 并以空账号启动，**不会崩溃、不会删除数据**，代价是设备需重新注册与授权。
 
-> 当前范围：账号自助注册只有 REST 端点，Web 页面仍只有登录与设备状态；微信 OAuth 端点尚未实现。
+> 当前范围：Web 页面仍只有登录与设备状态（账号自助注册与扫码登录只有 REST 端点）。
 
 公网使用 HTTPS 反向代理，并将 `DSH_SERVER_PUBLIC_URL` 设为实际域名；代理需支持 `/ws/v1/connect` 的 WebSocket Upgrade，空闲超时大于 75 秒。
+
+## 微信扫码登录
+
+自部署 Server 实现了与插件 `wechat` provider 对应的 QR OAuth 端点：
+
+```text
+POST /api/v1/auth/oauth/qr/start?provider=wechat   -> { qrId, scanUrl, expiresIn, provider }
+GET  /api/v1/auth/oauth/qr/<qrId>                  -> { status: pending | expired | complete, token? }
+GET  /api/v1/auth/oauth/wechat/callback            -> 微信回调（服务端换取 openid）
+```
+
+**前置条件**（都在微信侧，无法由代码替代）：微信开放平台「网站应用」需**企业主体认证**，且回调域名**必须已 ICP 备案**——微信会校验 `redirect_uri` 与后台配置一致，否则返回 10003。
+
+**账号绑定规则**：扫码得到的是 openid。默认情况下只有**已绑定**的 openid 能登录——运维需要用 REST/SDK 把 openid 绑定到既有账号（`linkOAuth`）。设 `DSH_SERVER_OAUTH_CREATES_ACCOUNTS=true` 后，未绑定的 openid 会以 `wechat:<openid>` 为账号名自动建号。默认关闭是为了避免"任何人扫一下就能拿到账号"。
+
+**无凭据时如何验证**：设 `DSH_SERVER_OAUTH_PROVIDER=mock` 会启用等价的本地 provider——`scanUrl` 指向本机的确认页，确认后回调写入身份，整条 QR 轮询链路与真实微信完全一致。核心测试即用该 provider 覆盖。
+
+### 凭据没有准备好时的替代路径
+
+不想等微信资质，可以用**注册码 + 账号密码**：设 `DSH_SERVER_REGISTRATION_CODE`，客户端用账号密码登录，无需任何第三方平台。
 
 ## 功能
 

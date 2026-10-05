@@ -30,6 +30,12 @@ const savedAccountSchema = z.object({
   devices: z.record(savedDeviceSchema),
   tokens: z.record(tokenSchema),
   createdAt: z.number(),
+  /**
+   * External identities bound to this account, as `provider:subject` -> bound-at
+   * timestamp. A QR login only succeeds for a subject already listed here, unless
+   * the server was explicitly told to create accounts for new subjects.
+   */
+  oauthLinks: z.record(z.number()).default({}),
 })
 const stateSchema = z.object({
   version: z.literal(2),
@@ -87,6 +93,25 @@ export class Store {
   /** Accounts known to this server, newest last. */
   listAccounts(): string[] { return Object.keys(this.state.accounts) }
 
+  /** The account an external identity is bound to, if any. */
+  findAccountByOAuth(link: string): string | undefined {
+    for (const [name, account] of Object.entries(this.state.accounts)) {
+      if (account.oauthLinks[link] !== undefined) return name
+    }
+    return undefined
+  }
+
+  /** Bind an external identity to an existing account, replacing any other binding for it. */
+  linkOAuth(accountName: string, link: string): void {
+    const account = this.account(accountName)
+    if (account === undefined) throw new ApiError('AUTH_INVALID', 401)
+    for (const [name, other] of Object.entries(this.state.accounts)) {
+      if (name !== accountName) delete other.oauthLinks[link]
+    }
+    account.oauthLinks[link] = Date.now()
+    this.save()
+  }
+
   /** One account's record, or undefined when it does not exist. */
   private account(name: string): SavedAccount | undefined {
     return Object.hasOwn(this.state.accounts, name) ? this.state.accounts[name] : undefined
@@ -102,7 +127,7 @@ export class Store {
     const salt = existing?.salt ?? secret()
     const verifier = scryptSync(password, salt, 32).toString('hex')
     if (existing === undefined) {
-      this.state.accounts[name] = { salt, verifier, devices: {}, tokens: {}, createdAt: Date.now() }
+      this.state.accounts[name] = { salt, verifier, devices: {}, tokens: {}, createdAt: Date.now(), oauthLinks: {} }
       this.save()
       return
     }
