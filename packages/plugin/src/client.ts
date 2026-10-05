@@ -497,6 +497,7 @@ const en = {
   deepseekSignInWaiting: 'Starting DeepSeek sign-in — finish it in the browser.',
   deepseekSignInOpen: 'Open the sign-in page',
   deepseekSignInTimeout: 'DeepSeek sign-in was not completed. Try again.',
+  deepseekAuthorizeUnavailable: 'DeepSeek did not return a sign-in page. Try again.',
   changeServerUrl: 'Change address',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
@@ -744,6 +745,7 @@ const zh: Record<keyof typeof en, string> = {
   deepseekSignInWaiting: '正在发起 DeepSeek 登录，请在浏览器中完成。',
   deepseekSignInOpen: '手动打开登录页',
   deepseekSignInTimeout: 'DeepSeek 登录未完成，请重试。',
+  deepseekAuthorizeUnavailable: '未能获取 DeepSeek 登录页，请重试。',
   changeServerUrl: '修改地址',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
@@ -2025,15 +2027,24 @@ window.__ModuleLoader__.load({
         try {
           let state = await requestDeepSeekSignIn()
           if (state.pending) {
-            if (state.authorizeUrl !== undefined) {
-              // Keep the address on screen: if the tab was blocked after all,
-              // a click on this link is a user gesture and always allowed.
-              setPendingAuthorizeUrl(state.authorizeUrl)
-              if (tab === null || tab.closed) window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
-              else tab.location.replace(state.authorizeUrl)
-            } else {
-              tab?.close()
+            // `startSignIn` returns as soon as the attempt exists — the attempt
+            // starts in `initializing` and only carries the authorization page
+            // once the platform answers. Wait for the address here: requiring a
+            // second click is the caller's bug, not a limit of the API.
+            for (let wait = 0; wait < 30 && state.pending && state.authorizeUrl === undefined; wait++) {
+              await new Promise(resolve => { setTimeout(resolve, 1_000) })
+              state = await requestDeepSeekSignIn()
             }
+            if (state.authorizeUrl === undefined) {
+              // Never end a click in silence: say the page could not be obtained.
+              tab?.close()
+              throw new Error(t('deepseekAuthorizeUnavailable'))
+            }
+            // Keep the address on screen: if the tab was blocked after all,
+            // a click on this link is a user gesture and always allowed.
+            setPendingAuthorizeUrl(state.authorizeUrl)
+            if (tab === null || tab.closed) window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+            else tab.location.replace(state.authorizeUrl)
             for (let poll = 0; poll < 40 && state.pending; poll++) {
               await new Promise(resolve => { setTimeout(resolve, 3_000) })
               state = await requestDeepSeekSignIn()

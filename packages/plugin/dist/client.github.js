@@ -1989,6 +1989,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     deepseekSignInWaiting: "Starting DeepSeek sign-in \u2014 finish it in the browser.",
     deepseekSignInOpen: "Open the sign-in page",
     deepseekSignInTimeout: "DeepSeek sign-in was not completed. Try again.",
+    deepseekAuthorizeUnavailable: "DeepSeek did not return a sign-in page. Try again.",
     changeServerUrl: "Change address",
     startSignIn: "Start sign-in",
     allowControlCurrentDevice: "Allow control of this device",
@@ -2233,6 +2234,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     deepseekSignInWaiting: "\u6B63\u5728\u53D1\u8D77 DeepSeek \u767B\u5F55\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210\u3002",
     deepseekSignInOpen: "\u624B\u52A8\u6253\u5F00\u767B\u5F55\u9875",
     deepseekSignInTimeout: "DeepSeek \u767B\u5F55\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u3002",
+    deepseekAuthorizeUnavailable: "\u672A\u80FD\u83B7\u53D6 DeepSeek \u767B\u5F55\u9875\uFF0C\u8BF7\u91CD\u8BD5\u3002",
     changeServerUrl: "\u4FEE\u6539\u5730\u5740",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
     allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
@@ -3123,7 +3125,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
           try {
             let state = await requestDeepSeekSignIn();
             if (state.pending) {
-              state.authorizeUrl !== void 0 ? (setPendingAuthorizeUrl(state.authorizeUrl), tab === null || tab.closed ? window.open(state.authorizeUrl, "_blank", "noopener,noreferrer") : tab.location.replace(state.authorizeUrl)) : tab?.close();
+              for (let wait = 0; wait < 30 && state.pending && state.authorizeUrl === void 0; wait++)
+                await new Promise((resolve) => {
+                  setTimeout(resolve, 1e3);
+                }), state = await requestDeepSeekSignIn();
+              if (state.authorizeUrl === void 0)
+                throw tab?.close(), new Error(t("deepseekAuthorizeUnavailable"));
+              setPendingAuthorizeUrl(state.authorizeUrl), tab === null || tab.closed ? window.open(state.authorizeUrl, "_blank", "noopener,noreferrer") : tab.location.replace(state.authorizeUrl);
               for (let poll = 0; poll < 40 && state.pending; poll++)
                 await new Promise((resolve) => {
                   setTimeout(resolve, 3e3);
