@@ -46,6 +46,10 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_ACCOUNT` | 必填，启动时的种子账号（每次启动按此变量校正该账号） |
 | `DSH_SERVER_PASSWORD` | 必填，至少 12 字符；修改后该账号的设备令牌失效，设备需重新授权 |
 | `DSH_SERVER_REGISTRATION_CODE` | 可选，至少 12 字符。**不设置时账号注册完全关闭**；设置后可用 `POST /api/v1/auth/register` 携带该注册码自助建号 |
+| `DSH_SERVER_DEEPSEEK_LOGIN` | 设为 `on` 启用 DeepSeek 账号登录端点；**默认关闭**（未启用时该端点返回 404） |
+| `DSH_SERVER_DEEPSEEK_PLATFORM` | 可选，账号平台地址，默认 `https://platform.deepseek.com` |
+| `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS` | 可选，默认关。设为 `true` 时首次登录的 DeepSeek 身份会自动建号 |
+| `DSH_SERVER_PASSWORD_LOGIN` | 设为 `off` 时**完全拒绝账号密码登录**（配合"只用一种登录方式"的部署） |
 | `DSH_SERVER_OAUTH_PROVIDER` | 可选：`auto`（默认，优先 GitHub）/ `github` / `wechat` / `mock` / `off` |
 | `DSH_SERVER_GITHUB_CLIENT_ID` | GitHub OAuth App 的 Client ID |
 | `DSH_SERVER_GITHUB_CLIENT_SECRET` | 对应 Client secret（只发往 GitHub） |
@@ -64,7 +68,42 @@ node --env-file=.env dist/main.js
 
 公网使用 HTTPS 反向代理，并将 `DSH_SERVER_PUBLIC_URL` 设为实际域名；代理需支持 `/ws/v1/connect` 的 WebSocket Upgrade，空闲超时大于 75 秒。
 
-## GitHub 扫码登录（推荐）
+## DeepSeek 账号登录（当前部署使用）
+
+插件现在只提供一种登录入口：**用 DSH 已登录的 DeepSeek 账号登录**。Server 端点：
+
+```text
+POST /api/v1/auth/deepseek   { token }   -> { account, token, expiresAt, ... }   与 /auth/v1/auth/login 同形
+```
+
+**它如何确认身份**：Server 拿到客户端提交的账号授权（grant）后，**自己**调用账号平台：
+
+```text
+GET {platformOrigin}/auth-api/v0/users/current
+    User-Agent: <浏览器 UA>          ← WAF 要求，见下
+    x-dsh-auth-token: <grant>
+    x-client-*: 5 个客户端标识头
+-> { code: 0, data: { biz_code: 0, biz_data: { id, email, id_profile } } }
+```
+
+`biz_data.id` 是平台稳定账号 ID，Server 用它作为绑定键，账号名为 `deepseek:<id>`。**grant 只用于这一次查询，用完即弃，不落盘。**
+
+**因此绑定是确定性的**：同一个人无论从哪台设备、用哪个 grant 登录，平台返回同一个 `id` → 绑定到同一个 Server 账号，该账号下的设备互相可见。客户端自报的身份**不参与**绑定（伪造无效）；平台没返回 `id` 时拒绝登录，不做猜测。
+
+**WAF 要求浏览器 UA**：`platform.deepseek.com` 前置的 WAF 对没有浏览器 User-Agent 的请求直接返回 **429**（连平台首页也一样），无论请求头是否完整。因此 `apps/server/src/deepseek.ts` 中的 `BROWSER_USER_AGENT` 是协议的一部分，不是可选的礼貌头；改动它会让所有登录失败（症状：假 token 也返回 502，而不是 401）。
+
+**账号创建**：默认拒绝未绑定的身份（403）。设 `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS=true` 后自动建号，账号名为 `deepseek:<id>`。
+
+**注意登录发生在用户的机器上**：DSH 的账号授权流程要求回调地址是**环回地址**（`http://127.0.0.1:<端口>` / `localhost` / `[::1]`），DSH 自己会校验并拒绝其他来源。所以：
+
+| 使用形态 | 能否用 DeepSeek 账号登录 |
+| --- | --- |
+| 用户在自己机器上运行 Desktop / `dsh web` | ✅ 可以 |
+| 用户通过公网域名访问你服务器上的 Web 界面 | ❌ 不行（回调回到用户本机，那里没有 DSH） |
+
+**当前部署的安全边界**：本部署启用了 `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS=true` 且 `DSH_SERVER_PASSWORD_LOGIN=off`，即**任何能访问本 Server 并持有 DeepSeek 账号的人都能建号**（账号之间仍完全隔离）。若只面向特定用户，请加白名单或改为预绑定。
+
+## GitHub 扫码登录（已实现，当前未启用）
 
 自部署 Server 实现了与插件 `github` provider 对应的 QR OAuth 端点：
 

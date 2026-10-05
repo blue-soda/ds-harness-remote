@@ -107,7 +107,7 @@ Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile
 ## Quick start
 
 1. Open **Remote** from the Harness sidebar.
-2. Sign in with a GitHub or Zhihu QR code, or use your account and password. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
+2. Sign in with a GitHub or Zhihu QR code, or use your account and password. **Note: this fork's plugin now offers DeepSeek account sign-in only** — the GitHub/Zhihu QR and password entries are gone from the Remote modal (their server-side implementations remain). The rest of this section describes the hosted service, whose own Web sign-in is unaffected. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
 3. The Host starts with control of the current computer enabled. Remote terminal access is also enabled by default; you can turn it off in the detailed Remote settings.
 4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.

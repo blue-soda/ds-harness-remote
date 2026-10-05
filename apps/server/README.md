@@ -46,6 +46,10 @@ Open <http://localhost:8080>. Set the same Server URL on your Host and Client, t
 | `DSH_SERVER_ACCOUNT` | Required; the bootstrap account, re-applied on every start |
 | `DSH_SERVER_PASSWORD` | Required; at least 12 characters. Changing it rotates that account's device tokens |
 | `DSH_SERVER_REGISTRATION_CODE` | Optional; at least 12 characters. **Without it account registration is closed**; when set, `POST /api/v1/auth/register` accepts the code to create an account |
+| `DSH_SERVER_DEEPSEEK_LOGIN` | Set to `on` to mount DeepSeek account sign-in; **off by default** (the endpoint answers 404) |
+| `DSH_SERVER_DEEPSEEK_PLATFORM` | Optional account-platform origin; default `https://platform.deepseek.com` |
+| `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS` | Optional, default off. When `true`, a first-time DeepSeek identity creates its account |
+| `DSH_SERVER_PASSWORD_LOGIN` | Set to `off` to refuse password sign-in entirely |
 | `DSH_SERVER_OAUTH_PROVIDER` | Optional: `auto` (default, prefers GitHub) / `github` / `wechat` / `mock` / `off` |
 | `DSH_SERVER_GITHUB_CLIENT_ID` | GitHub OAuth App client id |
 | `DSH_SERVER_GITHUB_CLIENT_SECRET` | Matching client secret (sent only to GitHub) |
@@ -63,7 +67,42 @@ Open <http://localhost:8080>. Set the same Server URL on your Host and Client, t
 
 For public access, use an HTTPS reverse proxy and set `DSH_SERVER_PUBLIC_URL` to your domain. The proxy must support WebSocket Upgrade at `/ws/v1/connect` with an idle timeout above 75 seconds.
 
-## GitHub QR sign-in
+## DeepSeek account sign-in (in use here)
+
+The plugin now offers one sign-in entry: **the DeepSeek account DSH is already signed in with**. The Server exposes:
+
+```text
+POST /api/v1/auth/deepseek   { token }   -> { account, token, expiresAt, ... }   same shape as /api/v1/auth/login
+```
+
+**How identity is confirmed**: the Server takes the grant the client presents and asks the account platform *itself*:
+
+```text
+GET {platformOrigin}/auth-api/v0/users/current
+    User-Agent: <a browser UA>      <- required by the WAF, see below
+    x-dsh-auth-token: <grant>
+    x-client-*: the five client identity headers
+-> { code: 0, data: { biz_code: 0, biz_data: { id, email, id_profile } } }
+```
+
+`biz_data.id` is the platform's stable account id and becomes the binding key, with the account named `deepseek:<id>`. **The grant is used for that one lookup and then discarded; it is never persisted.**
+
+**Binding is therefore deterministic**: one person signs in from any device with any grant, the platform returns the same `id`, and every device lands on the same Server account where they can see each other. Nothing the client claims takes part in the binding, so it cannot be forged; a response without an `id` is refused rather than guessed.
+
+**The WAF requires a browser User-Agent**: the WAF in front of `platform.deepseek.com` answers **429** to any request without one — including the platform's own home page — no matter how complete the other headers are. `BROWSER_USER_AGENT` in `apps/server/src/deepseek.ts` is therefore part of the protocol, not a courtesy header; changing it breaks every sign-in (a bogus token then returns 502 instead of 401).
+
+**Account creation** is refused by default for an unbound identity (403); `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS=true` creates the account instead.
+
+**Sign-in happens on the user's own machine**: DSH's account flow requires a **loopback** callback (`http://127.0.0.1:<port>`, `localhost` or `[::1]`) and rejects anything else itself. So:
+
+| Deployment | DeepSeek account sign-in |
+| --- | --- |
+| The user runs Desktop or `dsh web` on their own machine | works |
+| The user reaches a Web UI hosted on your server through a public domain | does not work (the callback lands on their machine, where no DSH runs) |
+
+**Boundary of this deployment**: it sets `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS=true` with `DSH_SERVER_PASSWORD_LOGIN=off`, so **anyone who can reach this Server and holds a DeepSeek account can create one** (accounts stay fully isolated). Restrict it with an allowlist or pre-binding if it is meant for specific people.
+
+## GitHub QR sign-in (implemented, not currently offered)
 
 ```text
 POST /api/v1/auth/oauth/qr/start?provider=github   -> { qrId, scanUrl, expiresIn, provider }

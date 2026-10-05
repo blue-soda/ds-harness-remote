@@ -103,7 +103,7 @@ Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile
 ## 快速开始
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
-2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
+2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。**注意：本 fork 的插件已改为只提供「使用 DeepSeek 账号登录」**——Remote 模态框中的 GitHub/知乎扫码与账号密码入口已移除（服务端实现仍保留）；本节其余内容描述的是官方托管服务，其网页端登录方式不受影响。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
 3. Host 启动后默认允许控制当前机器，远程终端也默认开启；需要时可在详细 Remote 设置中关闭远程终端。
 4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
