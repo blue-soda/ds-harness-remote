@@ -438,11 +438,24 @@ export class HostServerApi {
   }
 }
 
+/**
+ * Accept the authorization URL a server hands back for a QR login.
+ *
+ * A real OAuth provider's page lives on another origin (`github.com`,
+ * `open.weixin.qq.com`), so requiring the server's own origin would reject every
+ * provider. The guard is the scheme instead: HTTPS, or HTTP when the server
+ * itself is loopback. That still keeps `javascript:`, `data:` and obfuscated
+ * payloads out of the QR link and the rendered anchor.
+ */
 function normalizeOAuthScanUrl(value: unknown, baseUrl: string): string | undefined {
   if (typeof value !== 'string' || TERMINAL_CONTROL_CHARACTERS.test(value)) return undefined
   try {
-    const normalized = new URL(value).href
-    return normalized.startsWith(`${baseUrl}/`) ? normalized : undefined
+    const normalized = new URL(value)
+    if (normalized.protocol === 'https:') return normalized.href
+    if (normalized.protocol !== 'http:') return undefined
+    const server = new URL(baseUrl)
+    const loopback = server.hostname === 'localhost' || server.hostname === '127.0.0.1' || server.hostname === '::1'
+    return loopback ? normalized.href : undefined
   } catch {
     return undefined
   }

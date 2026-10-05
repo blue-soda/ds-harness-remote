@@ -18732,8 +18732,12 @@ var HostServerApi = class {
 function normalizeOAuthScanUrl(value, baseUrl) {
   if (typeof value !== "string" || TERMINAL_CONTROL_CHARACTERS.test(value)) return void 0;
   try {
-    const normalized = new URL(value).href;
-    return normalized.startsWith(`${baseUrl}/`) ? normalized : void 0;
+    const normalized = new URL(value);
+    if (normalized.protocol === "https:") return normalized.href;
+    if (normalized.protocol !== "http:") return void 0;
+    const server = new URL(baseUrl);
+    const loopback = server.hostname === "localhost" || server.hostname === "127.0.0.1" || server.hostname === "::1";
+    return loopback ? normalized.href : void 0;
   } catch {
     return void 0;
   }

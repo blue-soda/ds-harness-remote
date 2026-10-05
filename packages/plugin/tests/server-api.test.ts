@@ -60,6 +60,40 @@ describe('HostServerApi', () => {
     })
   })
 
+  it('accepts a provider authorization URL on another origin', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-provider-qr-'))
+    directories.push(directory)
+    // GitHub's authorize page is cross-origin by nature; only the scheme is ours to police.
+    const fetchMock = vi.fn(async () => json({
+      qrId: 'github-qr-session-1234567890',
+      scanUrl: 'https://github.com/login/oauth/authorize?client_id=abc&state=xyz',
+      expiresIn: 600,
+      provider: 'github',
+    })) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+
+    await expect(api.startOAuthQrLogin('github')).resolves.toMatchObject({
+      scanUrl: 'https://github.com/login/oauth/authorize?client_id=abc&state=xyz',
+    })
+  })
+
+  it('rejects a QR login URL that is not an HTTPS authorization page', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-bad-scheme-qr-'))
+    directories.push(directory)
+    const fetchMock = vi.fn(async () => json({
+      qrId: 'github-qr-session-1234567890',
+      scanUrl: 'javascript:alert(1)',
+      expiresIn: 600,
+      provider: 'github',
+    })) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+
+    await expect(api.startOAuthQrLogin('github')).rejects.toMatchObject({
+      code: 'INVALID_MESSAGE',
+      retryable: false,
+    })
+  })
+
   it('retries a completed QR login with a recovered device identity', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-qr-revoked-'))
     directories.push(directory)
