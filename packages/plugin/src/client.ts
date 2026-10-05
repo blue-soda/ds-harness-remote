@@ -1579,6 +1579,11 @@ window.__ModuleLoader__.load({
       const [editingServerUrl, setEditingServerUrl] = React.useState(false)
       /** True while the DeepSeek browser sign-in is outstanding. */
       const [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(false)
+      /**
+       * The authorization page, kept so a popup the browser blocks still leaves
+       * the user a link to click instead of a silent no-op.
+       */
+      const [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState<string | undefined>(undefined)
       const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(
         isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider,
       )
@@ -1978,8 +1983,13 @@ window.__ModuleLoader__.load({
         try {
           let state = await requestDeepSeekSignIn()
           if (state.pending) {
-            // Open the DeepSeek page, then wait for that browser flow to land.
-            if (state.authorizeUrl !== undefined) window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+            // The page is opened here, but browsers may treat a window opened
+            // after an await as an unwanted popup, so the link stays on screen
+            // until the flow settles either way.
+            if (state.authorizeUrl !== undefined) {
+              setPendingAuthorizeUrl(state.authorizeUrl)
+              window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+            }
             setAwaitingDeepSeek(true)
             try {
               for (let poll = 0; poll < 40 && state.pending; poll++) {
@@ -1988,6 +1998,7 @@ window.__ModuleLoader__.load({
               }
             } finally {
               setAwaitingDeepSeek(false)
+              setPendingAuthorizeUrl(undefined)
             }
             if (state.pending) throw new Error(t('deepseekSignInTimeout'))
           }
@@ -2237,7 +2248,11 @@ window.__ModuleLoader__.load({
                         }, loginServerUrl)),
                     React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '', onClick: () => void signInClient() },
                       t(busy ? 'signingIn' : 'deepseekSignIn')),
-                    awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' }, t('deepseekSignInWaiting')) : null)) : null,
+                    awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' },
+                      t('deepseekSignInWaiting'),
+                      pendingAuthorizeUrl === undefined ? null : React.createElement('a', {
+                        href: pendingAuthorizeUrl, target: '_blank', rel: 'noreferrer',
+                      }, t('openInBrowser'))) : null)) : null,
                 needsAuthorization ? null : React.createElement(React.Fragment, null,
                 selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading' },
