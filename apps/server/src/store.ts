@@ -10,78 +10,229 @@ export class ApiError extends Error {
 export const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
 export const secret = (): string => randomBytes(32).toString('base64url')
 export const equal = (left: string, right: string): boolean => timingSafeEqual(Buffer.from(hash(left)), Buffer.from(hash(right)))
-const tokenSchema = z.object({ kind: z.enum(['access', 'refresh']), deviceId: z.string(), expires: z.number(), used: z.boolean() })
-const savedDeviceSchema = z.object({ descriptor: accountDeviceDescriptorSchema, revoked: z.boolean(), lastSeenAt: z.number() })
-const stateSchema = z.object({ version: z.literal(1), account: z.string(), salt: z.string(), verifier: z.string(), devices: z.record(savedDeviceSchema), tokens: z.record(tokenSchema) })
-type SavedDevice = z.infer<typeof savedDeviceSchema>
 
-/** Single-process store. Only token digests and public identities reach disk. */
+const tokenSchema = z.object({ kind: z.enum(['access', 'refresh']), deviceId: z.string(), expires: z.number(), used: z.boolean() })
+const savedDeviceSchema = z.object({
+  /** Account this device belongs to; membership is scoped to it. */
+  account: z.string(),
+  descriptor: accountDeviceDescriptorSchema,
+  revoked: z.boolean(),
+  lastSeenAt: z.number(),
+})
+/**
+ * One account's credentials and its own device/token namespace. Accounts are
+ * independent: devices and tokens never cross the boundary, and a password
+ * change invalidates only that account's tokens.
+ */
+const savedAccountSchema = z.object({
+  salt: z.string(),
+  verifier: z.string(),
+  devices: z.record(savedDeviceSchema),
+  tokens: z.record(tokenSchema),
+  createdAt: z.number(),
+})
+const stateSchema = z.object({
+  version: z.literal(2),
+  accounts: z.record(savedAccountSchema),
+})
+type SavedDevice = z.infer<typeof savedDeviceSchema>
+type SavedAccount = z.infer<typeof savedAccountSchema>
+
+/**
+ * Read the state file, tolerating an older format.
+ *
+ * A single-account file stores one `account` with its own `devices`/`tokens`.
+ * That layout cannot be merged into the account-scoped one (two accounts may
+ * legitimately hold a device with the same id), so the file is preserved
+ * alongside as `<file>.v1.bak` and the server starts empty: every device
+ * re-registers and re-authorizes, but no data is destroyed and startup never
+ * fails on an old file.
+ */
+function loadState(file: string): z.infer<typeof stateSchema> {
+  if (!existsSync(file)) return { version: 2, accounts: {} }
+  let raw: unknown
+  try { raw = JSON.parse(readFileSync(file, 'utf8')) } catch { throw new Error(`${file} is not valid JSON.`) }
+  const parsed = stateSchema.safeParse(raw)
+  if (parsed.success) return parsed.data
+  const legacy = z.object({ version: z.literal(1), account: z.string() }).safeParse(raw)
+  if (legacy.success) {
+    let backup = `${file}.v1.bak`
+    for (let ordinal = 2; existsSync(backup); ordinal += 1) backup = `${file}.v1.bak${ordinal}`
+    renameSync(file, backup)
+    console.warn(`Remote Server: ${file} used the single-account format; kept it as ${backup} and started with no accounts.`)
+    return { version: 2, accounts: {} }
+  }
+  throw new Error(`${file} is not a recognised state file; refusing to overwrite it.`)
+}
+
+/**
+ * Single-process multi-account store. Only token digests and public identities
+ * reach disk; passwords are stored as scrypt verifiers, never in clear text.
+ */
 export class Store {
   private state: z.infer<typeof stateSchema>
-  onInvalidate: (id: string) => void = () => {}
-  constructor(private readonly file: string, readonly account: string, password: string) {
-    const previous = existsSync(file) ? stateSchema.parse(JSON.parse(readFileSync(file, 'utf8'))) : undefined
-    const salt = previous?.salt ?? secret()
-    const verifier = scryptSync(password, salt, 32).toString('hex')
-    this.state = previous ?? { version: 1, account, salt, verifier, devices: {}, tokens: {} }
-    if (this.state.account !== account) this.state.devices = {}
-    if (this.state.account !== account || !equal(this.state.verifier, verifier)) this.state.tokens = {}
-    Object.assign(this.state, { account, verifier })
-    this.save()
+  onInvalidate: (id: string, account: string) => void = () => {}
+
+  constructor(private readonly file: string) {
+    this.state = loadState(file)
   }
+
   private save(): void {
     mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 })
     const tmp = `${this.file}.tmp`
     writeFileSync(tmp, JSON.stringify(this.state), { mode: 0o600 })
     renameSync(tmp, this.file)
   }
-  get(id: string): SavedDevice {
-    const d = Object.hasOwn(this.state.devices, id) ? this.state.devices[id] : undefined
-    if (!d) throw new ApiError('DEVICE_NOT_FOUND', 404)
-    if (d.revoked) throw new ApiError('DEVICE_REVOKED', 403)
-    return d
+
+  /** Accounts known to this server, newest last. */
+  listAccounts(): string[] { return Object.keys(this.state.accounts) }
+
+  /** One account's record, or undefined when it does not exist. */
+  private account(name: string): SavedAccount | undefined {
+    return Object.hasOwn(this.state.accounts, name) ? this.state.accounts[name] : undefined
   }
-  list(): SavedDevice[] { return Object.values(this.state.devices).filter(d => !d.revoked) }
-  register(descriptor: AccountDeviceDescriptor): ReturnType<Store['issue']> {
-    const old = this.state.devices[descriptor.deviceId]
+
+  /**
+   * Create the account, or update its password. A changed verifier drops that
+   * account's tokens (devices stay registered, as they re-authorize with the
+   * new password), matching the single-account behaviour this replaces.
+   */
+  upsertAccount(name: string, password: string): void {
+    const existing = this.account(name)
+    const salt = existing?.salt ?? secret()
+    const verifier = scryptSync(password, salt, 32).toString('hex')
+    if (existing === undefined) {
+      this.state.accounts[name] = { salt, verifier, devices: {}, tokens: {}, createdAt: Date.now() }
+      this.save()
+      return
+    }
+    if (!equal(existing.verifier, verifier)) {
+      existing.salt = salt
+      existing.verifier = verifier
+      for (const id of Object.keys(existing.devices)) this.onInvalidate(id, name)
+      existing.tokens = {}
+    }
+    this.save()
+  }
+
+  /** Whether the account exists and the password matches, without issuing anything. */
+  verifyAccount(name: string, password: string): boolean {
+    const account = this.account(name)
+    if (account === undefined) return false
+    return equal(account.verifier, scryptSync(password, account.salt, 32).toString('hex'))
+  }
+
+  /** Number of active (non-revoked) devices on an account. */
+  deviceCount(name: string): number {
+    return Object.values(this.account(name)?.devices ?? {}).filter(d => !d.revoked).length
+  }
+
+  /** Devices of one account, excluding revoked ones. */
+  devicesFor(name: string): SavedDevice[] {
+    return Object.values(this.account(name)?.devices ?? {}).filter(d => !d.revoked)
+  }
+
+  /**
+   * Resolve a device scoped to one account. Tokens are per-account, so a token
+   * issued for one account can never resolve a device of another.
+   */
+  get(id: string, accountName?: string): SavedDevice {
+    const device = accountName === undefined
+      ? Object.values(this.state.accounts).map(a => a.devices[id]).find(d => d !== undefined)
+      : this.account(accountName)?.devices[id]
+    if (!device) throw new ApiError('DEVICE_NOT_FOUND', 404)
+    if (device.revoked) throw new ApiError('DEVICE_REVOKED', 403)
+    return device
+  }
+
+  /** Every non-revoked device on the server, across accounts. */
+  list(): SavedDevice[] {
+    return Object.values(this.state.accounts).flatMap(a => Object.values(a.devices)).filter(d => !d.revoked)
+  }
+
+  /**
+   * Register a device on an account. The device namespace is per account, so the
+   * same machine may hold a device on several accounts.
+   */
+  register(accountName: string, descriptor: AccountDeviceDescriptor): ReturnType<Store['issue']> {
+    const account = this.account(accountName)
+    if (account === undefined) throw new ApiError('AUTH_INVALID', 401)
+    const old = account.devices[descriptor.deviceId]
     if (old?.revoked) throw new ApiError('DEVICE_REVOKED', 403)
     if (old && (old.descriptor.identityKey !== descriptor.identityKey || old.descriptor.role !== descriptor.role)) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
-    if (!old && Object.keys(this.state.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
-    this.state.devices[descriptor.deviceId] = { descriptor, revoked: false, lastSeenAt: old?.lastSeenAt ?? 0 }
-    this.invalidate(descriptor.deviceId)
-    return this.issue(descriptor.deviceId)
+    if (!old && Object.values(account.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
+    account.devices[descriptor.deviceId] = {
+      account: accountName,
+      descriptor,
+      revoked: false,
+      lastSeenAt: old?.lastSeenAt ?? 0,
+    }
+    this.invalidate(descriptor.deviceId, accountName)
+    return this.issue(accountName, descriptor.deviceId)
   }
-  private issue(deviceId: string, refreshTokenExpiresAt = Date.now() + 30 * 86400_000) {
-    for (const [key, value] of Object.entries(this.state.tokens)) if (value.expires <= Date.now()) delete this.state.tokens[key]
-    if (Object.keys(this.state.tokens).length >= 16384) throw new ApiError('RATE_LIMITED', 429)
+
+  private issue(accountName: string, deviceId: string, refreshTokenExpiresAt = Date.now() + 30 * 86400_000) {
+    const account = this.account(accountName)
+    if (account === undefined) throw new ApiError('AUTH_INVALID', 401)
+    for (const [key, value] of Object.entries(account.tokens)) if (value.expires <= Date.now()) delete account.tokens[key]
+    if (Object.keys(account.tokens).length >= 16384) throw new ApiError('RATE_LIMITED', 429)
     const accessToken = secret(), refreshToken = secret()
     const accessTokenExpiresAt = Date.now() + 60 * 60_000
-    this.state.tokens[hash(accessToken)] = { kind: 'access', deviceId, expires: accessTokenExpiresAt, used: false }
-    this.state.tokens[hash(refreshToken)] = { kind: 'refresh', deviceId, expires: refreshTokenExpiresAt, used: false }
+    account.tokens[hash(accessToken)] = { kind: 'access', deviceId, expires: accessTokenExpiresAt, used: false }
+    account.tokens[hash(refreshToken)] = { kind: 'refresh', deviceId, expires: refreshTokenExpiresAt, used: false }
     this.save()
     return { accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt }
   }
+
+  /** Resolve a device from its access token, within the account that issued it. */
   authenticate(token: string): SavedDevice {
-    const record = this.state.tokens[hash(token)]
-    if (!record || record.kind !== 'access') throw new ApiError('AUTH_INVALID', 401)
-    if (record.expires <= Date.now()) throw new ApiError('TOKEN_EXPIRED', 401)
-    return this.get(record.deviceId)
+    for (const account of Object.values(this.state.accounts)) {
+      const record = account.tokens[hash(token)]
+      if (!record || record.kind !== 'access') continue
+      if (record.expires <= Date.now()) throw new ApiError('TOKEN_EXPIRED', 401)
+      return this.get(record.deviceId)
+    }
+    throw new ApiError('AUTH_INVALID', 401)
   }
+
+  /** The account a device token belongs to, without exposing the device. */
+  accountForToken(token: string): string {
+    return this.authenticate(token).account
+  }
+
   refresh(deviceId: string, token: string) {
-    this.get(deviceId)
-    const record = this.state.tokens[hash(token)]
-    if (!record || record.kind !== 'refresh' || record.deviceId !== deviceId) throw new ApiError('AUTH_INVALID', 401)
-    if (record.expires <= Date.now()) throw new ApiError('TOKEN_EXPIRED', 401)
-    if (record.used) { this.invalidate(deviceId); throw new ApiError('AUTH_INVALID', 401) }
-    record.used = true
-    return this.issue(deviceId, record.expires)
+    const digest = hash(token)
+    for (const [accountName, account] of Object.entries(this.state.accounts)) {
+      const record = account.tokens[digest]
+      if (!record || record.kind !== 'refresh' || record.deviceId !== deviceId) continue
+      this.get(deviceId, accountName)
+      if (record.expires <= Date.now()) throw new ApiError('TOKEN_EXPIRED', 401)
+      // A reused refresh token drops the whole family for that device.
+      if (record.used) { this.invalidate(deviceId, accountName); throw new ApiError('AUTH_INVALID', 401) }
+      record.used = true
+      return this.issue(accountName, deviceId, record.expires)
+    }
+    throw new ApiError('AUTH_INVALID', 401)
   }
-  invalidate(deviceId: string): void {
-    for (const [key, value] of Object.entries(this.state.tokens)) if (value.deviceId === deviceId) delete this.state.tokens[key]
-    this.onInvalidate(deviceId)
+
+  /** Drop every token of one device; reports the device id and account for socket teardown. */
+  invalidate(deviceId: string, accountName?: string): void {
+    const accounts = accountName === undefined
+      ? Object.entries(this.state.accounts)
+      : Object.entries(this.state.accounts).filter(([name]) => name === accountName)
+    for (const [, account] of accounts) {
+      for (const [key, value] of Object.entries(account.tokens)) if (value.deviceId === deviceId) delete account.tokens[key]
+    }
+    this.onInvalidate(deviceId, accountName ?? '')
     this.save()
   }
-  revoke(id: string): void { this.get(id).revoked = true; this.invalidate(id) }
+
+  revoke(id: string): void {
+    const device = this.get(id)
+    device.revoked = true
+    this.invalidate(id, device.account)
+  }
+
   touch(id: string, clientVersion?: string, harnessVersion?: string): void {
     const d = this.get(id)
     d.lastSeenAt = Date.now()

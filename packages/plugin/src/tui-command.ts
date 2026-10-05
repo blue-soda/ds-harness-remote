@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ResolvedConfig } from './config.js'
 import { renderCompactTerminalQr, renderTerminalQr } from './cli.js'
-import { ServerApiError, type OAuthProvider, type OAuthQrSession } from './server-api.js'
+import { ENABLED_QR_PROVIDERS, ServerApiError, isEnabledQrProvider, oauthProviderName, type OAuthProvider, type OAuthQrSession } from './server-api.js'
 import type { HostPluginRuntime } from './service.js'
 
 const QR_POLL_INTERVAL_MS = 2_000
@@ -122,9 +122,9 @@ export function installTuiRemoteCommand(
           return { kind: 'success', text: formatRemoteStatusInline(resolveTarget()) }
         }
         if (command === 'login' && args.length <= 2) {
-          const provider = args[1] ?? 'zhihu'
-          if (provider !== 'github' && provider !== 'zhihu') {
-            return { kind: 'error', text: 'Usage: /remote login [github|zhihu]' }
+          const provider = args[1] ?? ENABLED_QR_PROVIDERS[0] ?? 'wechat'
+          if (!isEnabledQrProvider(provider)) {
+            return { kind: 'error', text: `Usage: /remote login [${ENABLED_QR_PROVIDERS.join('|')}]` }
           }
           if (scenes === undefined) {
             return {
@@ -250,10 +250,11 @@ function remoteCommandChildren(canonicalPath: readonly string[]): readonly Comma
     ]
   }
   if (canonicalPath.length === 2 && canonicalPath[0] === 'remote' && canonicalPath[1] === 'login') {
-    return [
-      { name: 'zhihu', description: 'Sign in with Zhihu (default)', descriptions: { zh: '使用知乎登录（默认）' } },
-      { name: 'github', description: 'Sign in with GitHub', descriptions: { zh: '使用 GitHub 登录' } },
-    ]
+    return ENABLED_QR_PROVIDERS.map((provider, index) => ({
+      name: provider,
+      description: `Sign in with ${oauthProviderName(provider)}${index === 0 ? ' (default)' : ''}`,
+      descriptions: { zh: `使用${oauthProviderName(provider)}登录${index === 0 ? '（默认）' : ''}` },
+    }))
   }
   return []
 }
@@ -411,11 +412,14 @@ function createRemoteLoginScene(controller: RemoteLoginController): (props: Scen
       }
     })
 
-    const provider = snapshot.provider === 'github' ? 'GitHub' : 'Zhihu'
-    const other = snapshot.provider === 'github' ? '/remote login zhihu' : '/remote login github'
+    const provider = oauthProviderName(snapshot.provider)
+    const other = ENABLED_QR_PROVIDERS.filter(candidate => candidate !== snapshot.provider)
+      .map(candidate => `/remote login ${candidate}`).join(' or ')
     const children: unknown[] = [
       React.createElement(ui.Text, { key: 'title', bold: true, color: 'accent' }, 'Remote Host login'),
-      React.createElement(ui.Text, { key: 'provider' }, `Provider: ${provider} · You can also use ${other}`),
+      React.createElement(ui.Text, { key: 'provider' }, other === ''
+        ? `Provider: ${provider}`
+        : `Provider: ${provider} · You can also use ${other}`),
     ]
 
     if (snapshot.phase === 'loading') {

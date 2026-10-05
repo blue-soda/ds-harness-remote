@@ -121,8 +121,36 @@ interface OAuthQrSession {
   expiresIn: number
 }
 
-type OAuthProvider = 'zhihu' | 'github'
+type OAuthProvider = 'wechat' | 'zhihu' | 'github'
+
+/**
+ * QR-login providers this build offers, in tab order. Keep in sync with
+ * `ENABLED_QR_PROVIDERS` in server-api.ts (server half); this copy stays local
+ * so the browser bundle never pulls in the Node-side server client.
+ */
+const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['wechat']
+type EnabledQrProvider = (typeof ENABLED_QR_PROVIDERS)[number]
 type LoginMethod = OAuthProvider | 'password'
+
+/** `as const` keeps each value a literal locale key rather than a plain string. */
+const QR_PROVIDER_LABELS = {
+  wechat: 'wechatLogin',
+  github: 'githubLogin',
+  zhihu: 'zhihuLogin',
+} as const satisfies Record<OAuthProvider, LocaleKey>
+
+const QR_PROVIDER_SCAN_LABELS = {
+  wechat: 'scanWithWeChat',
+  github: 'scanWithGitHub',
+  zhihu: 'scanWithZhihu',
+} as const satisfies Record<OAuthProvider, LocaleKey>
+
+const defaultQrProvider: OAuthProvider = ENABLED_QR_PROVIDERS[0] ?? 'wechat'
+
+/** Whether this build offers the given provider; the panel must not select one it cannot render. */
+function isEnabledQrProvider(provider: OAuthProvider): provider is EnabledQrProvider {
+  return ENABLED_QR_PROVIDERS.includes(provider)
+}
 
 interface OAuthQrPollResult {
   status: 'pending' | 'expired' | 'complete'
@@ -473,8 +501,10 @@ const en = {
   noConnectedClients: 'No devices are currently connected to this Host.',
   unknownDevice: 'Unknown device',
   exitRemoteAccount: 'Sign out',
+  wechatLogin: 'WeChat QR',
   githubLogin: 'GitHub QR',
   zhihuLogin: 'Zhihu QR',
+  scanWithWeChat: 'Scan to continue with WeChat',
   scanWithGitHub: 'Scan to continue with GitHub',
   scanWithZhihu: 'Scan to continue with Zhihu',
   openInBrowser: 'Continue in browser',
@@ -716,8 +746,10 @@ const zh: Record<keyof typeof en, string> = {
   noConnectedClients: '目前没有设备连接到这台主机。',
   unknownDevice: '未知设备',
   exitRemoteAccount: '退出账号',
+  wechatLogin: '微信扫码',
   githubLogin: 'GitHub 扫码',
   zhihuLogin: '知乎扫码',
+  scanWithWeChat: '使用微信扫码登录',
   scanWithGitHub: '使用 GitHub 扫码登录',
   scanWithZhihu: '使用知乎扫码登录',
   openInBrowser: '在浏览器中继续',
@@ -1501,7 +1533,7 @@ window.__ModuleLoader__.load({
       wide: boolean
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
       statusFeed: StatusFeed<RemoteStatus>
-      preferredQrProvider: OAuthProvider
+      preferredQrProvider: EnabledQrProvider
       t: Translate
     }): unknown {
       const { t } = props
@@ -1530,7 +1562,9 @@ window.__ModuleLoader__.load({
       const [email, setEmail] = React.useState('')
       const [password, setPassword] = React.useState('')
       const [loginServerUrl, setLoginServerUrl] = React.useState('https://dsh.r2049.cn')
-      const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(props.preferredQrProvider)
+      const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(
+        isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider,
+      )
       const [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(false)
       const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
       const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
@@ -1700,16 +1734,14 @@ window.__ModuleLoader__.load({
         setError(undefined)
       }
 
-      const orderedQrProviders: OAuthProvider[] = props.preferredQrProvider === 'zhihu'
-        ? ['zhihu', 'github']
-        : ['github', 'zhihu']
+      const orderedQrProviders: readonly OAuthProvider[] = ENABLED_QR_PROVIDERS
 
       const qrLoginTab = (provider: OAuthProvider): unknown => React.createElement('button', {
         key: provider, type: 'button', role: 'tab', id: `dsh-remote-${provider}-tab`,
         'aria-selected': loginMethod === provider, 'aria-controls': `dsh-remote-${provider}-panel`,
         className: loginMethod === provider ? 'isActive' : '', disabled: busy,
         onClick: () => selectLoginMethod(provider),
-      }, t(provider === 'github' ? 'githubLogin' : 'zhihuLogin'))
+      }, t(QR_PROVIDER_LABELS[provider]))
 
       const selectHost = async (host: RemoteDevice): Promise<void> => {
         setBusy(true)
@@ -2157,11 +2189,11 @@ window.__ModuleLoader__.load({
                           },
                           React.createElement('img', {
                             src: qrImage, width: 184, height: 184,
-                            alt: t(loginMethod === 'github' ? 'scanWithGitHub' : 'scanWithZhihu'),
+                            alt: t(QR_PROVIDER_SCAN_LABELS[loginMethod]),
                           }),
                           React.createElement('span', null, t('openInBrowser'), ' ↗'))
                           : null,
-                      React.createElement('strong', null, t(loginMethod === 'github' ? 'scanWithGitHub' : 'scanWithZhihu')),
+                      React.createElement('strong', null, t(QR_PROVIDER_SCAN_LABELS[loginMethod])),
                       React.createElement('p', null, t('scanLoginHint')),
                       status?.serverUrl === undefined ? null : React.createElement('p', { className: 'dshRemoteServiceAddress' },
                         t('currentServiceAddress'), ' ', React.createElement('a', {
@@ -2997,7 +3029,7 @@ window.__ModuleLoader__.load({
         inject: () => ({
           control,
           statusFeed,
-          preferredQrProvider: ctx.locale.getLocale().active === 'zh' ? 'zhihu' : 'github',
+          preferredQrProvider: defaultQrProvider,
         }),
       }, RemoteWorkspaceAction))
       // rc.1 Plugins-page configuration surfaces. `plugins.item` is reserved

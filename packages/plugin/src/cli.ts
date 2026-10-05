@@ -9,8 +9,11 @@ import {
   type IdentityStoreOptions,
 } from './identity-store.js'
 import {
+  ENABLED_QR_PROVIDERS,
   HostServerApi,
   ServerApiError,
+  isEnabledQrProvider,
+  oauthProviderName,
   type DeviceAuthorization,
   type OAuthProvider,
   type OAuthQrPollResult,
@@ -96,16 +99,17 @@ async function register(args: readonly string[], runtime: CliRuntime): Promise<n
 }
 
 async function login(args: readonly string[], runtime: CliRuntime): Promise<number> {
-  if (args.length > 1) throw new CliUsageError('Usage: ds-harness-remote login [github|zhihu]')
-  const provider = args[0] ?? 'zhihu'
-  if (provider !== 'github' && provider !== 'zhihu') {
-    throw new CliUsageError('Login provider must be github or zhihu.')
+  const usage = `Usage: ds-harness-remote login [${ENABLED_QR_PROVIDERS.join('|')}]`
+  if (args.length > 1) throw new CliUsageError(usage)
+  const provider = args[0] ?? ENABLED_QR_PROVIDERS[0] ?? 'wechat'
+  if (!isEnabledQrProvider(provider)) {
+    throw new CliUsageError(`Login provider must be one of: ${ENABLED_QR_PROVIDERS.join(', ')}.`)
   }
 
   const context = await hostContext(runtime)
   const session = await context.api.startOAuthQrLogin(provider)
   const qr = await runtime.renderQr(session.scanUrl)
-  const providerName = provider === 'github' ? 'GitHub' : 'Zhihu'
+  const providerName = oauthProviderName(provider)
   write(runtime.stdout, `Using ${providerName} QR login. ${alternativeProviderHint(provider)}\n`)
   write(runtime.stdout, 'Scan this QR code to authorize this Host:\n\n')
   write(runtime.stdout, `${qr.trimEnd()}\n`)
@@ -301,9 +305,9 @@ function authorizedMessage(authorization: DeviceAuthorization): string {
 }
 
 function alternativeProviderHint(provider: OAuthProvider): string {
-  return provider === 'zhihu'
-    ? 'GitHub is also supported: ds-harness-remote login github'
-    : 'Zhihu is also supported: ds-harness-remote login zhihu'
+  const alternatives = ENABLED_QR_PROVIDERS.filter(candidate => candidate !== provider)
+  if (alternatives.length === 0) return ''
+  return `Also supported: ${alternatives.map(candidate => `ds-harness-remote login ${candidate}`).join(', ')}`
 }
 
 function authorizationLabel(method: ServerCredentials['authorizationMethod']): string {

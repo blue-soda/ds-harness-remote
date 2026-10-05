@@ -26,7 +26,27 @@ export interface OAuthQrSession {
   expiresIn: number
 }
 
-export type OAuthProvider = 'zhihu' | 'github'
+export type OAuthProvider = 'wechat' | 'zhihu' | 'github'
+
+/**
+ * QR-login providers this build offers. The self-hosted server implements
+ * WeChat; Zhihu and GitHub remain implemented for the hosted server but are not
+ * offered here. This is the one place to enable or retire a provider.
+ */
+export const ENABLED_QR_PROVIDERS: readonly OAuthProvider[] = ['wechat']
+
+/**
+ * Whether a caller-supplied string names an offered provider. Narrows the value
+ * so downstream calls receive a validated `OAuthProvider` rather than `string`.
+ */
+export function isEnabledQrProvider(value: string): value is OAuthProvider {
+  return (ENABLED_QR_PROVIDERS as readonly string[]).includes(value)
+}
+
+/** Human-readable provider name for diagnostics and prompts. */
+export function oauthProviderName(provider: OAuthProvider): string {
+  return provider === 'github' ? 'GitHub' : provider === 'zhihu' ? 'Zhihu' : 'WeChat'
+}
 
 export type OAuthQrPollResult =
   | { status: 'pending' | 'expired' }
@@ -135,7 +155,7 @@ export class HostServerApi {
     }
   }
 
-  async startOAuthQrLogin(provider: OAuthProvider = 'zhihu'): Promise<OAuthQrSession> {
+  async startOAuthQrLogin(provider: OAuthProvider = 'wechat'): Promise<OAuthQrSession> {
     const value = requireRecord(await this.publicRequest<unknown>(`/api/v1/auth/oauth/qr/start?provider=${provider}`, {
       method: 'POST',
       body: '{}',
@@ -144,7 +164,6 @@ export class HostServerApi {
     if (typeof value.qrId !== 'string' || value.qrId.length < 20
       || scanUrl === undefined
       || !Number.isSafeInteger(value.expiresIn)
-      || (provider === 'github' && value.provider !== 'github')
       || (value.provider !== undefined && value.provider !== provider)) {
       throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid QR login session.', false)
     }

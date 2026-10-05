@@ -16,15 +16,25 @@ async function request(path: string, method = 'GET', body?: unknown, token?: str
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
 }
-async function start(pass = password) {
-  app = createRemoteServer({ account, password: pass, dataFile: join(dir, 'state.json'), publicUrl: 'http://localhost:8080' })
+async function start(pass = password, options: { account?: string; registrationCode?: string } = {}) {
+  app = createRemoteServer({
+    account: options.account ?? account,
+    password: pass,
+    dataFile: join(dir, 'state.json'),
+    publicUrl: 'http://localhost:8080',
+    ...(options.registrationCode === undefined ? {} : { registrationCode: options.registrationCode }),
+  })
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening')
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
 }
-async function device(role: 'host' | 'client' = 'client') {
+/**
+ * Register a device. `token` defaults to the bootstrap account's account token;
+ * pass another account's token to prove cross-account isolation.
+ */
+async function device(role: 'host' | 'client' = 'client', token = accountToken) {
   const keys = generateKeyPair()
   const descriptor = { deviceId: randomUUID(), identityKey: keys.publicKey, name: 'test-device', role, platform: 'linux', clientVersion: '0.4.15' }
-  const result = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+  const result = await request('/devices/register', 'POST', { v: 1, device: descriptor }, token)
   expect(result.status).toBe(200)
   return { ...descriptor, keys, ...result.data }
 }
@@ -163,6 +173,60 @@ describe('control authorization and encrypted relay', () => {
     await closed
     expect(await ctx.host.next('error')).toMatchObject({ connectionId: incoming.connectionId })
     expect((await request('/devices', 'GET', undefined, second.accessToken)).status).toBe(401)
+  })
+})
+describe('multi-account isolation', () => {
+  it('keeps devices, discovery and pairing inside one account', async () => {
+    const hostA = await device('host')
+    // Seed a second account on the running server, then register its own host.
+    app.store.upsertAccount('second@example.com', 'second-account-password')
+    const tokenB = (await request('/auth/login', 'POST', { email: 'second@example.com', password: 'second-account-password' })).data.token
+    const hostB = await device('host', tokenB)
+
+    // A client of the first account sees only its own account's host.
+    const clientA = await device('client')
+    const listed = await request('/devices', 'GET', undefined, clientA.accessToken)
+    expect(listed.status).toBe(200)
+    expect(listed.data.items.map((item: { deviceId: string }) => item.deviceId)).toEqual([hostA.deviceId])
+
+    // The second account's host is invisible to the first account, by id too.
+    expect((await request(`/devices/${hostB.deviceId}`, 'GET', undefined, clientA.accessToken)).status).toBe(404)
+    expect((await request(`/devices/${hostB.deviceId}/presence`, 'GET', undefined, clientA.accessToken)).status).toBe(404)
+
+    // Device ids are namespaced per account: the same uuid can exist on both.
+    const id = randomUUID()
+    const keys = generateKeyPair()
+    const descriptor = { deviceId: id, identityKey: keys.publicKey, name: 'shared-id', role: 'client' as const, platform: 'linux', clientVersion: '0.4.15' }
+    expect((await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)).status).toBe(200)
+    expect((await request('/devices/register', 'POST', { v: 1, device: descriptor }, tokenB)).status).toBe(200)
+  })
+
+  it('refuses to pair a client with another account\'s host', async () => {
+    app.store.upsertAccount('second@example.com', 'second-account-password')
+    const tokenB = (await request('/auth/login', 'POST', { email: 'second@example.com', password: 'second-account-password' })).data.token
+    const hostB = await device('host', tokenB), clientA = await device('client')
+    const hostWire = await socket({ ...hostB, accessToken: hostB.accessToken })
+    const clientWire = await socket(clientA)
+    await hostWire.next('hello.ack')
+    await clientWire.next('hello.ack')
+    clientWire.send('connect.request', { hostDeviceId: hostB.deviceId, preferredTransports: ['relay'] })
+    // The host of another account is not even addressable: reported as offline.
+    expect(await clientWire.next('error')).toMatchObject({ code: 'HOST_OFFLINE' })
+  })
+
+  it('closes registration unless a code is configured', async () => {
+    const request_ = (body: Record<string, unknown>) => request('/auth/register', 'POST', body)
+    expect((await request_({ email: 'new@example.com', password: 'a-long-enough-password' })).status).toBe(403)
+
+    await app.close(); await start(password, { registrationCode: 'registration-code-value' })
+    expect((await request_({ email: 'new@example.com', password: 'a-long-enough-password', code: 'wrong-code-value' })).status).toBe(403)
+    const created = await request_({ email: 'new@example.com', password: 'a-long-enough-password', code: 'registration-code-value' })
+    expect(created.status).toBe(200)
+    expect(created.data.account).toBe('new@example.com')
+    expect((await request('/auth/login', 'POST', { email: 'new@example.com', password: 'a-long-enough-password' })).status).toBe(200)
+    // The new account starts empty and cannot see the bootstrap account's devices.
+    const listed = await request('/account/devices', 'GET', undefined, created.data.token)
+    expect(listed.data.items).toEqual([])
   })
 })
 describe('health and readiness endpoints', () => {

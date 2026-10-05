@@ -23,18 +23,18 @@
     mod
   ));
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js
+  // ../../node_modules/qrcode/lib/can-promise.js
   var require_can_promise = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js"(exports, module) {
+    "../../node_modules/qrcode/lib/can-promise.js"(exports, module) {
       module.exports = function() {
         return typeof Promise == "function" && Promise.prototype && Promise.prototype.then;
       };
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js
+  // ../../node_modules/qrcode/lib/core/utils.js
   var require_utils = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js"(exports) {
+    "../../node_modules/qrcode/lib/core/utils.js"(exports) {
       var toSJISFunction, CODEWORDS_COUNT = [
         0,
         // Not used
@@ -107,9 +107,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js
+  // ../../node_modules/qrcode/lib/core/error-correction-level.js
   var require_error_correction_level = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
+    "../../node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
       exports.L = { bit: 1 };
       exports.M = { bit: 0 };
       exports.Q = { bit: 3 };
@@ -149,9 +149,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js
+  // ../../node_modules/qrcode/lib/core/bit-buffer.js
   var require_bit_buffer = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
       function BitBuffer() {
         this.buffer = [], this.length = 0;
       }
@@ -176,9 +176,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js
+  // ../../node_modules/qrcode/lib/core/bit-matrix.js
   var require_bit_matrix = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
       function BitMatrix(size) {
         if (!size || size < 1)
           throw new Error("BitMatrix size must be defined and greater than 0");
@@ -201,9 +201,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js
+  // ../../node_modules/qrcode/lib/core/alignment-pattern.js
   var require_alignment_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
+    "../../node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize;
       exports.getRowColCoords = function(version) {
         if (version === 1) return [];
@@ -224,9 +224,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js
+  // ../../node_modules/qrcode/lib/core/finder-pattern.js
   var require_finder_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
+    "../../node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize, FINDER_PATTERN_SIZE = 7;
       exports.getPositions = function(version) {
         let size = getSymbolSize(version);
@@ -242,9 +242,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js
+  // ../../node_modules/qrcode/lib/core/mask-pattern.js
   var require_mask_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
+    "../../node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
       exports.Patterns = {
         PATTERN000: 0,
         PATTERN001: 1,
@@ -342,9 +342,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js
+  // ../../node_modules/qrcode/lib/core/error-correction-code.js
   var require_error_correction_code = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
+    "../../node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
       var ECLevel = require_error_correction_level(), EC_BLOCKS_TABLE = [
         // L  M  Q  H
         1,
@@ -701,9 +701,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js
+  // ../../node_modules/qrcode/lib/core/galois-field.js
   var require_galois_field = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js"(exports) {
+    "../../node_modules/qrcode/lib/core/galois-field.js"(exports) {
       var EXP_TABLE = new Uint8Array(512), LOG_TABLE = new Uint8Array(256);
       (function() {
         let x = 1;
@@ -725,9 +725,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js
+  // ../../node_modules/qrcode/lib/core/polynomial.js
   var require_polynomial = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js"(exports) {
+    "../../node_modules/qrcode/lib/core/polynomial.js"(exports) {
       var GF = require_galois_field();
       exports.mul = function(p1, p2) {
         let coeff = new Uint8Array(p1.length + p2.length - 1);
@@ -757,9 +757,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js
+  // ../../node_modules/qrcode/lib/core/reed-solomon-encoder.js
   var require_reed_solomon_encoder = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
       var Polynomial = require_polynomial();
       function ReedSolomonEncoder(degree) {
         this.genPoly = void 0, this.degree = degree, this.degree && this.initialize(this.degree);
@@ -783,18 +783,18 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js
+  // ../../node_modules/qrcode/lib/core/version-check.js
   var require_version_check = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js"(exports) {
+    "../../node_modules/qrcode/lib/core/version-check.js"(exports) {
       exports.isValid = function(version) {
         return !isNaN(version) && version >= 1 && version <= 40;
       };
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js
+  // ../../node_modules/qrcode/lib/core/regex.js
   var require_regex = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js"(exports) {
+    "../../node_modules/qrcode/lib/core/regex.js"(exports) {
       var numeric = "[0-9]+", alphanumeric = "[A-Z $%*+\\-./:]+", kanji = "(?:[u3000-u303F]|[u3040-u309F]|[u30A0-u30FF]|[uFF00-uFFEF]|[u4E00-u9FAF]|[u2605-u2606]|[u2190-u2195]|u203B|[u2010u2015u2018u2019u2025u2026u201Cu201Du2225u2260]|[u0391-u0451]|[u00A7u00A8u00B1u00B4u00D7u00F7])+";
       kanji = kanji.replace(/u/g, "\\u");
       var byte = "(?:(?![A-Z0-9 $%*+\\-./:]|" + kanji + `)(?:.|[\r
@@ -817,9 +817,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js
+  // ../../node_modules/qrcode/lib/core/mode.js
   var require_mode = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js"(exports) {
+    "../../node_modules/qrcode/lib/core/mode.js"(exports) {
       var VersionCheck = require_version_check(), Regex = require_regex();
       exports.NUMERIC = {
         id: "Numeric",
@@ -888,9 +888,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js
+  // ../../node_modules/qrcode/lib/core/version.js
   var require_version = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js"(exports) {
+    "../../node_modules/qrcode/lib/core/version.js"(exports) {
       var Utils = require_utils(), ECCode = require_error_correction_code(), ECLevel = require_error_correction_level(), Mode = require_mode(), VersionCheck = require_version_check(), G18 = 7973, G18_BCH = Utils.getBCHDigit(G18);
       function getBestVersionForDataLength(mode, length, errorCorrectionLevel) {
         for (let currentVersion = 1; currentVersion <= 40; currentVersion++)
@@ -957,9 +957,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js
+  // ../../node_modules/qrcode/lib/core/format-info.js
   var require_format_info = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js"(exports) {
+    "../../node_modules/qrcode/lib/core/format-info.js"(exports) {
       var Utils = require_utils(), G15 = 1335, G15_MASK = 21522, G15_BCH = Utils.getBCHDigit(G15);
       exports.getEncodedBits = function(errorCorrectionLevel, mask) {
         let data = errorCorrectionLevel.bit << 3 | mask, d = data << 10;
@@ -970,9 +970,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js
+  // ../../node_modules/qrcode/lib/core/numeric-data.js
   var require_numeric_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
       var Mode = require_mode();
       function NumericData(data) {
         this.mode = Mode.NUMERIC, this.data = data.toString();
@@ -997,9 +997,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js
+  // ../../node_modules/qrcode/lib/core/alphanumeric-data.js
   var require_alphanumeric_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
       var Mode = require_mode(), ALPHA_NUM_CHARS = [
         "0",
         "1",
@@ -1071,9 +1071,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js
+  // ../../node_modules/qrcode/lib/core/byte-data.js
   var require_byte_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
       var Mode = require_mode();
       function ByteData(data) {
         this.mode = Mode.BYTE, typeof data == "string" ? this.data = new TextEncoder().encode(data) : this.data = new Uint8Array(data);
@@ -1095,9 +1095,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js
+  // ../../node_modules/qrcode/lib/core/kanji-data.js
   var require_kanji_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
+    "../../node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
       var Mode = require_mode(), Utils = require_utils();
       function KanjiData(data) {
         this.mode = Mode.KANJI, this.data = data;
@@ -1131,9 +1131,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js
+  // ../../node_modules/dijkstrajs/dijkstra.js
   var require_dijkstra = __commonJS({
-    "../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js"(exports, module) {
+    "../../node_modules/dijkstrajs/dijkstra.js"(exports, module) {
       "use strict";
       var dijkstra = {
         single_source_shortest_paths: function(graph, s, d) {
@@ -1201,9 +1201,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js
+  // ../../node_modules/qrcode/lib/core/segments.js
   var require_segments = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js"(exports) {
+    "../../node_modules/qrcode/lib/core/segments.js"(exports) {
       var Mode = require_mode(), NumericData = require_numeric_data(), AlphanumericData = require_alphanumeric_data(), ByteData = require_byte_data(), KanjiData = require_kanji_data(), Regex = require_regex(), Utils = require_utils(), dijkstra = require_dijkstra();
       function getStringByteLength(str) {
         return unescape(encodeURIComponent(str)).length;
@@ -1334,9 +1334,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js
+  // ../../node_modules/qrcode/lib/core/qrcode.js
   var require_qrcode = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js"(exports) {
+    "../../node_modules/qrcode/lib/core/qrcode.js"(exports) {
       var Utils = require_utils(), ECLevel = require_error_correction_level(), BitBuffer = require_bit_buffer(), BitMatrix = require_bit_matrix(), AlignmentPattern = require_alignment_pattern(), FinderPattern = require_finder_pattern(), MaskPattern = require_mask_pattern(), ECCode = require_error_correction_code(), ReedSolomonEncoder = require_reed_solomon_encoder(), Version = require_version(), FormatInfo = require_format_info(), Mode = require_mode(), Segments = require_segments();
       function setupFinderPattern(matrix, version) {
         let size = matrix.size, pos = FinderPattern.getPositions(version);
@@ -1464,9 +1464,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js
+  // ../../node_modules/qrcode/lib/renderer/utils.js
   var require_utils2 = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js"(exports) {
+    "../../node_modules/qrcode/lib/renderer/utils.js"(exports) {
       function hex2rgba(hex) {
         if (typeof hex == "number" && (hex = hex.toString()), typeof hex != "string")
           throw new Error("Color should be defined as hex string");
@@ -1522,9 +1522,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js
+  // ../../node_modules/qrcode/lib/renderer/canvas.js
   var require_canvas = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js"(exports) {
+    "../../node_modules/qrcode/lib/renderer/canvas.js"(exports) {
       var Utils = require_utils2();
       function clearCanvas(ctx, canvas, size) {
         ctx.clearRect(0, 0, canvas.width, canvas.height), canvas.style || (canvas.style = {}), canvas.height = size, canvas.width = size, canvas.style.height = size + "px", canvas.style.width = size + "px";
@@ -1551,9 +1551,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js
+  // ../../node_modules/qrcode/lib/renderer/svg-tag.js
   var require_svg_tag = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
+    "../../node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
       var Utils = require_utils2();
       function getColorAttrib(color, attrib) {
         let alpha = color.a / 255, str = attrib + '="' + color.hex + '"';
@@ -1579,9 +1579,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js
+  // ../../node_modules/qrcode/lib/browser.js
   var require_browser = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js"(exports) {
+    "../../node_modules/qrcode/lib/browser.js"(exports) {
       var canPromise = require_can_promise(), QRCode2 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
       function renderCanvas(renderFunc, canvas, text, opts, cb) {
         let args = [].slice.call(arguments, 1), argsNum = args.length, isLastArgCb = typeof args[argsNum - 1] == "function";
@@ -1751,7 +1751,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
   }
 
   // src/client.ts
-  var clientModuleId = "ds-harness-remote", pendingWorkspaceSelectionKey = "dsh-remote:pending-workspace-selection", deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC";
+  var clientModuleId = "ds-harness-remote", pendingWorkspaceSelectionKey = "dsh-remote:pending-workspace-selection", deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC", ENABLED_QR_PROVIDERS = ["wechat"], QR_PROVIDER_LABELS = {
+    wechat: "wechatLogin",
+    github: "githubLogin",
+    zhihu: "zhihuLogin"
+  }, QR_PROVIDER_SCAN_LABELS = {
+    wechat: "scanWithWeChat",
+    github: "scanWithGitHub",
+    zhihu: "scanWithZhihu"
+  }, defaultQrProvider = ENABLED_QR_PROVIDERS[0] ?? "wechat";
+  function isEnabledQrProvider(provider) {
+    return ENABLED_QR_PROVIDERS.includes(provider);
+  }
   function storedWorkspaceSelection() {
     let raw = window.sessionStorage.getItem(pendingWorkspaceSelectionKey);
     if (raw !== null)
@@ -1997,8 +2008,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "No devices are currently connected to this Host.",
     unknownDevice: "Unknown device",
     exitRemoteAccount: "Sign out",
+    wechatLogin: "WeChat QR",
     githubLogin: "GitHub QR",
     zhihuLogin: "Zhihu QR",
+    scanWithWeChat: "Scan to continue with WeChat",
     scanWithGitHub: "Scan to continue with GitHub",
     scanWithZhihu: "Scan to continue with Zhihu",
     openInBrowser: "Continue in browser",
@@ -2237,8 +2250,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "\u76EE\u524D\u6CA1\u6709\u8BBE\u5907\u8FDE\u63A5\u5230\u8FD9\u53F0\u4E3B\u673A\u3002",
     unknownDevice: "\u672A\u77E5\u8BBE\u5907",
     exitRemoteAccount: "\u9000\u51FA\u8D26\u53F7",
+    wechatLogin: "\u5FAE\u4FE1\u626B\u7801",
     githubLogin: "GitHub \u626B\u7801",
     zhihuLogin: "\u77E5\u4E4E\u626B\u7801",
+    scanWithWeChat: "\u4F7F\u7528\u5FAE\u4FE1\u626B\u7801\u767B\u5F55",
     scanWithGitHub: "\u4F7F\u7528 GitHub \u626B\u7801\u767B\u5F55",
     scanWithZhihu: "\u4F7F\u7528\u77E5\u4E4E\u626B\u7801\u767B\u5F55",
     openInBrowser: "\u5728\u6D4F\u89C8\u5668\u4E2D\u7EE7\u7EED",
@@ -2896,7 +2911,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteWorkspaceAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [loginMethod, setLoginMethod] = React.useState(props.preferredQrProvider), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [loginMethod, setLoginMethod] = React.useState(
+          isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider
+        ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
           open || setDevicesOpen(!1);
         }, [open]), React.useEffect(() => {
@@ -2983,7 +3000,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, [props.preferredQrProvider, loginMethodManuallySelected]);
         let selectLoginMethod = (method) => {
           setLoginMethodManuallySelected(!0), method !== loginMethod && (qrFlowRun.current += 1, setLoginMethod(method), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setError(void 0));
-        }, orderedQrProviders = props.preferredQrProvider === "zhihu" ? ["zhihu", "github"] : ["github", "zhihu"], qrLoginTab = (provider) => React.createElement("button", {
+        }, orderedQrProviders = ENABLED_QR_PROVIDERS, qrLoginTab = (provider) => React.createElement("button", {
           key: provider,
           type: "button",
           role: "tab",
@@ -2993,7 +3010,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           className: loginMethod === provider ? "isActive" : "",
           disabled: busy,
           onClick: () => selectLoginMethod(provider)
-        }, t(provider === "github" ? "githubLogin" : "zhihuLogin")), selectHost = async (host) => {
+        }, t(QR_PROVIDER_LABELS[provider])), selectHost = async (host) => {
           setBusy(!0), setError(void 0), setConnectingHost(host), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1);
           try {
             let result = await runConnectHostProgress(
@@ -3331,11 +3348,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
                         src: qrImage,
                         width: 184,
                         height: 184,
-                        alt: t(loginMethod === "github" ? "scanWithGitHub" : "scanWithZhihu")
+                        alt: t(QR_PROVIDER_SCAN_LABELS[loginMethod])
                       }),
                       React.createElement("span", null, t("openInBrowser"), " \u2197")
                     ) : null,
-                    React.createElement("strong", null, t(loginMethod === "github" ? "scanWithGitHub" : "scanWithZhihu")),
+                    React.createElement("strong", null, t(QR_PROVIDER_SCAN_LABELS[loginMethod])),
                     React.createElement("p", null, t("scanLoginHint")),
                     status?.serverUrl === void 0 ? null : React.createElement(
                       "p",
@@ -4102,7 +4119,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           inject: () => ({
             control,
             statusFeed,
-            preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github"
+            preferredQrProvider: defaultQrProvider
           })
         }, RemoteWorkspaceAction)), ctx.slots.inject("plugins.row.config", () => ctx.slots.register({
           name: "plugins.row.config",
