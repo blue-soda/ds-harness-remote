@@ -21697,7 +21697,16 @@ var PluginControlRuntime = class {
       }
       const session = await this.deepseekSession.read();
       if (session === void 0) {
-        throw new ClientModeError("AUTH_INVALID", "Sign in to your DeepSeek account in DSH, then try again.");
+        const started = await this.deepseekSession.startSignIn({
+          callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
+          loginSource: value.loginSource === "desktop" ? "desktop" : "web",
+          locale: typeof value.locale === "string" ? value.locale : "en",
+          timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === "number" ? value.timezoneOffsetSeconds : 0
+        });
+        return {
+          status: "deepseek-sign-in-required",
+          ...started.authorizeUrl === void 0 ? {} : { authorizeUrl: started.authorizeUrl }
+        };
       }
       authorization = await api.authorizeWithDeepSeek(identity, session.token);
     } else {
@@ -28252,6 +28261,15 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     read: async () => {
       const session = await deepseekAccount.getPlatformSession();
       return session === null || session.token.length === 0 ? void 0 : { token: session.token };
+    },
+    startSignIn: async (request) => {
+      const view = await deepseekAccount.startSignIn({
+        version: PLUGIN_VERSION,
+        locale: request.locale,
+        timezoneOffsetSeconds: request.timezoneOffsetSeconds
+      }, request.callbackOrigin, request.loginSource);
+      const authorizeUrl = view?.attempt?.authorizeUrl;
+      return typeof authorizeUrl === "string" && authorizeUrl.length > 0 ? { authorizeUrl } : {};
     }
   };
   const runtime = new HostPluginRuntime(

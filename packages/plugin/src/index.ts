@@ -22,15 +22,22 @@ import { ServerCredentialStore } from './server-credentials.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
+import { PLUGIN_VERSION } from './version.js'
 
 /**
  * The official DeepSeek account service as this plugin needs it.
  *
- * Only the platform session is read; the grant it carries is forwarded to the
- * Server for verification and is never stored by the plugin.
+ * Only the platform session is read, and the official browser authorization is
+ * started when there is none. The grant it carries is forwarded to the Server
+ * for verification and is never stored by the plugin.
  */
 interface DeepSeekAccountLike {
   getPlatformSession(): Promise<{ token: string } | null>
+  startSignIn(
+    client: { version: string; locale: string; timezoneOffsetSeconds: number },
+    callbackOrigin: string,
+    loginSource: 'web' | 'desktop',
+  ): Promise<{ attempt?: { authorizeUrl?: string } | null } | null>
 }
 
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
@@ -228,6 +235,17 @@ async function activate(
       read: async () => {
         const session = await deepseekAccount.getPlatformSession()
         return session === null || session.token.length === 0 ? undefined : { token: session.token }
+      },
+      startSignIn: async request => {
+        // The account service owns the attempt; we supply only the identity of
+        // the UI that asked and the loopback origin that receives the callback.
+        const view = await deepseekAccount.startSignIn({
+          version: PLUGIN_VERSION,
+          locale: request.locale,
+          timezoneOffsetSeconds: request.timezoneOffsetSeconds,
+        }, request.callbackOrigin, request.loginSource)
+        const authorizeUrl = view?.attempt?.authorizeUrl
+        return typeof authorizeUrl === 'string' && authorizeUrl.length > 0 ? { authorizeUrl } : {}
       },
     }
   const runtime = new HostPluginRuntime(

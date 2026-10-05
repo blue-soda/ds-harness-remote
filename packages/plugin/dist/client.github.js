@@ -1985,6 +1985,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClient: "DeepSeek Harness Remote",
     signInClientDescription: "Connect once. Available anytime.",
     deepseekSignIn: "Sign in with DeepSeek account",
+    deepseekSignInWaiting: "Finish signing in to DeepSeek in the browser tab that just opened.",
+    deepseekSignInTimeout: "DeepSeek sign-in was not completed. Try again.",
     changeServerUrl: "Change address",
     startSignIn: "Start sign-in",
     allowControlCurrentDevice: "Allow control of this device",
@@ -2228,6 +2230,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClient: "DeepSeek Harness Remote",
     signInClientDescription: "\u4E00\u6B21\u8FDE\u63A5\uFF0C\u968F\u65F6\u53EF\u7528\u3002",
     deepseekSignIn: "\u4F7F\u7528 DeepSeek \u8D26\u53F7\u767B\u5F55",
+    deepseekSignInWaiting: "\u8BF7\u5728\u5F39\u51FA\u7684\u6D4F\u89C8\u5668\u6807\u7B7E\u9875\u4E2D\u5B8C\u6210 DeepSeek \u767B\u5F55\u3002",
+    deepseekSignInTimeout: "DeepSeek \u767B\u5F55\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u3002",
     changeServerUrl: "\u4FEE\u6539\u5730\u5740",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
     allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
@@ -2910,7 +2914,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteWorkspaceAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [loginMethod, setLoginMethod] = React.useState(
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(!1), [loginMethod, setLoginMethod] = React.useState(
           isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider
         ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
@@ -3086,15 +3090,35 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, [open, selectedHost]);
         let chooseAnotherHost = () => {
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
+        }, requestDeepSeekSignIn = async () => {
+          let transport = globalThis.__DSH_TRANSPORT__, callbackOrigin = transport?.streamBaseUrl !== void 0 ? new URL(transport.streamBaseUrl).origin : window.location.origin, result = await props.control("settings.configure", {
+            role: "client",
+            serverUrl: loginServerUrl.trim(),
+            provider: "deepseek",
+            callbackOrigin,
+            loginSource: "dshDesktop" in globalThis ? "desktop" : "web",
+            locale: navigator.language,
+            timezoneOffsetSeconds: -(/* @__PURE__ */ new Date()).getTimezoneOffset() * 60
+          });
+          return result?.status === "deepseek-sign-in-required" ? { pending: !0, ...typeof result.authorizeUrl == "string" ? { authorizeUrl: result.authorizeUrl } : {} } : { pending: !1 };
         }, signInClient = async () => {
           if (loginServerUrl.trim() !== "") {
             setBusy(!0), setError(void 0);
             try {
-              await props.control("settings.configure", {
-                role: "client",
-                serverUrl: loginServerUrl.trim(),
-                provider: "deepseek"
-              }), setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
+              let state = await requestDeepSeekSignIn();
+              if (state.pending) {
+                state.authorizeUrl !== void 0 && window.open(state.authorizeUrl, "_blank", "noopener,noreferrer"), setAwaitingDeepSeek(!0);
+                try {
+                  for (let poll = 0; poll < 40 && state.pending; poll++)
+                    await new Promise((resolve) => {
+                      setTimeout(resolve, 3e3);
+                    }), state = await requestDeepSeekSignIn();
+                } finally {
+                  setAwaitingDeepSeek(!1);
+                }
+                if (state.pending) throw new Error(t("deepseekSignInTimeout"));
+              }
+              setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
             } catch (reason) {
               setError(messageOf(reason));
             } finally {
@@ -3334,7 +3358,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
                       "button",
                       { type: "button", disabled: busy || loginServerUrl.trim() === "", onClick: () => void signInClient() },
                       t(busy ? "signingIn" : "deepseekSignIn")
-                    )
+                    ),
+                    awaitingDeepSeek ? React.createElement("p", { className: "dshRemoteServiceAddress" }, t("deepseekSignInWaiting")) : null
                   )
                 ) : null,
                 needsAuthorization ? null : React.createElement(

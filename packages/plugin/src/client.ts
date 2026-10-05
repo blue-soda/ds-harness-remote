@@ -487,6 +487,8 @@ const en = {
   signInClient: 'DeepSeek Harness Remote',
   signInClientDescription: 'Connect once. Available anytime.',
   deepseekSignIn: 'Sign in with DeepSeek account',
+  deepseekSignInWaiting: 'Finish signing in to DeepSeek in the browser tab that just opened.',
+  deepseekSignInTimeout: 'DeepSeek sign-in was not completed. Try again.',
   changeServerUrl: 'Change address',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
@@ -733,6 +735,8 @@ const zh: Record<keyof typeof en, string> = {
   signInClient: 'DeepSeek Harness Remote',
   signInClientDescription: '一次连接，随时可用。',
   deepseekSignIn: '使用 DeepSeek 账号登录',
+  deepseekSignInWaiting: '请在弹出的浏览器标签页中完成 DeepSeek 登录。',
+  deepseekSignInTimeout: 'DeepSeek 登录未完成，请重试。',
   changeServerUrl: '修改地址',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
@@ -1573,6 +1577,8 @@ window.__ModuleLoader__.load({
       // The address is a property of the deployment, not something every sign-in
       // should re-read: show it, and only open the editor when asked.
       const [editingServerUrl, setEditingServerUrl] = React.useState(false)
+      /** True while the DeepSeek browser sign-in is outstanding. */
+      const [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(false)
       const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(
         isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider,
       )
@@ -1934,6 +1940,35 @@ window.__ModuleLoader__.load({
         setError(undefined)
       }
 
+      /**
+       * Ask the Host to sign this device in with the DSH DeepSeek account.
+       *
+       * A signed-out DSH has no grant to lend, so the Host starts the official
+       * browser authorization instead and hands back the page to open.
+       */
+      const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
+        const transport = (globalThis as typeof globalThis & {
+          __DSH_TRANSPORT__?: { streamBaseUrl?: string }
+        }).__DSH_TRANSPORT__
+        // The provider callback must be reachable from this browser, so it uses
+        // the origin this page was served from; DSH rejects anything but loopback.
+        const callbackOrigin = transport?.streamBaseUrl !== undefined
+          ? new URL(transport.streamBaseUrl).origin
+          : window.location.origin
+        const result = await props.control<{ status?: string; authorizeUrl?: string }>('settings.configure', {
+          role: 'client',
+          serverUrl: loginServerUrl.trim(),
+          provider: 'deepseek',
+          callbackOrigin,
+          loginSource: 'dshDesktop' in globalThis ? 'desktop' : 'web',
+          locale: navigator.language,
+          timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+        })
+        return result?.status === 'deepseek-sign-in-required'
+          ? { pending: true, ...(typeof result.authorizeUrl === 'string' ? { authorizeUrl: result.authorizeUrl } : {}) }
+          : { pending: false }
+      }
+
       const signInClient = async (): Promise<void> => {
         // Sign in with the DeepSeek account DSH is already using. The Server
         // verifies the grant against the platform instead of trusting this client.
@@ -1941,11 +1976,21 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setError(undefined)
         try {
-          await props.control('settings.configure', {
-            role: 'client',
-            serverUrl: loginServerUrl.trim(),
-            provider: 'deepseek',
-          })
+          let state = await requestDeepSeekSignIn()
+          if (state.pending) {
+            // Open the DeepSeek page, then wait for that browser flow to land.
+            if (state.authorizeUrl !== undefined) window.open(state.authorizeUrl, '_blank', 'noopener,noreferrer')
+            setAwaitingDeepSeek(true)
+            try {
+              for (let poll = 0; poll < 40 && state.pending; poll++) {
+                await new Promise(resolve => { setTimeout(resolve, 3_000) })
+                state = await requestDeepSeekSignIn()
+              }
+            } finally {
+              setAwaitingDeepSeek(false)
+            }
+            if (state.pending) throw new Error(t('deepseekSignInTimeout'))
+          }
           setDevices(await props.control<RemoteDevice[]>('devices'))
           setStatus(await props.control<RemoteStatus>('status'))
           setNeedsAuthorization(false)
@@ -2191,7 +2236,8 @@ window.__ModuleLoader__.load({
                           onClick: () => setEditingServerUrl(true),
                         }, loginServerUrl)),
                     React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '', onClick: () => void signInClient() },
-                      t(busy ? 'signingIn' : 'deepseekSignIn')))) : null,
+                      t(busy ? 'signingIn' : 'deepseekSignIn')),
+                    awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' }, t('deepseekSignInWaiting')) : null)) : null,
                 needsAuthorization ? null : React.createElement(React.Fragment, null,
                 selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading' },

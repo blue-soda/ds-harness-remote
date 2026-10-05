@@ -36,6 +36,20 @@ function platformFetch(payload: unknown) {
   return { calls, fetchImpl }
 }
 
+/**
+ * A platform that answers per grant, the way one account's several devices each
+ * hold their own grant for the same person.
+ */
+function platformFetchPerGrant(byGrant: Record<string, string>) {
+  const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const grant = ((init?.headers ?? {}) as Record<string, string>)['x-dsh-auth-token'] ?? ''
+    const id = byGrant[grant]
+    const payload = id === undefined ? { code: 40003, data: null } : profilePayload(id)
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as unknown as typeof fetch
+  return { fetchImpl }
+}
+
 type ServerConfig = Parameters<typeof createRemoteServer>[0]
 
 async function start(overrides: Partial<ServerConfig> = {}): Promise<void> {
@@ -120,6 +134,28 @@ describe('DeepSeek account login', () => {
     expect(again.status).toBe(200)
     expect((await again.json() as { account: string }).account).toBe('deepseek:user-2')
     expect(app!.store.listAccounts().filter(name => name.startsWith('deepseek:'))).toEqual(['deepseek:user-2'])
+  })
+
+  it('binds every grant of one DeepSeek account to the same Server account', async () => {
+    // Two devices of one person each carry their own grant for the same account.
+    const { fetchImpl } = platformFetchPerGrant({ 'grant-device-a': 'user-shared', 'grant-device-b': 'user-shared' })
+    await start({ deepseek: { fetchImpl, createsAccounts: true } })
+
+    const first = await login('grant-device-a')
+    const second = await login('grant-device-b')
+    expect((await first.json() as { account: string }).account).toBe('deepseek:user-shared')
+    expect((await second.json() as { account: string }).account).toBe('deepseek:user-shared')
+    // One account, reached by both grants: identity follows the platform id.
+    expect(app!.store.listAccounts().filter(name => name.startsWith('deepseek:'))).toEqual(['deepseek:user-shared'])
+  })
+
+  it('keeps two different DeepSeek accounts apart', async () => {
+    const { fetchImpl } = platformFetchPerGrant({ 'grant-one': 'user-one', 'grant-two': 'user-two' })
+    await start({ deepseek: { fetchImpl, createsAccounts: true } })
+    await login('grant-one')
+    await login('grant-two')
+    expect(app!.store.listAccounts().filter(name => name.startsWith('deepseek:')).sort())
+      .toEqual(['deepseek:user-one', 'deepseek:user-two'])
   })
 
   it('refuses a grant the platform rejects', async () => {

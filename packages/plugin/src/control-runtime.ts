@@ -30,6 +30,23 @@ export interface PluginAssociation {
 }
 
 /**
+ * Request to begin the DeepSeek browser authorization on the user's behalf.
+ *
+ * The provider only accepts a loopback callback, so the origin must be the one
+ * this page was served from; anything else is refused before the browser opens.
+ */
+export interface DeepSeekSignInRequest {
+  /** Browser-accessible loopback origin that receives the provider callback. */
+  callbackOrigin: string
+  /** Initiating UI: a Desktop shell returns from a failed exchange differently. */
+  loginSource: 'web' | 'desktop'
+  /** Active UI language, reduced to the platform wire locale by the provider. */
+  locale: string
+  /** Seconds east of UTC, the form the platform's client identity expects. */
+  timezoneOffsetSeconds: number
+}
+
+/**
  * Host-side source of the DSH DeepSeek account grant.
  *
  * The grant is read from the account service on demand and never cached here:
@@ -39,6 +56,12 @@ export interface PluginAssociation {
 export interface DeepSeekSessionSource {
   /** The signed-in account's platform grant, or undefined when signed out. */
   read(): Promise<{ token: string } | undefined>
+  /**
+   * Begin the official browser authorization and report the page to open.
+   * @param request - callback origin and client identity for the attempt.
+   * @returns the authorization URL when the provider exposes one.
+   */
+  startSignIn(request: DeepSeekSignInRequest): Promise<{ authorizeUrl?: string }>
 }
 
 /**
@@ -175,7 +198,19 @@ export class PluginControlRuntime {
       }
       const session = await this.deepseekSession.read()
       if (session === undefined) {
-        throw new ClientModeError('AUTH_INVALID', 'Sign in to your DeepSeek account in DSH, then try again.')
+        // Signed out: start the official browser authorization rather than
+        // telling the user to go find DSH's own account settings. Nothing is
+        // authorized yet, so the settings are left untouched.
+        const started = await this.deepseekSession.startSignIn({
+          callbackOrigin: typeof value.callbackOrigin === 'string' ? value.callbackOrigin : '',
+          loginSource: value.loginSource === 'desktop' ? 'desktop' : 'web',
+          locale: typeof value.locale === 'string' ? value.locale : 'en',
+          timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === 'number' ? value.timezoneOffsetSeconds : 0,
+        })
+        return {
+          status: 'deepseek-sign-in-required',
+          ...(started.authorizeUrl === undefined ? {} : { authorizeUrl: started.authorizeUrl }),
+        }
       }
       authorization = await api.authorizeWithDeepSeek(identity, session.token)
     } else {
