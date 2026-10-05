@@ -1838,6 +1838,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     enterAccountPassword: "Enter the Server account and password.",
     associationSaved: "Associated. Restart Harness to apply.",
     signedOut: "Signed out. Restart Harness to disconnect this mode.",
+    signedOutDeepseek: "Signed out, and your DSH DeepSeek account was signed out too.",
     remoteRequestFailed: "Remote mode request failed.",
     remoteControlUnavailable: "Remote plugin control is still starting. Restart DSH if it stays unavailable.",
     switchTarget: "Switch Local / Remote Harness target",
@@ -1986,7 +1987,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     openLocalWorkspaces: "Open local workspaces",
     clientSignInHint: "Sign in to this Server to list your remote Hosts.",
     deepseekSignIn: "Sign in with DeepSeek account",
-    deepseekSignInWaiting: "Starting DeepSeek sign-in \u2014 finish it in the browser.",
+    deepseekSignInRequesting: "Requesting the DeepSeek sign-in page\u2026",
+    deepseekSignInWaiting: "Finish signing in to DeepSeek in the browser.",
     deepseekSignInOpen: "Open the sign-in page",
     deepseekSignInTimeout: "DeepSeek sign-in was not completed. Try again.",
     deepseekAuthorizeUnavailable: "DeepSeek did not return a sign-in page. Try again.",
@@ -2083,6 +2085,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     enterAccountPassword: "\u8BF7\u8F93\u5165 Server \u8D26\u53F7\u548C\u5BC6\u7801\u3002",
     associationSaved: "\u5173\u8054\u6210\u529F\u3002\u91CD\u542F Harness \u540E\u751F\u6548\u3002",
     signedOut: "\u5DF2\u9000\u51FA\u6388\u6743\u3002\u91CD\u542F Harness \u540E\u5C06\u65AD\u5F00\u6B64\u6A21\u5F0F\u3002",
+    signedOutDeepseek: "\u5DF2\u9000\u51FA\u6388\u6743\uFF0CDSH \u7684 DeepSeek \u8D26\u53F7\u4E5F\u5DF2\u4E00\u5E76\u9000\u51FA\u767B\u5F55\u3002",
     remoteRequestFailed: "\u8FDC\u7A0B\u6A21\u5F0F\u8BF7\u6C42\u5931\u8D25\u3002",
     remoteControlUnavailable: "Remote \u63D2\u4EF6\u63A7\u5236\u901A\u9053\u4ECD\u5728\u542F\u52A8\uFF1B\u5982\u679C\u4E00\u76F4\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u542F DSH\u3002",
     switchTarget: "\u5207\u6362\u672C\u5730\u6216\u8FDC\u7A0B Harness",
@@ -2231,7 +2234,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     openLocalWorkspaces: "\u6253\u5F00\u672C\u5730\u5DE5\u4F5C\u533A",
     clientSignInHint: "\u767B\u5F55 Server \u540E\u5373\u53EF\u67E5\u770B\u81EA\u5DF1\u7684\u8FDC\u7AEF\u4E3B\u673A\u3002",
     deepseekSignIn: "\u4F7F\u7528 DeepSeek \u8D26\u53F7\u767B\u5F55",
-    deepseekSignInWaiting: "\u6B63\u5728\u53D1\u8D77 DeepSeek \u767B\u5F55\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210\u3002",
+    deepseekSignInRequesting: "\u6B63\u5728\u83B7\u53D6 DeepSeek \u767B\u5F55\u9875\u2026",
+    deepseekSignInWaiting: "\u8BF7\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210 DeepSeek \u767B\u5F55\u3002",
     deepseekSignInOpen: "\u624B\u52A8\u6253\u5F00\u767B\u5F55\u9875",
     deepseekSignInTimeout: "DeepSeek \u767B\u5F55\u672A\u5B8C\u6210\uFF0C\u8BF7\u91CD\u8BD5\u3002",
     deepseekAuthorizeUnavailable: "\u672A\u80FD\u83B7\u53D6 DeepSeek \u767B\u5F55\u9875\uFF0C\u8BF7\u91CD\u8BD5\u3002",
@@ -2500,7 +2504,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           setBusy(!0), setError(void 0), setNotice(void 0);
           try {
             let view = await props.control("settings.logout");
-            applyView(view), setRegistrationCode(""), setNotice({ key: "signedOut" });
+            applyView(view), setRegistrationCode(""), setNotice({ key: view.deepseekSignedOut === !0 ? "signedOutDeepseek" : "signedOut" });
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -3162,9 +3166,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setBusy(!1);
           }
         }, logoutRemote = async () => {
-          setBusy(!0), setError(void 0);
+          setBusy(!0), setError(void 0), setNotice(void 0);
           try {
-            await props.control("settings.logout"), setDevices([]), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
+            let view = await props.control("settings.logout");
+            setDevices([]), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setNotice(t(view?.deepseekSignedOut === !0 ? "signedOutDeepseek" : "signedOut")), setStatus(await props.control("status"));
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -3376,7 +3381,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     awaitingDeepSeek ? React.createElement(
                       "p",
                       { className: "dshRemoteServiceAddress" },
-                      t("deepseekSignInWaiting"),
+                      t(pendingAuthorizeUrl === void 0 ? "deepseekSignInRequesting" : "deepseekSignInWaiting"),
                       pendingAuthorizeUrl === void 0 ? null : React.createElement("a", {
                         href: pendingAuthorizeUrl,
                         target: "_blank",

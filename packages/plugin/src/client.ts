@@ -346,6 +346,7 @@ const en = {
   enterAccountPassword: 'Enter the Server account and password.',
   associationSaved: 'Associated. Restart Harness to apply.',
   signedOut: 'Signed out. Restart Harness to disconnect this mode.',
+  signedOutDeepseek: 'Signed out, and your DSH DeepSeek account was signed out too.',
   remoteRequestFailed: 'Remote mode request failed.',
   remoteControlUnavailable: 'Remote plugin control is still starting. Restart DSH if it stays unavailable.',
   switchTarget: 'Switch Local / Remote Harness target',
@@ -494,7 +495,8 @@ const en = {
   openLocalWorkspaces: 'Open local workspaces',
   clientSignInHint: 'Sign in to this Server to list your remote Hosts.',
   deepseekSignIn: 'Sign in with DeepSeek account',
-  deepseekSignInWaiting: 'Starting DeepSeek sign-in — finish it in the browser.',
+  deepseekSignInRequesting: 'Requesting the DeepSeek sign-in page…',
+  deepseekSignInWaiting: 'Finish signing in to DeepSeek in the browser.',
   deepseekSignInOpen: 'Open the sign-in page',
   deepseekSignInTimeout: 'DeepSeek sign-in was not completed. Try again.',
   deepseekAuthorizeUnavailable: 'DeepSeek did not return a sign-in page. Try again.',
@@ -594,6 +596,7 @@ const zh: Record<keyof typeof en, string> = {
   enterAccountPassword: '请输入 Server 账号和密码。',
   associationSaved: '关联成功。重启 Harness 后生效。',
   signedOut: '已退出授权。重启 Harness 后将断开此模式。',
+  signedOutDeepseek: '已退出授权，DSH 的 DeepSeek 账号也已一并退出登录。',
   remoteRequestFailed: '远程模式请求失败。',
   remoteControlUnavailable: 'Remote 插件控制通道仍在启动；如果一直不可用，请重启 DSH。',
   switchTarget: '切换本地或远程 Harness',
@@ -742,7 +745,8 @@ const zh: Record<keyof typeof en, string> = {
   openLocalWorkspaces: '打开本地工作区',
   clientSignInHint: '登录 Server 后即可查看自己的远端主机。',
   deepseekSignIn: '使用 DeepSeek 账号登录',
-  deepseekSignInWaiting: '正在发起 DeepSeek 登录，请在浏览器中完成。',
+  deepseekSignInRequesting: '正在获取 DeepSeek 登录页…',
+  deepseekSignInWaiting: '请在浏览器中完成 DeepSeek 登录。',
   deepseekSignInOpen: '手动打开登录页',
   deepseekSignInTimeout: 'DeepSeek 登录未完成，请重试。',
   deepseekAuthorizeUnavailable: '未能获取 DeepSeek 登录页，请重试。',
@@ -1207,10 +1211,10 @@ window.__ModuleLoader__.load({
         setError(undefined)
         setNotice(undefined)
         try {
-          const view = await props.control<PluginSettingsView>('settings.logout')
+          const view = await props.control<PluginSettingsView & { deepseekSignedOut?: boolean }>('settings.logout')
           applyView(view)
           setRegistrationCode('')
-          setNotice({ key: 'signedOut' })
+          setNotice({ key: view.deepseekSignedOut === true ? 'signedOutDeepseek' : 'signedOut' })
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
@@ -2095,13 +2099,17 @@ window.__ModuleLoader__.load({
       const logoutRemote = async (): Promise<void> => {
         setBusy(true)
         setError(undefined)
+        setNotice(undefined)
         try {
-          await props.control('settings.logout')
+          const view = await props.control<{ deepseekSignedOut?: boolean }>('settings.logout')
           setDevices([])
           setNeedsAuthorization(true)
           setQrSession(undefined)
           setQrImage(undefined)
           setQrExpired(false)
+          // Signing out releases the borrowed DSH DeepSeek authorization too, and
+          // the user should know that happened rather than discovering it later.
+          setNotice(t(view?.deepseekSignedOut === true ? 'signedOutDeepseek' : 'signedOut'))
           setStatus(await props.control<RemoteStatus>('status'))
         } catch (reason) {
           setError(messageOf(reason))
@@ -2301,7 +2309,7 @@ window.__ModuleLoader__.load({
                     React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '', onClick: () => void signInClient() },
                       t(busy ? 'signingIn' : 'deepseekSignIn')),
                     awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' },
-                      t('deepseekSignInWaiting'),
+                      t(pendingAuthorizeUrl === undefined ? 'deepseekSignInRequesting' : 'deepseekSignInWaiting'),
                       pendingAuthorizeUrl === undefined ? null : React.createElement('a', {
                         href: pendingAuthorizeUrl, target: '_blank', rel: 'noreferrer',
                         style: { marginLeft: '6px', color: 'var(--dsw-alias-brand-primary)' },
