@@ -521,6 +521,8 @@ const en = {
   noConnectedClients: 'No devices are currently connected to this Host.',
   unknownDevice: 'Unknown device',
   exitRemoteAccount: 'Sign out',
+  cancel: 'Cancel',
+  signOutImpact: 'Signing out disconnects this plugin and also signs DSH out of your DeepSeek account. If DSH is using that account for model calls, they stay unavailable until you sign in again.',
   wechatLogin: 'WeChat QR',
   githubLogin: 'GitHub QR',
   zhihuLogin: 'Zhihu QR',
@@ -771,6 +773,8 @@ const zh: Record<keyof typeof en, string> = {
   noConnectedClients: '目前没有设备连接到这台主机。',
   unknownDevice: '未知设备',
   exitRemoteAccount: '退出账号',
+  cancel: '取消',
+  signOutImpact: '退出后会断开本插件的连接，并且会一并退出 DSH 的 DeepSeek 账号登录；若 DSH 正在用该账号调用模型，需要重新登录后才能继续。',
   wechatLogin: '微信扫码',
   githubLogin: 'GitHub 扫码',
   zhihuLogin: '知乎扫码',
@@ -1618,6 +1622,14 @@ window.__ModuleLoader__.load({
       const progressRun = React.useRef(0)
       const qrFlowRun = React.useRef(0)
       const [notice, setNotice] = React.useState<string | undefined>(undefined)
+      /**
+       * Whether the sign-out confirmation is on screen.
+       *
+       * Signing out also releases DSH's DeepSeek authorization, which is a real
+       * consequence the user should agree to before it happens, rather than a
+       * notice explaining it afterwards.
+       */
+      const [confirmingSignOut, setConfirmingSignOut] = React.useState(false)
       const [error, setError] = React.useState<string | undefined>(undefined)
 
       React.useEffect(() => {
@@ -2063,6 +2075,9 @@ window.__ModuleLoader__.load({
           setNeedsAuthorization(false)
           setAuthorizationResolved(true)
           setPassword('')
+          // A message about a previous sign-out must not outlive a successful
+          // sign-in: it would describe a state that no longer holds.
+          setNotice(undefined)
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
@@ -2101,19 +2116,20 @@ window.__ModuleLoader__.load({
         setError(undefined)
         setNotice(undefined)
         try {
-          const view = await props.control<{ deepseekSignedOut?: boolean }>('settings.logout')
+          await props.control('settings.logout')
           setDevices([])
           setNeedsAuthorization(true)
           setQrSession(undefined)
           setQrImage(undefined)
           setQrExpired(false)
-          // Signing out releases the borrowed DSH DeepSeek authorization too, and
-          // the user should know that happened rather than discovering it later.
-          setNotice(t(view?.deepseekSignedOut === true ? 'signedOutDeepseek' : 'signedOut'))
           setStatus(await props.control<RemoteStatus>('status'))
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
+          // The confirmation is a one-shot step: the outcome speaks for itself,
+          // and a notice left behind would describe a state that no longer holds
+          // as soon as the next sign-in succeeds.
+          setConfirmingSignOut(false)
           setBusy(false)
         }
       }
@@ -2350,13 +2366,25 @@ window.__ModuleLoader__.load({
                 React.createElement(RemoteProgressView, { progress, t }),
                 selectedHost === undefined
                   ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
-                    React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
+                    React.createElement('p', { className: 'dshRemoteHint' },
+                      t(confirmingSignOut ? 'signOutImpact' : 'selectHostHint')),
                     React.createElement('footer', { className: 'dshRemoteAccountFooter' },
-                      React.createElement('span', null, status?.host?.account ?? t('account')),
-                      React.createElement('button', {
-                        type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
-                        onClick: () => void logoutRemote(),
-                      }, t('exitRemoteAccount')))) : null)
+                      confirmingSignOut
+                        ? React.createElement(React.Fragment, null,
+                          React.createElement('button', {
+                            type: 'button', className: 'dshRemoteDiscard', disabled: busy,
+                            onClick: () => setConfirmingSignOut(false),
+                          }, t('cancel')),
+                          React.createElement('button', {
+                            type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                            onClick: () => void logoutRemote(),
+                          }, t('exitRemoteAccount')))
+                        : React.createElement(React.Fragment, null,
+                          React.createElement('span', null, status?.host?.account ?? t('account')),
+                          React.createElement('button', {
+                            type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                            onClick: () => setConfirmingSignOut(true),
+                          }, t('exitRemoteAccount'))))) : null)
                   : React.createElement('section', { className: 'dshRemoteBrowser', 'aria-label': t('chooseDirectory') },
                     React.createElement('div', { className: 'dshRemoteSectionHeading dshRemoteWorkspaceHeading' },
                       React.createElement('strong', null, t(addingWorkspace

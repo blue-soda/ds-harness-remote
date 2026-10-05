@@ -2013,6 +2013,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "No devices are currently connected to this Host.",
     unknownDevice: "Unknown device",
     exitRemoteAccount: "Sign out",
+    cancel: "Cancel",
+    signOutImpact: "Signing out disconnects this plugin and also signs DSH out of your DeepSeek account. If DSH is using that account for model calls, they stay unavailable until you sign in again.",
     wechatLogin: "WeChat QR",
     githubLogin: "GitHub QR",
     zhihuLogin: "Zhihu QR",
@@ -2260,6 +2262,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "\u76EE\u524D\u6CA1\u6709\u8BBE\u5907\u8FDE\u63A5\u5230\u8FD9\u53F0\u4E3B\u673A\u3002",
     unknownDevice: "\u672A\u77E5\u8BBE\u5907",
     exitRemoteAccount: "\u9000\u51FA\u8D26\u53F7",
+    cancel: "\u53D6\u6D88",
+    signOutImpact: "\u9000\u51FA\u540E\u4F1A\u65AD\u5F00\u672C\u63D2\u4EF6\u7684\u8FDE\u63A5\uFF0C\u5E76\u4E14\u4F1A\u4E00\u5E76\u9000\u51FA DSH \u7684 DeepSeek \u8D26\u53F7\u767B\u5F55\uFF1B\u82E5 DSH \u6B63\u5728\u7528\u8BE5\u8D26\u53F7\u8C03\u7528\u6A21\u578B\uFF0C\u9700\u8981\u91CD\u65B0\u767B\u5F55\u540E\u624D\u80FD\u7EE7\u7EED\u3002",
     wechatLogin: "\u5FAE\u4FE1\u626B\u7801",
     githubLogin: "GitHub \u626B\u7801",
     zhihuLogin: "\u77E5\u4E4E\u626B\u7801",
@@ -2924,7 +2928,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       function RemoteWorkspaceAction(props) {
         let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [authorizationResolved, setAuthorizationResolved] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState(DEFAULT_REMOTE_SERVER_URL), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(!1), [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState(void 0), [loginMethod, setLoginMethod] = React.useState(
           isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider
-        ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
+        ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [confirmingSignOut, setConfirmingSignOut] = React.useState(!1), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
           open || setDevicesOpen(!1);
         }, [open]), React.useEffect(() => {
@@ -3143,7 +3147,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               if (state.pending) throw new Error(t("deepseekSignInTimeout"));
             } else
               tab?.close();
-            setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setAuthorizationResolved(!0), setPassword("");
+            setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setAuthorizationResolved(!0), setPassword(""), setNotice(void 0);
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -3168,12 +3172,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, logoutRemote = async () => {
           setBusy(!0), setError(void 0), setNotice(void 0);
           try {
-            let view = await props.control("settings.logout");
-            setDevices([]), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setNotice(t(view?.deepseekSignedOut === !0 ? "signedOutDeepseek" : "signedOut")), setStatus(await props.control("status"));
+            await props.control("settings.logout"), setDevices([]), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
-            setBusy(!1);
+            setConfirmingSignOut(!1), setBusy(!1);
           }
         }, openWorkspace = async (selection) => {
           let targetBackend = selection?.backend ?? workspaceBackend, targetPath = (selection?.path ?? path).trim(), targetCodexWorkspaceId = selection?.backend === "codex" ? selection.workspaceId : selection === void 0 ? codexWorkspaceId : void 0, createWorkspace = selection === void 0 && addingWorkspace;
@@ -3449,17 +3452,40 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   selectedHost === void 0 ? connectingHost === void 0 ? React.createElement(
                     React.Fragment,
                     null,
-                    React.createElement("p", { className: "dshRemoteHint" }, t("selectHostHint")),
+                    React.createElement(
+                      "p",
+                      { className: "dshRemoteHint" },
+                      t(confirmingSignOut ? "signOutImpact" : "selectHostHint")
+                    ),
                     React.createElement(
                       "footer",
                       { className: "dshRemoteAccountFooter" },
-                      React.createElement("span", null, status?.host?.account ?? t("account")),
-                      React.createElement("button", {
-                        type: "button",
-                        className: "dshRemoteAccountExit",
-                        disabled: busy,
-                        onClick: () => void logoutRemote()
-                      }, t("exitRemoteAccount"))
+                      confirmingSignOut ? React.createElement(
+                        React.Fragment,
+                        null,
+                        React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteDiscard",
+                          disabled: busy,
+                          onClick: () => setConfirmingSignOut(!1)
+                        }, t("cancel")),
+                        React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteAccountExit",
+                          disabled: busy,
+                          onClick: () => void logoutRemote()
+                        }, t("exitRemoteAccount"))
+                      ) : React.createElement(
+                        React.Fragment,
+                        null,
+                        React.createElement("span", null, status?.host?.account ?? t("account")),
+                        React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteAccountExit",
+                          disabled: busy,
+                          onClick: () => setConfirmingSignOut(!0)
+                        }, t("exitRemoteAccount"))
+                      )
                     )
                   ) : null : React.createElement(
                     "section",
