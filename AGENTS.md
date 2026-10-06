@@ -181,14 +181,14 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 锁不按时间强行抢占；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。
 核心测试覆盖多进程刷新互斥与鉴权恢复状态机，Windows 双实例实机验证仍待完成。
 
-**登出会消耗一个设备身份**：`clearClientAuthorization()` 先 `revokeCurrentDevice()` 再
-`identities.reset()`，所以每次登出都会吊销当前设备**并轮换本机身份**（新 `deviceId` 与密钥对），
-下次登录必然注册成新设备。换身份是必需的——被吊销的设备用原 `identityKey` 重新注册会被
-`DEVICE_REVOKED` 拒绝。自部署 Server 只置位 `revoked`、**不自动清理**；每账号设备数上限 **256**，
-且**只在新 `deviceId` 注册时判定**（已有设备复用同一行、不占名额），所以约 **128 次登出**后该账号会
-无法再注册新设备（`RATE_LIMITED`）。`state.json` 也会持续累积（每次登出留下 host/client 各一条死记录），
-且身份更换会使已 pin 该设备的对端信任失效。不要把"登出再登录"当排障手段；运行期间不要直接编辑
-`state.json`（会被内存状态覆盖）。机制与代价见 `docs/plugin-integration.md` §6.1。
+**登出保留设备身份**：`clearClientAuthorization()` / `clearHostAuthorization()` / CLI `logout`
+只清理本地凭证，**不吊销设备、不轮换身份**，所以再次登录会**复用同一设备行**（`register` 会作废
+该设备旧令牌）。原因：每账号设备数上限 **256**，且**只在新 `deviceId` 注册时判定**（已有设备复用
+同一行、不占名额）；早期"登出即吊销+轮换"每次消耗一个名额，**约 128 次登出即把账号用满**
+（`RATE_LIMITED`）。代价（有意接受）：登出后设备仍留在账号中（离线可见），其旧令牌在下次登录前
+仍然有效（access 1h / refresh 30d），所以**登出不等于立即断权**。`revokeCurrentDevice()` 与
+`DELETE /api/v1/devices/self` 予以保留但登出不再调用；要彻底移除设备须由运维在服务停止后改
+`state.json`（运行期间编辑会被内存状态覆盖）。详见 `docs/plugin-integration.md` §6.1。
 
 ## Native sidebar and development preview (2026-09-20)
 

@@ -299,19 +299,22 @@ export class HostPluginRuntime {
     return result
   }
 
+  /**
+   * Stop this Host from being authorized, keeping its device identity.
+   *
+   * Revoking the device here would force a new identity on the next sign-in and
+   * register a second device for the same installation. An account holds at most
+   * 256 devices and the count only grows for new identities, so signing out
+   * often enough could exhaust it. The credentials themselves are cleared by the
+   * caller; this device simply stops authenticating.
+   */
   async clearHostAuthorization(): Promise<void> {
     await this.serverConnection?.stop()
-    let revokeFailure: unknown
-    try {
-      await this.serverApi?.revokeCurrentDevice()
-    } catch (error) {
-      revokeFailure = error
+    // The connection survives, bound to the identity it keeps.
+    if (this.serverApi !== undefined && this.identity !== undefined) {
+      this.serverConnection = this.createServerConnection(this.identity)
     }
-    this.identity = await this.identities.reset(this.config.deviceName)
-    this.serverApi?.bindIdentity(this.identity)
-    if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
     this.logger.info('Host authorization cleared')
-    if (revokeFailure !== undefined) throw revokeFailure
   }
 
   async authorizeHostAsOwned(accessToken: string, account?: string): Promise<DeviceAuthorization> {

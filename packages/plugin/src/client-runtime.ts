@@ -407,6 +407,21 @@ export class ClientModeRuntime {
     return result
   }
 
+  /**
+   * Stop this Client from being authorized, keeping its device identity.
+   *
+   * The device is deliberately *not* revoked and the identity is deliberately
+   * *not* rotated. Signing out used to revoke the device, which forced a new
+   * identity on the next sign-in and registered a second device for the same
+   * installation; an account holds at most 256 devices, so signing out often
+   * enough could exhaust it. Keeping the row also means the next sign-in reuses
+   * it, and the server invalidates the previous tokens at that point.
+   *
+   * The cost, by choice: while signed out the device stays in the account and
+   * its old tokens stay valid until the next sign-in or their expiry, so signing
+   * out is no longer a way to cut a leaked token off immediately. Removing the
+   * device for good is an operator action on the server's state file.
+   */
   async clearClientAuthorization(): Promise<void> {
     const previous = this.connected
     this.connected = undefined
@@ -418,9 +433,6 @@ export class ClientModeRuntime {
     this.gatewaySwitch.selectLocal()
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
-    await this.server.revokeCurrentDevice()
-    this.identity = await this.identities.reset(this.config.deviceName)
-    this.server.bindIdentity(this.identity)
   }
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {

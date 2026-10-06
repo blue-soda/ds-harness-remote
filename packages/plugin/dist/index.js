@@ -20324,6 +20324,21 @@ var ClientModeRuntime = class {
     if (result.status === "complete") await this.authorizeHostByDefault();
     return result;
   }
+  /**
+   * Stop this Client from being authorized, keeping its device identity.
+   *
+   * The device is deliberately *not* revoked and the identity is deliberately
+   * *not* rotated. Signing out used to revoke the device, which forced a new
+   * identity on the next sign-in and registered a second device for the same
+   * installation; an account holds at most 256 devices, so signing out often
+   * enough could exhaust it. Keeping the row also means the next sign-in reuses
+   * it, and the server invalidates the previous tokens at that point.
+   *
+   * The cost, by choice: while signed out the device stays in the account and
+   * its old tokens stay valid until the next sign-in or their expiry, so signing
+   * out is no longer a way to cut a leaked token off immediately. Removing the
+   * device for good is an operator action on the server's state file.
+   */
   async clearClientAuthorization() {
     const previous = this.connected;
     this.connected = void 0;
@@ -20335,9 +20350,6 @@ var ClientModeRuntime = class {
     this.gatewaySwitch.selectLocal();
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
-    await this.server.revokeCurrentDevice();
-    this.identity = await this.identities.reset(this.config.deviceName);
-    this.server.bindIdentity(this.identity);
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -27381,19 +27393,21 @@ var HostPluginRuntime = class {
     }
     return result;
   }
+  /**
+   * Stop this Host from being authorized, keeping its device identity.
+   *
+   * Revoking the device here would force a new identity on the next sign-in and
+   * register a second device for the same installation. An account holds at most
+   * 256 devices and the count only grows for new identities, so signing out
+   * often enough could exhaust it. The credentials themselves are cleared by the
+   * caller; this device simply stops authenticating.
+   */
   async clearHostAuthorization() {
     await this.serverConnection?.stop();
-    let revokeFailure;
-    try {
-      await this.serverApi?.revokeCurrentDevice();
-    } catch (error) {
-      revokeFailure = error;
+    if (this.serverApi !== void 0 && this.identity !== void 0) {
+      this.serverConnection = this.createServerConnection(this.identity);
     }
-    this.identity = await this.identities.reset(this.config.deviceName);
-    this.serverApi?.bindIdentity(this.identity);
-    if (this.serverApi !== void 0) this.serverConnection = this.createServerConnection(this.identity);
     this.logger.info("Host authorization cleared");
-    if (revokeFailure !== void 0) throw revokeFailure;
   }
   async authorizeHostAsOwned(accessToken, account) {
     if (this.serverApi === void 0) {
@@ -27712,20 +27726,9 @@ async function logout(args, runtime) {
   }
   const deviceName = hostname3();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity = await identities.loadOrCreate(deviceName);
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  api.bindIdentity(identity);
-  let revokeFailure;
-  try {
-    await api.revokeCurrentDevice();
-  } catch (error) {
-    revokeFailure = error;
-  }
-  await identities.reset(deviceName);
-  if (revokeFailure !== void 0) {
-    throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`);
-  }
-  write(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart dsh-tui.\n");
+  await identities.loadOrCreate(deviceName);
+  await new ServerCredentialStore(directory).clear();
+  write(runtime.stdout, "Remote Host logged out. This device stays registered and is reused on the next login. Restart dsh-tui.\n");
   return 0;
 }
 async function hostContext(runtime) {
