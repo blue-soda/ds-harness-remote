@@ -18904,6 +18904,8 @@ var TypertGatewaySwitch = class {
   remoteSupport = { execute: false, list: false };
   target;
   installed = false;
+  /** Defaults to reachable so a caller that never wires this keeps the old behaviour. */
+  remoteAvailability = () => true;
   constructor(gateway) {
     this.runtime = gateway;
     this.originalInvoke = gateway.invoke;
@@ -18948,17 +18950,17 @@ var TypertGatewaySwitch = class {
     if (this.installed) return;
     this.runtime.invoke = (request) => this.selectInvoke(request);
     if (this.originalStream !== void 0) {
-      this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
+      this.runtime.stream = (request) => !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal);
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal);
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
       const rc1 = usesRc1Arity(open);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
-        if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
+        if (!this.routesToRemote(endpoint)) {
           return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
@@ -18989,12 +18991,29 @@ var TypertGatewaySwitch = class {
     if (this.originalOpen !== void 0) this.runtime.openWireStream = this.originalOpen;
     this.installed = false;
   }
+  /**
+   * Whether the peer a remote target routes to is reachable right now.
+   *
+   * A remote-mode boot still needs its own local services — localizations, theme,
+   * the plugin registry — before any remote work can happen. Routing those to a
+   * peer that is not connected leaves them unanswered, so the whole shell fails to
+   * activate: a dropped connection becomes "the application is unavailable" and
+   * stays that way until the user restarts into local mode. Serve local while the
+   * peer is away; the live session takes over again as soon as it is reachable.
+   */
+  setRemoteAvailability(check) {
+    this.remoteAvailability = check;
+  }
+  routesToRemote(endpoint) {
+    return this.remoteTarget !== void 0 && !isLocalOnlyEndpoint(endpoint) && this.remoteAvailability();
+  }
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
-    if (this.remoteTarget !== void 0) return this.remoteTarget.invoke(request);
+    if (this.remoteTarget !== void 0 && this.remoteAvailability()) return this.remoteTarget.invoke(request);
     if (request.namespace !== "commands" || !isRemoteCommandMethod(request.method) || this.remoteInvoke === void 0) {
       return this.localInvoke(request);
     }
+    if (!this.remoteAvailability()) return this.localInvoke(request);
     if (this.remoteSupport[request.method]) return this.remoteInvoke(request);
     if (request.method === "list") return Promise.resolve([]);
     return this.localInvoke(request);
@@ -20148,6 +20167,7 @@ var ClientModeRuntime = class {
     this.rtcFactoryProvider = rtcFactoryProvider;
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
+    this.gatewaySwitch.setRemoteAvailability(() => this.connected !== void 0);
   }
   preview;
   identity;

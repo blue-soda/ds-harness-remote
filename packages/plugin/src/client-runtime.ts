@@ -226,6 +226,10 @@ export class ClientModeRuntime {
   ) {
     this.proxySwitch = apiProxy === undefined ? undefined : new ApiProxySwitch(apiProxy)
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway)
+    // Serve the local shell while no peer session is live. Otherwise a remote-mode
+    // boot routes its own local services at a peer that may not be there, and the
+    // shell never finishes activating.
+    this.gatewaySwitch.setRemoteAvailability(() => this.connected !== undefined)
   }
 
   async start(): Promise<void> {
