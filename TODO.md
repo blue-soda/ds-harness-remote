@@ -40,7 +40,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 ## 发行版默认配置与 role
 
 第三方发行版在 profile patch 里 seed `ds-harness-remote` 条目时的契约与待办；完整证据链见
-`AGENTS.md` §发行版默认配置与 `role` 语义。
+`docs/config-and-role.md`。
 
 - [x] 核对"seed 的 `role: both` 在全新 home 下被改写成 `client`"：已确认 **`role` 不是运行时开关**
       （两个半边都由 `serverUrl + connection` 决定 ✓）、双角色注册来自 `authorizeHostByDefault()` ✓、

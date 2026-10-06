@@ -261,6 +261,7 @@ generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app
 - `docs/server.md`：完整 Server 项目的产品/功能设计，并说明本仓库自部署版本的范围。
 - `docs/plugin-integration.md`：Host Plugin 对接 Server 的账号认证、设备认证与凭证状态机，以及最小自部署版本支持的子集。
 - `docs/protocol.md`：跨仓库协议规范。
+- `docs/config-and-role.md`：`role` 语义、配置写回路径与发行版 seed 默认值的契约（按需阅读，勿写入本文件）。
 - `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
@@ -292,35 +293,6 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 仍然有效（access 1h / refresh 30d），所以**登出不等于立即断权**。`revokeCurrentDevice()` 与
 `DELETE /api/v1/devices/self` 予以保留但登出不再调用；要彻底移除设备须由运维在服务停止后改
 `state.json`（运行期间编辑会被内存状态覆盖）。详见 `docs/plugin-integration.md` §6.1。
-
-## 发行版默认配置与 `role` 语义（2026-10-06）
-
-第三方发行版会在 profile 的 `cordis.patch.yml` 里 seed 一个 `ds-harness-remote` 条目并期待默认值生效。
-排查"seed 的 `role: both` 被改写成 `client`"后确认的契约如下（每条都给了代码位置，避免重复排查）：
-
-- **`role` 不是运行时开关** ✗。Host 运行时无条件创建 ✓，`ClientModeRuntime` 的创建条件只是
-  `config.serverUrl !== undefined && connection !== undefined` ✓（`index.ts:290-309` ✓）。因此
-  `host` / `client` / `both` 三种取值下**两个半边都启动** ✓。插件自带 patch 用 `role: host`
-  （`packages/plugin/cordis.patch.yml:13,28` ✓）。
-- **"同时注册 client + host" 不由 `role` 实现** ✓。客户端登录完成后 `control-runtime.ts:281-283`
-  调 `client.authorizeHostByDefault()` ✓ → `client-runtime.ts:276-293` 在 Host 尚未授权时用当前凭据
-  执行 `authorizeHostAsOwned(accessToken, account)` ✓，把 Host 角色作为同账号"自有设备"注册 ✓。
-- **`role: both` 是惰性值** ✗。schema 接受它 ✓（`config.ts:121` ✓），但所有决策点都写成
-  `role === 'client' ? 'client' : 'host'` ✓（`control-runtime.ts:316` 与 `:491` ✓）；穷举搜索 `'both'`
-  只有 schema ✓ → 行为上 ≡ `host` ✓，既不会因此掉功能 ✓，也拿不到额外能力 ✗。
-- **唯一会强制写具体角色的路径** ✗：远程卡片的 DeepSeek 登录 ✓（`client.ts:2128-2129`，**硬编码
-  `role: 'client'`** ✓）→ `settings.configure` → `control-runtime.ts:284` 用 `editableConfig(next)`
-  **整节写回** ✓ —— 发行版看到的"patch 被展开成完整配置"就来自这里 ✓。其余控制写入
-  （`server.set` `:303`、`development.set` `:336`、`codex.set` `:391`、`acp.*` `:377/401`）都是
-  `{ ...current, 只改自己那几个字段 }` ✓、**保留 `current.role`** ✓；**CLI 完全不写 `role`** ✓。
-- **没有启动期写入** ✓：`settings.replace(...)` 只出现在控制端点里 ✓，激活路径只有读 ✓
-  （`index.ts:391-414` ✓）。
-- **没有 `DSH_HOME` 之外的存储** ✓：角色只来自 profile 配置 ✓；状态全在 `DSH_HOME` 下 ✓
-  （`identity-store.ts:70` + `serverStorageDirectory()` ✓，凭据按角色分目录 ✓）；同机多份 home
-  互不影响 ✓，外部输入只有 `DSH_REMOTE_SERVER` ✓（`config.ts:140` ✓）。
-- 实践结论 ✓：发行版 seed 默认值在**功能上安全** ✓；会被改写的只有"有人点过卡片登录"之后的
-  `role` ✓。发行版若要断言 `role`，应接受 `host|client|both` ✓。让 `both` 有一等语义的改动
-  见 `TODO.md` 的"发行版默认配置与 role"条目 ✓。
 
 ## Native sidebar and development preview (2026-09-20)
 
