@@ -1199,7 +1199,14 @@ function containsCodexPath(root: string, candidate: string): boolean {
 }
 
 function normalizeCodexPathForCompare(path: string): string {
-  return path.replace(/[\\/]+$/u, '') || path
+  const trimmed = path.replace(/[\\/]+$/u, '') || path
+  // Windows resolves paths case-insensitively, and Codex reports the same
+  // directory in whatever spelling it happens to hold: a lowercased drive letter,
+  // a project renamed after its thread was created, or a short 8.3 name such as
+  // `SAKAKI~1`. Comparing literally therefore declared a thread's own directory
+  // "outside" the authority built from that very directory, which rejected every
+  // thread on Windows.
+  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
 }
 
 function codexDirectoryCrumbs(root: string, path: string): CodexDirectoryEntry[] {

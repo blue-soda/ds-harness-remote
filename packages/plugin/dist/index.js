@@ -23278,7 +23278,8 @@ function containsCodexPath(root, candidate) {
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
 }
 function normalizeCodexPathForCompare(path) {
-  return path.replace(/[\\/]+$/u, "") || path;
+  const trimmed = path.replace(/[\\/]+$/u, "") || path;
+  return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
 }
 function codexDirectoryCrumbs(root, path) {
   const crumbs2 = [{ name: basename2(root) || root, path: root, hidden: false }];
