@@ -81,6 +81,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 使用当前 v2 schema 与真实 Codex App Server 完成 stdio initialize/account/project/list/read 冒烟
 - [x] 使用真实 Codex App Server 完成本机 thread/start、幂等 resume、streamed turn/completed、History 回读与归档清理冒烟
 - [x] 迁移旧 `dsh-remote` 用户设置，并在 macOS 默认配置下自动发现 ChatGPT App 内置 Codex
+- [x] Windows 自动发现 ChatGPT 桌面应用内置的 `codex.exe`（取最新哈希目录），无需桌面应用运行即可对话（2026-10-06 用户实测）
+- [x] 用真实 Codex App Server **0.160.0** 与 DSH **0.2.1-alpha.1** 跨机跑通 Desktop ↔ web 远程 CodeX 工作区：连接、会话名称、会话历史与对话正常（`scripts/codex-app-server-smoke.mts` 覆盖只读调用面）
 - [x] 用两台真实 DSH Desktop 跑通加密跨机 resume/turn/event/approval/interrupt 与大 History 传输
 - [x] 验证 App Server crash、Host transport 重连和多 Desktop Web Client 同时观察同一 Thread
 - [x] 用 Android 真机跑通 CodeX Workspace→Thread→Prompt/steer/approval/interrupt、大 History、图片分块与断线重连
