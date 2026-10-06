@@ -1,5 +1,5 @@
 {
-  "name": "ds-harness-remote",
+  "name": "@blue-soda/dsh-remote",
   "version": "0.4.28",
   "description": "End-to-end encrypted remote access to DeepSeek Harness and experimental Codex workspaces from desktop, web, and Android, with dsh-TUI Host support.",
   "keywords": [
@@ -12,19 +12,18 @@
     "end-to-end-encryption",
     "webrtc"
   ],
-  "homepage": "https://github.com/liguobao/ds-harness-remote#readme",
+  "homepage": "https://github.com/blue-soda/ds-harness-remote#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liguobao/ds-harness-remote.git"
+    "url": "git+https://github.com/blue-soda/ds-harness-remote.git"
   },
   "bugs": {
-    "url": "https://github.com/liguobao/ds-harness-remote/issues"
+    "url": "https://github.com/blue-soda/ds-harness-remote/issues"
   },
-  "author": "liguobao <lgb835485368@gmail.com>",
+  "author": "blue-soda <blue-soda@users.noreply.github.com>",
   "license": "MIT",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -159,5 +158,8 @@
     "@deepseek-ai/dsh-client-ui-settings-general": "^0.2.0-rc.1",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.0-rc.1",
     "@deepseek-ai/dsh-client-ui-settings-plugin-inventory": "^0.2.0-rc.1"
-  }
+  },
+  "contributors": [
+    "liguobao <lgb835485368@gmail.com>"
+  ]
 }

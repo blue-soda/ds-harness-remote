@@ -10,7 +10,7 @@ const pluginManifest = JSON.parse(readFileSync(join(root, 'packages/plugin/packa
 const componentManifest = JSON.parse(readFileSync(join(root, 'dsh-plugin.json'), 'utf8'))
 const pluginComponentManifest = JSON.parse(readFileSync(join(root, 'packages/plugin/dsh-plugin.json'), 'utf8'))
 
-assert.equal(manifest.name, 'ds-harness-remote', 'root package must use the canonical DSH installation id')
+assert.equal(manifest.name, '@blue-soda/dsh-remote', 'root package must use the canonical DSH installation id')
 assert.equal(pluginManifest.name, manifest.name, 'root and npm plugin package ids must stay unified')
 assert.equal(componentManifest.name, manifest.name, 'root Component manifest must use the canonical plugin id')
 assert.equal(pluginComponentManifest.name, pluginManifest.name, 'npm Component manifest must use the canonical plugin id')

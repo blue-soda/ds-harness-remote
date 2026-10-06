@@ -35,9 +35,10 @@ await buildAtomically({
   external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'werift', 'ws'],
 })
 
+// The client module id must be the package name the Host resolves the plugin by.
 for (const [moduleId, outfile] of [
-  ['ds-harness-remote', 'client.js'],
-  ['ds-harness-remote', 'client.github.js'],
+  ['@blue-soda/dsh-remote', 'client.js'],
+  ['@blue-soda/dsh-remote', 'client.github.js'],
 ]) {
   await buildAtomically({
     entryPoints: [join(root, 'src/client.ts')],

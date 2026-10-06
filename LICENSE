@@ -22,8 +22,9 @@ SOFTWARE.
 
 ---
 
-This distribution is a fork of https://github.com/liguobao/ds-harness-remote and is
-published as @blue-soda/dsh-remote. The original notice above is retained unchanged,
-as the MIT License requires. The notice below covers the changes made in this fork.
+This repository is a fork of https://github.com/liguobao/ds-harness-remote,
+published as @blue-soda/dsh-remote. The original notice above is retained
+unchanged, as the MIT License requires. The notice below covers the changes made
+in this fork.
 
 Modifications Copyright (c) 2026 blue-soda <blue-soda@users.noreply.github.com>
