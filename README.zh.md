@@ -80,7 +80,8 @@ dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 
 ### Android 客户端
 
-本 fork **不发布 Android APK**。请从 [`apps/android`](apps/android/README.md) 自行构建（该文档说明 Expo/React Native 环境与原生模块要求）。本 fork 的 Release 只有源码。
+本仓库的安卓版应用来自上游 Remote 仓库。若你需要一个**能在安卓本地运行 DSH、且自带 Remote 插件**的 APK，本 fork 推荐
+[`blue-soda/deepseek-harness-android-app` 的 releases](https://github.com/blue-soda/deepseek-harness-android-app/releases)。
 
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 

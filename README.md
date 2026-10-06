@@ -83,7 +83,8 @@ adds the bundle's configuration layer.
 
 ### Android client
 
-This fork does not publish Android APKs. Build the client from [`apps/android`](apps/android/README.md); the Flutter-free Expo/React Native setup and its native module requirements are documented there. Releases on this fork are source-only.
+This repository's Android app comes from the upstream Remote repository. For an APK that runs DSH locally on Android and already bundles the Remote plugin, this fork recommends
+[`blue-soda/deepseek-harness-android-app` releases](https://github.com/blue-soda/deepseek-harness-android-app/releases).
 
 Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
