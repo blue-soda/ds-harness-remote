@@ -98,6 +98,13 @@ pnpm --filter @dsh-remote/android start
 DSH_REMOTE_SERVER=ws://127.0.0.1:8080/ws/v1/connect pnpm --filter @dsh-remote/mock-host dev
 ```
 
+针对真实 Codex App Server 的只读 smoke（需要本机 Codex 可执行文件路径，验证 `codex.app.call`
+allowlist、Workspace authority 与历史读取在已安装版本上是否成立）：
+
+```bash
+node --import tsx/esm scripts/codex-app-server-smoke.mts "<path-to-codex.exe>"
+```
+
 Android 不能使用 Expo Go，因为 `react-native-webrtc` 依赖原生模块。
 
 开源自部署 Server 的独立验证命令：
@@ -261,3 +268,11 @@ Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已�
 未解决：该现象仍会在 Desktop 选中远程工作区时发生，根因在 DSH 远程模式的 mux/引导，
 不在本插件。可用替代路径：浏览器直接打开 Host 自己的 UI，或 Android / VS Code 客户端
 （两者直接消费 `codex.app.*`，不经过 DSH 客户端 shell 的引导）。
+
+`scripts/codex-app-server-smoke.mts` 在真实 Codex **0.160.0** 上只读跑通了客户端使用的完整
+路径：`thread/list`、`thread/read`（元数据与完整历史，含 `cwd=C:\Workspace\opencood` 这类
+大小写不同的路径）、`dsh/sessionHistory`、`model/list`、`account/read` 全部成功，
+**`thread/read` 不再返回 `CODEX_THREAD_NOT_ALLOWED`**，因此 Windows 路径比较的大小写修复
+在真数据上得到确认。另外两点是**有意设计**而非缺陷：客户端直调 `thread/turns/list` 返回
+`METHOD_NOT_ALLOWED`（Host 负责上游分页，客户端经 `dsh/sessionHistory` 读取）；`thread/list`
+带 `originators` 会被**上游**拒绝，因为 policy 只负责放行上游声明的字段、取值由上游校验。
