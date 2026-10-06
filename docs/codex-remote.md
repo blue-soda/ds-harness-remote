@@ -94,6 +94,41 @@ ds-harness-remote:
 
 ## 当前验证状态
 
-Codex Remote 已完成 Desktop 跨机、Android 真机、Web → Host、多客户端观察、大 History、Prompt、
-approval、interrupt 和图片分块的真实设备验证，但仍以实验功能发布。后续恢复策略、跨平台矩阵和
-长期稳定性以 [TODO](../TODO.md) 为准；不应把 TODO 中的目标能力描述为已完成。
+已在真实 **Codex App Server 0.160.0** + **DSH 0.2.1-alpha.1** 上完成跨机验证（Desktop ↔ Web）：
+连接、会话名称、会话历史与对话均正常，且**不需要运行 ChatGPT 桌面应用**（桌面应用只是
+`codex.exe` 的来源，见上文发现规则）。此前也完成过 Desktop 跨机、Android 真机、Web → Host、
+多客户端观察、大 History、Prompt、approval、interrupt 与图片分块验证；仍以实验功能发布。
+
+Windows 上的一处已知差异已在 0.4.28 处理：Codex 会以**小写盘符**和 **8.3 短名**
+（`c:\Users\SAKAKI~1\…`）报告线程目录，而工作区授权来自 `project/list` 的大写长路径，因此
+路径比较在 Windows 上改为**大小写不敏感**；否则每个线程都会被判为越界并回
+`CODEX_THREAD_NOT_ALLOWED`。**未验证的残留风险**：短名与长名混用目前只靠大小写归一覆盖，
+若将来再次出现越界拒绝，应在此处补 `realpath` 归一。
+
+## 版本漂移与维护
+
+本领域贴在两个高速演进的上游上，是一层**固定契约适配层**，上游升级后需要跟着维护。三类风险：
+
+| 上游变化 | 症状 | 改哪里 |
+| --- | --- | --- |
+| **Codex App Server** 方法/字段/取值变化 | 调用被拒，错误里**点名方法与字段**：`The CodeX call parameters are invalid. (thread/xxx → 字段: 类型)` | `src/codex/method-policy.ts` 白名单、`src/codex/domain.ts` 字段映射 |
+| **DSH 客户端契约** 投影/基线字段变化 | 客户端控制台出现 `assertNever`、`reading 'length' of undefined`，启动期条目成片 pending | `src/codex/virtual-harness.ts` 的投影与 baseline 载荷 |
+| **产品行为变化** | 历史加载失败，例如界面请求的页大小超过上限（`maxMessages: too_big`） | `CODEX_HISTORY_MAX_MESSAGES`（在 `method-policy.ts` 定义，两个历史入口共用） |
+
+**上游升级后的自检**（Codex 或 DSH 任一升级后各跑一次，均为只读）：
+
+```bash
+node --import tsx/esm scripts/codex-app-server-smoke.mts "<codex.exe 路径>"   # 逐个调用协议面，指名失败的调用
+node scripts/verify-dsh-plugin.mjs                                          # 校验 DSH bundle 契约
+```
+
+只规避 Codex 升级带来的行为变化时，可在设置卡片把 `codex.binary` **钉死**到当前可用路径
+（代价是拿不到新版本特性）。
+
+另外：Codex 领域之外的 `/api` 端点由**拥有窗口的本地 shell**回答，远端工作区的
+`workspaceFiles/*` 与 `terminal/*` 才走远端 Host；这条规则让"载体拒掉本地引导"这一类
+整机不可用的故障结构性消失，但**不能**保证未来 DSH 的引导顺序不变。
+
+后续恢复策略、跨平台矩阵与长期稳定性仍以 [TODO](../TODO.md) 为准；不应把 TODO 中的目标能力
+描述为已完成。
+

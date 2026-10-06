@@ -26,3 +26,10 @@ Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.28` selects
 ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop clients can open
 legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
 Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.
+
+Beyond that matrix: `0.4.28` is verified on **`dsh 0.2.1-alpha.1`** (the current Desktop build),
+where a remote Codex workspace opens across machines and loads its history, and its projection and
+workspace-baseline fields satisfy what that release declares. The Codex-side baseline (App Server
+**0.160.0**), the Windows path difference, the maintenance risks and the read-only checks to run
+after either upstream is upgraded are recorded in
+[Codex Remote technical notes](codex-remote.md).

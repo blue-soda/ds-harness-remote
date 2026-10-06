@@ -5,6 +5,11 @@
 会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
 本插件不提供旧 RPC 的适配层或 wire format 翻译。
 
+除下表之外，`0.4.28` 还已在 **`dsh 0.2.1-alpha.1`**（当前 Desktop 构建）上验证：跨机打开远程
+CodeX 工作区、加载会话历史与对话均正常，且其投影与 Workspace baseline 字段满足该版本的要求。
+Codex 侧基线（App Server **0.160.0**）、Windows 路径差异、维护风险与"上游升级后的只读自检"
+记录在 [Codex Remote 技术说明](codex-remote.md)。
+
 Plugin `0.4.28` 主要用于兼容 DeepSeek Harness `dsh-v0.2.0-rc.2`，同时保留 `dsh-v0.1.7-rc.1`，并保留
 `dsh-v0.1.6-alpha.2` 及更早版本的 settings 兼容路径；它也兼容 `dsh-v0.1.1-rc.2` 与
 `dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
