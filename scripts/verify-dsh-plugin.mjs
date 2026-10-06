@@ -42,9 +42,12 @@ assert.equal(
   'root package must expose the TUI-compatible Remote CLI',
 )
 assert.equal(manifest.bin?.remote, undefined, 'root package must not install a standalone remote executable')
+// npm normalizes a bin target by dropping the leading './' during publish and rewrites
+// package.json to match, so the npm package keeps the normalized form. The root package is
+// never published and keeps its explicit path.
 assert.equal(
   pluginManifest.bin?.['ds-harness-remote'],
-  './bin/ds-harness-remote.js',
+  'bin/ds-harness-remote.js',
   'npm plugin package must expose the Remote CLI',
 )
 assert.equal(pluginManifest.bin?.remote, undefined, 'npm package must not install a standalone remote executable')
