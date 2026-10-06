@@ -43,4 +43,4 @@ ds-harness-remote status
 重启 DSH 后按[快速开始](../README.zh.md#快速开始)继续。卸载：`curl -fsSL https://dsh.r2049.cn/app/uninstall.sh | bash`
 （Windows：用同样方式下载 `uninstall.ps1` 后执行 `& "$env:TEMP\uninstall.ps1"`；避免 `irm ... | iex`）。若域名不可访问，把
 `https://dsh.r2049.cn/app` 换成
-`https://raw.githubusercontent.com/liguobao/ds-harness-remote/main/scripts` 再执行即可。
+`https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts` 再执行即可。

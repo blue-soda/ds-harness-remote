@@ -50,4 +50,4 @@ Restart DSH and continue with [Quick start](../README.md#quick-start). To uninst
 `curl -fsSL https://dsh.r2049.cn/app/uninstall.sh | bash`
 (Windows: download `uninstall.ps1` the same way and run `& "$env:TEMP\uninstall.ps1"`; avoid `irm ... | iex`). If the domain is unreachable,
 swap `https://dsh.r2049.cn/app` for
-`https://raw.githubusercontent.com/liguobao/ds-harness-remote/main/scripts` and run the same way.
+`https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts` and run the same way.

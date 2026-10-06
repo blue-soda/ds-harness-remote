@@ -11,18 +11,22 @@
   &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/releases/latest">Android</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
   <a href="apps/server/README.zh.md">自部署</a>
   &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
+  <a href="https://www.npmjs.com/package/@blue-soda/dsh-remote">npm</a>
   &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
+  <a href="https://dshfind.com/zh/plugins/blue-soda/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/blue-soda/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
 </p>
+
+> **这是 fork。** 它基于 [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote)（MIT）
+> 继续开发，并以 [`@blue-soda/dsh-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote) 发布。
+> 原项目与贡献者致谢见 [LICENSE](LICENSE) 与 `contributors`。
 
 ## 一次连接，随时可用。
 
@@ -32,7 +36,7 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`ds-harness-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.28`
 
 ## 主要特性
 
@@ -52,7 +56,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`ds-harness-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.28`
 
 ### dsh-TUI Host
 
@@ -64,7 +68,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.28
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -76,7 +80,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.28
 
 ### Android 客户端
 
-从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 Android APK。
+从 [GitHub Releases](https://github.com/blue-soda/ds-harness-remote/releases/latest) 下载最新 Android APK。
 
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 
@@ -228,9 +232,9 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 
 <a href="https://www.star-history.com/?repos=liguobao%2Fds-harness-remote&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&legend=top-left" />
  </picture>
 </a>
 

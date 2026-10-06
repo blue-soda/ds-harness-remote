@@ -2,11 +2,15 @@
 
 Continue DeepSeek Harness sessions and experimental Codex workspaces from another device over an end-to-end encrypted connection.
 
-[GitHub](https://github.com/liguobao/ds-harness-remote) · [Full guide](https://github.com/liguobao/ds-harness-remote#readme) · [中文说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/liguobao/ds-harness-remote/releases/latest)
+[GitHub](https://github.com/blue-soda/ds-harness-remote) · [Full guide](https://github.com/blue-soda/ds-harness-remote#readme) · [中文说明](https://github.com/blue-soda/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/blue-soda/ds-harness-remote/releases/latest)
 
 `ds-harness-remote` is the Remote Host and workspace plugin for DeepSeek Harness. Harness keeps running on your work computer with its existing workspaces, tools, and permission controls; Remote gives authorized devices another window into that environment.
 
 > Install this package with `dsh plugin`, not `npm install`. The DSH command updates the selected profile and adds the required bundle configuration.
+
+> **This is a fork** of [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) (MIT),
+> published as [`@blue-soda/dsh-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote).
+> The original project and its contributors are credited in [LICENSE](LICENSE) and `contributors`.
 
 ## Install
 
@@ -19,7 +23,7 @@ Continue DeepSeek Harness sessions and experimental Codex workspaces from anothe
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.28
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 ```
 
 ### dsh-TUI Host
@@ -27,7 +31,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.28
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.28
+dsh plugin --profile dsh-tui add -w @blue-soda/dsh-remote@0.4.28
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
@@ -54,7 +58,7 @@ The same package feature-detects the older settings registry and the `0.1.7-rc.1
 
 ## Self-hosted Server
 
-This repository includes a minimal, single-account self-hosted Relay Server in [`apps/server`](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server). Configure `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`, then point the Host and clients at the same server URL. It provides account login, device credentials, encrypted Control/Noise forwarding, Relay, and a device-status page. It does not provide the complete multi-account Server, Remote Web session UI, or WebRTC/TURN deployment.
+This repository includes a minimal, single-account self-hosted Relay Server in [`apps/server`](https://github.com/blue-soda/ds-harness-remote/tree/main/apps/server). Configure `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`, then point the Host and clients at the same server URL. It provides account login, device credentials, encrypted Control/Noise forwarding, Relay, and a device-status page. It does not provide the complete multi-account Server, Remote Web session UI, or WebRTC/TURN deployment.
 
 ## Security boundary
 
@@ -66,12 +70,12 @@ This repository includes a minimal, single-account self-hosted Relay Server in [
 
 ## Documentation
 
-- [Complete guide](https://github.com/liguobao/ds-harness-remote#readme)
-- [dsh-TUI Remote guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/dsh-tui.md)
-- [Codex Remote technical notes](https://github.com/liguobao/ds-harness-remote/blob/main/docs/codex-remote.md)
-- [End-to-end encryption](https://github.com/liguobao/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)
-- [Network and transport](https://github.com/liguobao/ds-harness-remote/blob/main/docs/network.md)
-- [Protocol reference](https://github.com/liguobao/ds-harness-remote/blob/main/docs/protocol.md)
-- [Changelog](https://github.com/liguobao/ds-harness-remote/blob/main/CHANGELOG.md)
+- [Complete guide](https://github.com/blue-soda/ds-harness-remote#readme)
+- [dsh-TUI Remote guide](https://github.com/blue-soda/ds-harness-remote/blob/main/docs/dsh-tui.md)
+- [Codex Remote technical notes](https://github.com/blue-soda/ds-harness-remote/blob/main/docs/codex-remote.md)
+- [End-to-end encryption](https://github.com/blue-soda/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)
+- [Network and transport](https://github.com/blue-soda/ds-harness-remote/blob/main/docs/network.md)
+- [Protocol reference](https://github.com/blue-soda/ds-harness-remote/blob/main/docs/protocol.md)
+- [Changelog](https://github.com/blue-soda/ds-harness-remote/blob/main/CHANGELOG.md)
 
 This is an independent community project and is not an official DeepSeek product. Licensed under the [MIT License](./LICENSE).

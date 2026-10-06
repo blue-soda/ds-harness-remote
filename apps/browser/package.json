@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liguobao/ds-harness-remote.git",
+    "url": "git+https://github.com/blue-soda/ds-harness-remote.git",
     "directory": "apps/browser"
   },
   "scripts": {

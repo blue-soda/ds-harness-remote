@@ -11,18 +11,22 @@
   &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/releases/latest">Android</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
   <a href="apps/server/README.md">Self-hosting</a>
   &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
+  <a href="https://www.npmjs.com/package/@blue-soda/dsh-remote">npm</a>
   &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
+  <a href="https://dshfind.com/zh/plugins/blue-soda/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/blue-soda/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
 </p>
+
+> **This is a fork.** It continues [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote)
+> (MIT) and is published as [`@blue-soda/dsh-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote).
+> The original project and its contributors are credited in [LICENSE](LICENSE) and `contributors`.
 
 ## Connect once. Ready whenever you are.
 
@@ -33,7 +37,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`ds-harness-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.28`
 
 ## Features
 
@@ -54,7 +58,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`ds-harness-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.28`
 
 ### dsh-TUI Host
 
@@ -66,7 +70,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.28
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -79,7 +83,7 @@ adds the bundle's configuration layer.
 
 ### Android client
 
-Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
+Download the latest Android APK from [GitHub Releases](https://github.com/blue-soda/ds-harness-remote/releases/latest).
 
 Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
@@ -245,9 +249,9 @@ validation status.
 
 <a href="https://www.star-history.com/?repos=liguobao%2Fds-harness-remote&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=blue-soda/ds-harness-remote&type=date&legend=top-left" />
  </picture>
 </a>
 

@@ -28,12 +28,12 @@ Activity Bar, sign in, then choose an online Host. Opening a Session shows its
 conversation in an editor beside the Host list.
 
 The remote computer must first install and enable the
-[`ds-harness-remote`](https://www.npmjs.com/package/ds-harness-remote) plugin in
+[`ds-harness-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote) plugin in
 DeepSeek Harness. The Host plugin and this VS Code client must sign in to the same
 account before the Host can appear in the device list.
 
 远端电脑必须先在 DeepSeek Harness 中安装并启用
-[`ds-harness-remote`](https://www.npmjs.com/package/ds-harness-remote) 插件；远端 Host
+[`ds-harness-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote) 插件；远端 Host
 插件与 VS Code 客户端还必须登录同一账号，设备才会出现在列表中。
 
 The current extension version is `0.4.13`. Cross-machine Extension Host testing is still
