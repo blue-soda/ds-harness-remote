@@ -22061,7 +22061,11 @@ var schemas = {
     isPinned: external_exports.boolean().optional(),
     cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
     useStateDbOnly: external_exports.boolean().optional(),
-    searchTerm: external_exports.string().max(1024).optional()
+    searchTerm: external_exports.string().max(1024).optional(),
+    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
+    // legitimate client query into "The CodeX call parameters are invalid.".
+    originators: external_exports.array(external_exports.string().min(1).max(256)).max(32).nullable().optional(),
+    sectionId: external_exports.string().max(256).nullable().optional()
   }).strict(),
   "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
   "dsh/sessionHistory": external_exports.object({
@@ -22089,7 +22093,9 @@ var schemas = {
     lastTurnId: id2.optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().trim().min(1).max(256) }).strict(),
+  // Upstream declares a plain string and uses the empty value to clear a name, so the
+  // trim-based minimum rejected a legitimate rename.
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().max(256) }).strict(),
   "thread/archive": external_exports.object({ threadId: id2 }).strict(),
   "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
   "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
@@ -22102,7 +22108,13 @@ var schemas = {
     personality: external_exports.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "turn/steer": external_exports.object({ threadId: id2, input, expectedTurnId: id2 }).strict(),
+  "turn/steer": external_exports.object({
+    threadId: id2,
+    input,
+    expectedTurnId: id2,
+    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
+    clientUserMessageId: external_exports.string().max(256).nullable().optional()
+  }).strict(),
   "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
 };
 var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
@@ -22112,7 +22124,14 @@ function parseCodexCall(method, params) {
   }
   const schema = schemas[method];
   const parsed = schema.safeParse(params);
-  if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
+  if (!parsed.success) {
+    const detail = parsed.error.issues.slice(0, 4).map((issue) => {
+      const path = issue.path.length === 0 ? "(root)" : issue.path.join(".");
+      const keys = "keys" in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(", ")}]` : "";
+      return `${path}${keys}: ${issue.code}`;
+    }).join(", ");
+    throw new RpcError("INVALID_MESSAGE", `The CodeX call parameters are invalid. (${method} \u2192 ${detail})`);
+  }
   return { method, params: parsed.data };
 }
 function isThreadMutation(method) {

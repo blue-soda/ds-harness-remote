@@ -53,6 +53,10 @@ const schemas = {
     cwd: z.union([z.string().min(1).max(4096), z.array(z.string().min(1).max(4096)).min(1).max(32)]).optional(),
     useStateDbOnly: z.boolean().optional(),
     searchTerm: z.string().max(1024).optional(),
+    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
+    // legitimate client query into "The CodeX call parameters are invalid.".
+    originators: z.array(z.string().min(1).max(256)).max(32).nullable().optional(),
+    sectionId: z.string().max(256).nullable().optional(),
   }).strict(),
   'thread/read': z.object({ threadId: id, includeTurns: z.boolean().optional() }).strict(),
   'dsh/sessionHistory': z.object({
@@ -80,7 +84,9 @@ const schemas = {
     lastTurnId: id.optional(),
     permissionPreset: permissionPreset.optional(),
   }).strict(),
-  'thread/name/set': z.object({ threadId: id, name: z.string().trim().min(1).max(256) }).strict(),
+  // Upstream declares a plain string and uses the empty value to clear a name, so the
+  // trim-based minimum rejected a legitimate rename.
+  'thread/name/set': z.object({ threadId: id, name: z.string().max(256) }).strict(),
   'thread/archive': z.object({ threadId: id }).strict(),
   'thread/unarchive': z.object({ threadId: id }).strict(),
   'thread/unsubscribe': z.object({ threadId: id }).strict(),
@@ -93,7 +99,13 @@ const schemas = {
     personality: z.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional(),
   }).strict(),
-  'turn/steer': z.object({ threadId: id, input, expectedTurnId: id }).strict(),
+  'turn/steer': z.object({
+    threadId: id,
+    input,
+    expectedTurnId: id,
+    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
+    clientUserMessageId: z.string().max(256).nullable().optional(),
+  }).strict(),
   'turn/interrupt': z.object({ threadId: id, turnId: id }).strict(),
 } as const
 
@@ -106,7 +118,21 @@ export function parseCodexCall(method: string, params: unknown): { method: Allow
   }
   const schema = schemas[method as AllowedCodexAppMethod] as z.ZodType<Record<string, unknown>>
   const parsed = schema.safeParse(params)
-  if (!parsed.success) throw new RpcError('INVALID_MESSAGE', 'The CodeX call parameters are invalid.')
+  if (!parsed.success) {
+    // Name the offending fields. The bare message sent every unreproduced failure
+    // back to the client with no way to tell which argument the Host refused; field
+    // names and issue codes carry no values, so this stays inside the logging rules.
+    const detail = parsed.error.issues
+      .slice(0, 4)
+      .map(issue => {
+        const path = issue.path.length === 0 ? '(root)' : issue.path.join('.')
+        // An unrecognized-key issue names the offending fields in `keys`, not `path`.
+        const keys = 'keys' in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(', ')}]` : ''
+        return `${path}${keys}: ${issue.code}`
+      })
+      .join(', ')
+    throw new RpcError('INVALID_MESSAGE', `The CodeX call parameters are invalid. (${method} → ${detail})`)
+  }
   return { method: method as AllowedCodexAppMethod, params: parsed.data }
 }
 
