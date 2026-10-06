@@ -72,6 +72,8 @@ interface RemoteStatus {
     account?: string
     authorized: boolean
     accountRequired: boolean
+    /** Set when the user paused remote availability while staying signed in. */
+    paused?: boolean
     connectedClients?: Array<{
       deviceId: string
       name: string
@@ -503,6 +505,9 @@ const en = {
   changeServerUrl: 'Change address',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
+  releaseDeviceAuthorization: 'Release this machine',
+  releaseDeviceAuthorizationImpact: 'Releasing removes this machine from your account and gives it a new identity, so you must authorize it again. To only stop being reachable, switch the control above off.',
+  deviceAuthorizationReleased: 'This machine was released from your account.',
   allowControlDevice: 'Allow control of device',
   connectedClientCount: '{count} connected',
   checkAcp: 'Check ACP',
@@ -755,6 +760,9 @@ const zh: Record<keyof typeof en, string> = {
   changeServerUrl: '修改地址',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
+  releaseDeviceAuthorization: '解除本机授权',
+  releaseDeviceAuthorizationImpact: '解除后本机将从你的账号中移除并生成新的设备身份，需要重新授权。若只是想不再被远程访问，请关闭上方的开关。',
+  deviceAuthorizationReleased: '已解除本机在账号中的授权。',
   allowControlDevice: '允许控制设备',
   connectedClientCount: '{count} 台已连接',
   checkAcp: '检测 ACP',
@@ -986,6 +994,29 @@ function connectionErrorMessage(code: string, t: Translate): string {
   return t('connectionUnexpected')
 }
 
+/**
+ * Turn this machine's remote availability on or off.
+ *
+ * Switching it off pauses the connection and keeps the authorization, so the
+ * user does not have to authorize again and no device identity is consumed.
+ * Switching it on authorizes the machine when that is still missing, and
+ * otherwise just resumes — releasing the authorization is a separate,
+ * confirmed action.
+ * @param control - the component's control channel.
+ * @param enabled - whether this machine should accept remote connections.
+ * @param authorized - whether an authorization is already stored.
+ * @returns the refreshed status.
+ */
+async function setDeviceControl(
+  control: <T>(endpoint: string, payload?: unknown) => Promise<T>,
+  enabled: boolean,
+  authorized: boolean,
+): Promise<RemoteStatus> {
+  return enabled && !authorized
+    ? await control<RemoteStatus>('host.authorization.set', { enabled: true })
+    : await control<RemoteStatus>('host.connection.set', { connected: enabled })
+}
+
 function connectionStatusLabel(status: RemoteStatus['host'] | undefined, t: Translate): string {
   if (status === undefined) return t('checkingConnection')
   if (status.online) return t('online')
@@ -1141,6 +1172,14 @@ window.__ModuleLoader__.load({
       const [acpCommand, setAcpCommand] = React.useState('')
       const [acpArguments, setAcpArguments] = React.useState('acp')
       const [reconnectBusy, setReconnectBusy] = React.useState(false)
+      /**
+       * Whether the release-authorization confirmation is showing.
+       *
+       * Releasing is destructive (the account forgets this machine and it gets a
+       * new identity), so it asks first instead of hiding behind the switch that
+       * now only pauses the connection.
+       */
+      const [confirmingRelease, setConfirmingRelease] = React.useState(false)
       const [hostStatus, setHostStatus] = React.useState<RemoteStatus['host'] | undefined>(undefined)
       const [hostName, setHostName] = React.useState('')
       const [hostDeviceId, setHostDeviceId] = React.useState('')
@@ -1210,6 +1249,29 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Release this machine's authorization on the account.
+       *
+       * Separate from the switch above because it is destructive: the server
+       * revokes the device, the local identity is rotated, and the machine has to
+       * be authorized again.
+       */
+      const releaseCurrentDeviceAuthorization = async (): Promise<void> => {
+        setBusy(true)
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          const status = await props.control<RemoteStatus>('host.authorization.set', { enabled: false })
+          setHostStatus(status.host)
+          setConfirmingRelease(false)
+          setNotice({ key: 'deviceAuthorizationReleased' })
+        } catch (reason) {
+          setError(messageOf(reason))
+        } finally {
+          setBusy(false)
+        }
+      }
+
       const logout = async (): Promise<void> => {
         setBusy(true)
         setError(undefined)
@@ -1246,8 +1308,7 @@ window.__ModuleLoader__.load({
         setError(undefined)
         setNotice(undefined)
         try {
-          const status = await props.control<RemoteStatus>('host.authorization.set', { enabled })
-          setHostStatus(status.host)
+          setHostStatus((await setDeviceControl(props.control, enabled, hostStatus?.authorized === true)).host)
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
@@ -1481,9 +1542,27 @@ window.__ModuleLoader__.load({
           React.createElement('input', {
             type: 'checkbox', role: 'switch', disabled: busy,
             'aria-label': t('allowControlCurrentDevice'),
-            checked: hostStatus?.authorized === true,
+            checked: hostStatus?.authorized === true && hostStatus?.paused !== true,
             onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
           })),
+        hostStatus?.authorized === true
+          ? React.createElement('div', { className: 'dshRemoteAuthorizationRelease' },
+            confirmingRelease
+              ? React.createElement(React.Fragment, null,
+                React.createElement('p', null, t('releaseDeviceAuthorizationImpact')),
+                React.createElement('button', {
+                  type: 'button', className: 'dshRemoteDiscard', disabled: busy,
+                  onClick: () => setConfirmingRelease(false),
+                }, t('cancel')),
+                React.createElement('button', {
+                  type: 'button', className: 'dshRemoteDiscard', disabled: busy,
+                  onClick: () => void releaseCurrentDeviceAuthorization(),
+                }, t('releaseDeviceAuthorization')))
+              : React.createElement('button', {
+                type: 'button', className: 'dshRemoteDiscard', disabled: busy,
+                onClick: () => setConfirmingRelease(true),
+              }, t('releaseDeviceAuthorization')))
+          : null,
         React.createElement('div', { className: 'dshRemoteConnection', 'aria-live': 'polite' },
           React.createElement('div', { className: 'dshRemoteConnectionSummary' },
             React.createElement('span', null, t('connection')),
@@ -2103,7 +2182,7 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setError(undefined)
         try {
-          setStatus(await props.control<RemoteStatus>('host.authorization.set', { enabled }))
+          setStatus(await setDeviceControl(props.control, enabled, status?.host?.authorized === true))
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
@@ -2340,7 +2419,7 @@ window.__ModuleLoader__.load({
                         React.createElement('input', {
                           type: 'checkbox', role: 'switch', disabled: busy,
                           'aria-label': t('allowControlDevice'),
-                          checked: status.host?.authorized === true,
+                          checked: status.host?.authorized === true && status.host?.paused !== true,
                           onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                         })) : null,
                       connectedMenu)),
@@ -2981,7 +3060,7 @@ window.__ModuleLoader__.load({
         '.dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:720px}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}',
         '.dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}',
         '.dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
-        '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
+        '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}.dshRemoteAuthorizationRelease{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 0 12px}.dshRemoteAuthorizationRelease p{flex:1 1 100%;margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}',
         '.dshRemoteAssociation{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.dshRemoteAssociation>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteAssociation p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
         '.dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect{appearance:none;flex:0 0 auto;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:34px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteReconnect:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}',
         '.dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',

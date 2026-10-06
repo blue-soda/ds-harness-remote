@@ -154,6 +154,8 @@ export interface HostAuthorizationControl {
     account?: string
     authorized: boolean
     accountRequired: boolean
+    /** Whether the user asked this machine to stay unreachable while signed in. */
+    paused?: boolean
     connectedClients?: Array<{
       deviceId: string
       name: string
@@ -163,6 +165,10 @@ export interface HostAuthorizationControl {
   }
   hasStoredAuthorization?(): Promise<boolean>
   reconnectHost(): void
+  /** Stop being reachable without releasing the authorization. */
+  pauseHostConnection?(): Promise<void>
+  /** Resume with the same credentials and device identity. */
+  resumeHostConnection?(): Promise<void>
   clearHostAuthorization(): Promise<void>
   localHarnessVersion?(): string | undefined
   authorizeHostAsOwned(accessToken: string, account?: string): Promise<unknown>

@@ -18307,7 +18307,7 @@ var entryConfigSchema = s.object({
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
-  hostControl: s.object({ enabled: s.boolean() }),
+  hostControl: s.object({ enabled: s.boolean(), paused: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
   logLevel: s.union(["debug", "info", "warn", "error"]),
@@ -18344,7 +18344,7 @@ var configSchema = external_exports.object({
   serverUrl: external_exports.string().url().optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
-  hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
+  hostControl: external_exports.object({ enabled: external_exports.boolean().optional(), paused: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
@@ -18370,7 +18370,9 @@ function resolveConfig(input2 = {}, env = process.env) {
     role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
     deviceName: parsed.deviceName ?? hostname(),
-    hostControl: { enabled: parsed.hostControl?.enabled ?? true },
+    // `paused` keeps this machine unreachable without releasing its credentials:
+    // it must survive a restart, or "do not connect me" would quietly expire.
+    hostControl: { enabled: parsed.hostControl?.enabled ?? true, paused: parsed.hostControl?.paused ?? false },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
@@ -21656,9 +21658,18 @@ var PluginControlRuntime = class {
         const status2 = await this.client.setHostAuthorization(value.enabled);
         if (this.settings !== void 0) {
           const current = resolveConfig(this.settings.get());
-          await this.settings.replace(editableConfig({ ...current, hostControl: { enabled: value.enabled } }));
+          await this.settings.replace(editableConfig({
+            ...current,
+            // Releasing the authorization must not silently drop a pause.
+            hostControl: { enabled: value.enabled, paused: current.hostControl?.paused ?? false }
+          }));
         }
         return ok3(status2);
+      }
+      if (endpoint === "host.connection.set") {
+        const value = record5(payload);
+        if (typeof value.connected !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host connection state is required.");
+        return ok3(await this.setHostConnection(value.connected));
       }
       if (endpoint === "host.reconnect") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -21878,6 +21889,31 @@ var PluginControlRuntime = class {
     }
     return { ...await this.settingsView(), deepseekSignedOut };
   }
+  /**
+   * Stop or resume this machine's remote availability without releasing its
+   * authorization, and remember the choice so a restart respects it.
+   *
+   * This is the non-destructive counterpart of releasing the authorization: it
+   * closes the connection, keeps the credentials and the device identity, and
+   * therefore costs neither a re-authorization nor a device identity.
+   * @param connected - whether this machine should accept remote connections.
+   * @returns the refreshed status for the caller's view.
+   */
+  async setHostConnection(connected) {
+    if (this.host === void 0) {
+      throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
+    }
+    if (connected) await this.host.resumeHostConnection?.();
+    else await this.host.pauseHostConnection?.();
+    if (this.settings !== void 0) {
+      const current = resolveConfig(this.settings.get());
+      await this.settings.replace(editableConfig({
+        ...current,
+        hostControl: { enabled: current.hostControl?.enabled ?? true, paused: !connected }
+      }));
+    }
+    return this.client === void 0 ? this.hostOnlyStatus() : await this.client.status();
+  }
   async settingsView() {
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
     const associations = await this.associations(config);
@@ -21940,7 +21976,7 @@ function editableConfig(config) {
     role: config.role,
     ...config.serverUrl === void 0 ? {} : { serverUrl: config.serverUrl },
     terminal: config.terminal,
-    hostControl: config.hostControl ?? { enabled: true },
+    hostControl: config.hostControl ?? { enabled: true, paused: false },
     loopback: config.loopback,
     forceRelay: config.forceRelay,
     logLevel: config.logLevel,
@@ -27135,6 +27171,7 @@ var HostPluginRuntime = class {
     this.terminalSpawner = terminalSpawner;
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
+    this.paused = config.hostControl?.paused === true;
     this.codex = new CodexRemoteDomain(config.codex, logger);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
@@ -27193,6 +27230,14 @@ var HostPluginRuntime = class {
   identity;
   serverApi;
   serverConnection;
+  /**
+   * Whether the user asked this machine to stay unreachable.
+   *
+   * Pausing keeps the credentials and the device identity: it only stops the
+   * outbound connection, so resuming needs no re-authorization and consumes no
+   * device identity, unlike clearing the authorization.
+   */
+  paused;
   harnessVersion;
   closed = false;
   codex;
@@ -27226,7 +27271,7 @@ var HostPluginRuntime = class {
       this.serverApi.setHarnessVersion(this.harnessVersion);
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
-      this.serverConnection.start();
+      if (!this.paused) this.serverConnection.start();
     }
   }
   currentIdentity() {
@@ -27250,6 +27295,7 @@ var HostPluginRuntime = class {
       ...authorization?.account === void 0 ? {} : { account: authorization.account },
       authorized: authorization !== void 0,
       accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED",
+      paused: this.paused,
       connectedClients: this.listConnectedClients()
     };
   }
@@ -27270,11 +27316,35 @@ var HostPluginRuntime = class {
   localHarnessVersion() {
     return this.harnessVersion;
   }
+  /**
+   * Stop this machine from being reachable without releasing its authorization.
+   *
+   * Clearing the authorization revokes the device and rotates its identity, so a
+   * user who only wants to stop being remotely reachable would have to authorize
+   * again and would consume a device identity. Pausing closes the connection and
+   * keeps both.
+   */
+  async pauseHostConnection() {
+    this.paused = true;
+    await this.serverConnection?.stop();
+    this.logger.info("Host connection paused");
+  }
+  /** Resume a paused connection with the same credentials and identity. */
+  async resumeHostConnection() {
+    const wasPaused = this.paused;
+    this.paused = false;
+    this.serverConnection?.resume();
+    if (wasPaused) this.logger.info("Host connection resumed");
+  }
+  isPaused() {
+    return this.paused;
+  }
   reconnectHost() {
     if (this.closed) throw new Error("remote runtime is closed");
     if (this.serverConnection === void 0) {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before reconnecting.", false);
     }
+    this.paused = false;
     this.serverConnection.reconnect();
   }
   async startHostOAuthQrLogin(provider) {
@@ -27330,7 +27400,7 @@ var HostPluginRuntime = class {
       result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account);
       this.logger.info("Rotated revoked Host identity before owned-device authorization");
     }
-    this.serverConnection?.resume();
+    if (!this.paused) this.serverConnection?.resume();
     this.logger.info("Host authorized as an owned device");
     return result;
   }
@@ -27339,7 +27409,7 @@ var HostPluginRuntime = class {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before signing in.", false);
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password);
-    this.serverConnection?.resume();
+    if (!this.paused) this.serverConnection?.resume();
     this.logger.info("Host account authorized");
     return result;
   }
@@ -27348,7 +27418,7 @@ var HostPluginRuntime = class {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before entering a Host registration code.", false);
     }
     const result = await this.serverApi.authorizeHostWithCode(this.currentIdentity(), code);
-    this.serverConnection?.resume();
+    if (!this.paused) this.serverConnection?.resume();
     this.logger.info("Host registration code authorized");
     return result;
   }
