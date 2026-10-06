@@ -11,7 +11,7 @@
   &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/blue-soda/ds-harness-remote/releases/latest">Android</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/releases">Releases</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
@@ -80,7 +80,7 @@ dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 
 ### Android 客户端
 
-从 [GitHub Releases](https://github.com/blue-soda/ds-harness-remote/releases/latest) 下载最新 Android APK。
+本 fork **不发布 Android APK**。请从 [`apps/android`](apps/android/README.md) 自行构建（该文档说明 Expo/React Native 环境与原生模块要求）。本 fork 的 Release 只有源码。
 
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
 

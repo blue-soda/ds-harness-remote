@@ -11,7 +11,7 @@
   &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/blue-soda/ds-harness-remote/releases/latest">Android</a>
+  <a href="https://github.com/blue-soda/ds-harness-remote/releases">Releases</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
@@ -83,7 +83,7 @@ adds the bundle's configuration layer.
 
 ### Android client
 
-Download the latest Android APK from [GitHub Releases](https://github.com/blue-soda/ds-harness-remote/releases/latest).
+This fork does not publish Android APKs. Build the client from [`apps/android`](apps/android/README.md); the Flutter-free Expo/React Native setup and its native module requirements are documented there. Releases on this fork are source-only.
 
 Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
