@@ -189,6 +189,14 @@ export class ClientModeRuntime {
   private preview?: LoopbackPreview
   private identity?: HostIdentity
   private connected?: ConnectedRemote
+  /**
+   * Set when a remote session dropped and the runtime fell back to local.
+   *
+   * The mode then reads 'local', which is what every "return to local" control is
+   * gated on, so without this the user is left in a stale remote view with no way
+   * back except signing out.
+   */
+  private fellBackToLocal = false
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
   private codexVirtual?: CodexVirtualHarness
   private readonly proxySwitch?: ApiProxySwitch
@@ -288,6 +296,7 @@ export class ClientModeRuntime {
       serverUrl: this.config.serverUrl,
       ...targetStatus,
       connected: this.connected !== undefined,
+      fellBackToLocal: this.fellBackToLocal,
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -458,6 +467,8 @@ export class ClientModeRuntime {
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
     this.selectRemoteTarget(next)
+    // A fresh remote session clears the record of an earlier dropped one.
+    this.fellBackToLocal = false
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
     this.logger.info('Harness target switched', { mode: 'remote', targetDeviceId: shortId(next.target.deviceId) })
@@ -964,6 +975,10 @@ export class ClientModeRuntime {
         void this.closeCodexVirtual()
         this.proxySwitch?.selectLocal()
         this.gatewaySwitch.selectLocal()
+        // The UI keeps whatever the remote session rendered and offers no exit
+        // route once the mode reads 'local' again, so remember that the session
+        // dropped. The card uses this to keep a way back to the local shell.
+        this.fellBackToLocal = true
         void connectedClient.close().catch(() => undefined)
         this.logger.warn('remote Harness transport closed; falling back to local mode', {
           targetDeviceId: shortId(target.deviceId),

@@ -20152,6 +20152,14 @@ var ClientModeRuntime = class {
   preview;
   identity;
   connected;
+  /**
+   * Set when a remote session dropped and the runtime fell back to local.
+   *
+   * The mode then reads 'local', which is what every "return to local" control is
+   * gated on, so without this the user is left in a stale remote view with no way
+   * back except signing out.
+   */
+  fellBackToLocal = false;
   pendingWorkspaceSelection;
   codexVirtual;
   proxySwitch;
@@ -20218,6 +20226,7 @@ var ClientModeRuntime = class {
       serverUrl: this.config.serverUrl,
       ...targetStatus,
       connected: this.connected !== void 0,
+      fellBackToLocal: this.fellBackToLocal,
       transport: this.connected?.client.getStats().mode ?? "Disconnected",
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ["relay"] : ["lan", "p2p", "turn", "relay"],
@@ -20373,6 +20382,7 @@ var ClientModeRuntime = class {
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
     this.selectRemoteTarget(next);
+    this.fellBackToLocal = false;
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
@@ -20816,6 +20826,7 @@ var ClientModeRuntime = class {
         void this.closeCodexVirtual();
         this.proxySwitch?.selectLocal();
         this.gatewaySwitch.selectLocal();
+        this.fellBackToLocal = true;
         void connectedClient.close().catch(() => void 0);
         this.logger.warn("remote Harness transport closed; falling back to local mode", {
           targetDeviceId: shortId(target2.deviceId)
