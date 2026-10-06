@@ -50,6 +50,25 @@ docs/
 构建脚本，所以根 `index.js`、`packages/plugin/dist/index.js`、`client.github.js` 与
 `packages/plugin/bin/ds-harness-remote.js` 是需要提交的发布入口。
 
+**发布名与上游归属（2026-10-06）**：本仓库是 `liguobao/ds-harness-remote` 的 fork（MIT），
+npm 上的 `ds-harness-remote` 属于上游作者，因此**本 fork 以 `@blue-soda/dsh-remote` 发布**。
+发布入口是包目录内的 `npm publish`（`npm publish -w packages/plugin` **不可用**：npm 不读
+pnpm workspace，会报 `No workspaces found`）：
+
+```bash
+cd packages/plugin && npm publish --access public
+```
+
+改名只涉及**包名与解析入口**：根与包的 `package.json`、两个 `cordis.patch.yml` 的 `name:`、
+客户端 module id（`scripts/build-bundles.mjs` 与 `src/client.ts` 兜底）、两个 `dsh-plugin.json`
+的 `name` 与 `source.repository`、`scripts/verify-dsh-plugin.mjs` 的包名断言。**保持不变**：
+Cordis 实例 `id:`、插件导出的 `name`、设置命名空间 `ds-harness-remote`/`dsh-remote`、控制路由
+`/ds-harness-remote`、CLI bin 名、`dsh-plugin.json` 的 `id` —— 因此设备授权与设置**不迁移**。
+profile 迁移 = 依赖键 + `package.json` 的 `dsh.profile.bundles` 条目改新名（`cordis.patch.yml`
+只按 `id` 覆盖配置，无需改）。`publishConfig` 已移除 `provenance`（本地发布无法生成 ✓），
+如需 provenance 请改由 GitHub Actions 发布。上游引用**故意保留**：`docs/design/` 的上游 issue 与
+`.github/release-notes.md` 中致谢的上游 PR。
+
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
 
 ## Current Status

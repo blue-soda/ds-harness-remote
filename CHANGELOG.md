@@ -2,6 +2,7 @@
 
 ## 0.4.28 - 2026-10-06
 
+- Publishes this fork as `@blue-soda/dsh-remote`. The npm name `ds-harness-remote` belongs to the upstream author, so it could not be published here and using it would have been ambiguous. The Cordis instance id, the plugin's exported name, its settings namespace and the CLI command name stay `ds-harness-remote`, so existing profiles, device authorization and settings keep working; only the dependency key and the profile's `dsh.profile.bundles` entry change. The upstream project is credited in `contributors`, in the MIT notice it keeps verbatim in `LICENSE`, and in a fork notice at the top of the READMEs.
 - Signs in with the DeepSeek account DSH already uses: the Remote card starts the official browser authorization, the Server verifies the grant against the platform and discards it, and the same DeepSeek user always lands in the same account.
 - Points the bundled Remote Server address at this project's own Server — in the profile patch as well as in the code — because a patch value overrides the fallback, and an install otherwise kept the upstream address no matter what the code said.
 - Chooses the sign-in panel from the credentials already stored on this machine, so a signed-out install no longer shows an empty Host list and a "checking connection" line while a network round trip fails.
