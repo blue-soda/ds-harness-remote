@@ -12,6 +12,12 @@
 - Keeps the device identity across sign-out, so signing in again reuses the same device instead of registering a new one. An account holds at most 256 devices and the limit only counts new identities, so the previous behaviour could exhaust an account.
 - Documents what sign-out does and does not do: the device stays in the account, its previous tokens stay valid until the next sign-in, and removing a device is an operator action on the Server's state file.
 - Adds regression coverage for the DeepSeek verifier and its per-grant binding, the local-authorization answer, the sign-out paths and the pause/resume endpoint.
+- Finds the Codex app-server that the ChatGPT desktop app bundles on Windows (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`, newest by modification time) and shows the discovered path as a read-only field, so the setting no longer has to be typed by hand and the discovery result is not printed twice.
+- Compares Codex workspace paths case-insensitively on Windows. Codex reports a thread's directory in whatever spelling it holds — a lowercased drive letter, a project renamed after its thread was created — so a literal comparison declared a thread's own directory to be outside the authority built from it and rejected every thread with `CODEX_THREAD_NOT_ALLOWED`.
+- Fills in the projection fields DSH declares. `WorkspaceBaseline` carries `pinnedSessionIds`, which the client reads directly, and `SessionProjectionHints` is a discriminated union whose `kind` the client switches on exhaustively; omitting either threw inside the client and took the whole session list down with it.
+- Accepts every field the App Server declares in the `codex.app.call` policy — `originators` and `sectionId` on `thread/list`, `clientUserMessageId` on `turn/steer`, and the empty name that `thread/name/set` uses to clear one — and names the method and offending fields when it refuses a call, instead of answering with an unexplained "The CodeX call parameters are invalid.".
+- Falls back to answering locally when the peer does not implement a routed endpoint, or when the connection drops mid-call, and only routes to a remote target while its session is connected. A remote-mode boot still issues RPCs that only the local shell can answer; a business error still propagates.
+- Adds regression coverage for the call policy, the projection kind in the session payloads and the Windows Codex path comparison.
 
 ## 0.4.27 - 2026-09-30
 

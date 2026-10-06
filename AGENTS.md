@@ -135,6 +135,13 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 
 2026-09-20 开源自部署 Server 补充验证：check、11 个核心测试与生产 build 通过；构建产物本地启动后，健康检查、页面及静态资源、账号登录、Cookie 鉴权与未授权拒绝通过。Docker daemon 未运行，未验证镜像构建和容器启动；真实跨机与反向代理长期连接仍待验证。独立 Server 的既有联调结果不等于本版本已完成部署验收。
 
+2026-10-06 Plugin 补充验证：`pnpm --filter ds-harness-remote build` 与 `pnpm -r check` 通过；
+全量 Plugin 测试 **317 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
+路径分隔符/目录顺序平台假设，`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡
+影响），**311 通过**；本轮新增 `tests/method-policy.test.ts`（5 个）覆盖 `codex.app.call`
+allowlist 的上游字段与 fail-closed 行为。Codex App Server 版本探测基线为 **0.160.0**
+（`codex app-server generate-json-schema` 产物用于逐字段对照）。
+
 ## Implementation Rules
 
 1. `docs/protocol.md` 是线协议权威来源。代码与文档冲突时，先按协议实现；必要的协议澄清必须同步更新文档和共享类型。
@@ -224,3 +231,33 @@ Host 限额仍生效。原生真机与真实跨设备文件预览验收尚待完
 该预览分支的全仓 check/生产 build、Android 197 测试、client-core 38 测试及本地 PDF 浏览器
 烟测通过；全仓 test 仍有既有 codex-domain Windows 平台假设的 3 个失败。原生 APK 构建在
 Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已完成 APK 或真机验收。
+
+## DSH 0.2.1 Desktop 远程模式启动失败（2026-10-06）
+
+现象：Desktop 作为 Client 选中远程 CodeX 工作区后，渲染进程的启动判定失败
+（`Error: web boot: 48 entries did not activate`），其中 `@deepseek-ai/dsh-client-locale: failed`，
+所有依赖 `locale` 的插件保持 pending，应用弹出「DeepSeek Harness is unavailable」。
+点 Restart（回到本地模式）必然恢复，因此与本地模式无关。
+
+已确认的事实（每条都有证据，避免重复走弯路）：
+
+- locale 抛出的真实异常只有在给 `dsh-client-locale` 的 `apply()` 临时包一层 try/catch 后才可见
+  （DSH 只记录 `failed` 状态、不记录原因）：
+  `Error invoking remote method 'dsh-desktop:locale-bootstrap': Error: desktop welcome: Web RPC failed`。
+- 该 RPC 走 Desktop 主进程 ↔ 本地 web server 的 `/api/remote.mux`（Gateway 自有 WebSocket，
+  见 `packages/api/gateway/README.md`），**不经过**插件的 Typert 网关切换器：给
+  `invoke` / `dispatchRpc` / `stream` / `openWireStream` 四条路径都加上「对端无法回答即回退本地」
+  后，日志里**没有**出现回退 warning，证明这条调用根本不经被 patch 的 runtime。
+- 因此「我们的远程路由把它转走」这一假设**已被证伪**。`typert-gateway-switch` 的本地回退与
+  「peer 未连接即走本地」保留为防御性改动，**不声称**修复了上述现象。
+- 插件侧确有并已修复的契约缺口：`WorkspaceBaseline.pinnedSessionIds`（客户端直接读其长度）与
+  `SessionProjectionHints.kind`（客户端 `assertNever` 穷尽分支）。修好后客户端控制台里
+  `installPinned` 与 `block kind` 两条硬错误消失。
+- 客户端 `codex.app.call` 调用面与 App Server 字段对照后发现 Host 侧 policy 偏严，已对齐上游：
+  `thread/list` 的 `originators`/`sectionId`、`turn/steer` 的 `clientUserMessageId`、
+  `thread/name/set` 的空名字（上游用空串清空名字，`.trim().min(1)` 会拒绝合法重命名）。
+  拒绝消息现在点名方法与字段；注意未识别字段在 Zod 的 `issue.keys`，不在 `issue.path`。
+
+未解决：该现象仍会在 Desktop 选中远程工作区时发生，根因在 DSH 远程模式的 mux/引导，
+不在本插件。可用替代路径：浏览器直接打开 Host 自己的 UI，或 Android / VS Code 客户端
+（两者直接消费 `codex.app.*`，不经过 DSH 客户端 shell 的引导）。
