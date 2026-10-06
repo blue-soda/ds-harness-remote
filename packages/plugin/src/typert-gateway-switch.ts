@@ -113,12 +113,20 @@ export class TypertGatewaySwitch {
     if (this.originalStream !== undefined) {
       this.runtime.stream = request => !this.routesToRemote(endpointOf(request))
         ? this.localStream!(request)
-        : this.remoteTarget!.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal)
+        : this.withLocalFallback(
+          endpointOf(request),
+          () => this.remoteTarget!.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal),
+          () => this.localStream!(request),
+        )
     }
     if (this.originalDispatch !== undefined) {
       this.runtime.dispatchRpc = (endpoint, payload, signal) => !this.routesToRemote(endpoint)
         ? this.localDispatch!(endpoint, payload, signal)
-        : this.remoteTarget!.dispatch(endpoint, payload, signal)
+        : this.withLocalFallback(
+          endpoint,
+          () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
+          () => this.localDispatch!(endpoint, payload, signal),
+        )
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen
@@ -131,7 +139,16 @@ export class TypertGatewaySwitch {
             : (open as CarrierOpen).call(this.runtime, endpoint, callArgs[1], callArgs[2] as AbortSignal)
         }
         const signal = (rc1 ? callArgs[4] : callArgs[2]) as AbortSignal | undefined
-        return this.remoteTarget!.open(endpoint, callArgs[1], signal ?? new AbortController().signal)
+        if (!rc1) {
+          // The legacy carrier returns an iterable, so a rejection cannot be caught and
+          // the local fallback stays unavailable on that arity.
+          return this.remoteTarget!.open(endpoint, callArgs[1], signal ?? new AbortController().signal)
+        }
+        return this.withLocalFallback(
+          endpoint,
+          () => this.remoteTarget!.open(endpoint, callArgs[1], signal ?? new AbortController().signal),
+          () => Reflect.apply(open, this.runtime, callArgs) as Promise<AsyncIterable<unknown>>,
+        )
       }
     }
     this.installed = true
@@ -204,6 +221,26 @@ export class TypertGatewaySwitch {
     if (this.remoteSupport[request.method]) return this.remoteInvoke(request)
     if (request.method === 'list') return Promise.resolve([])
     return this.localInvoke(request)
+  }
+
+  /**
+   * Run a remote call, and answer it locally when the peer turns out not to serve
+   * that endpoint. A remote-mode boot still issues RPCs only the local shell can
+   * answer: the Desktop asks the local Web server for its locale bootstrap over the
+   * remote mux before any remote work happens. Forwarding those swept them to a host
+   * that does not implement them, the locale plugin failed, and every entry
+   * depending on it stayed pending. A genuine business error still propagates.
+   * @param endpoint - endpoint being routed, for the diagnostic warning.
+   * @param remote - the remote carrier call.
+   * @param local - the local call used when the peer could not answer.
+   * @returns the remote or local result.
+   */
+  private withLocalFallback<T>(endpoint: string, remote: () => Promise<T>, local: () => T | Promise<T>): Promise<T> {
+    return remote().catch(error => {
+      if (!isUnansweredByPeer(error)) throw error
+      console.warn(`[dsh-remote] serving ${endpoint} locally: the peer did not answer it`, error)
+      return local()
+    })
   }
 
   private failure(error: unknown): { code: string; message: string; details: Record<string, unknown> } {
@@ -300,8 +337,7 @@ function isRemoteCommandMethod(method: string): method is typeof REMOTE_COMMAND_
  * locally; a business error such as a denied permission is not.
  * @param error - rejection from the remote carrier.
  * @returns whether the local shell should answer the call instead.
- */
-function isUnansweredByPeer(error: unknown): boolean {
+ */function isUnansweredByPeer(error: unknown): boolean {
   // A wrapped carrier failure such as "Web RPC failed" often arrives with no code at
   // all, and refusing to fall back there would leave the local shell unanswered. The
   // warning emitted at the call site keeps the decision visible in DevTools.

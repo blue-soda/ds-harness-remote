@@ -18962,10 +18962,18 @@ var TypertGatewaySwitch = class {
     if (this.installed) return;
     this.runtime.invoke = (request) => this.selectInvoke(request);
     if (this.originalStream !== void 0) {
-      this.runtime.stream = (request) => !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
+      this.runtime.stream = (request) => !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.withLocalFallback(
+        endpointOf(request),
+        () => this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal),
+        () => this.localStream(request)
+      );
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal);
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.withLocalFallback(
+        endpoint,
+        () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
+        () => this.localDispatch(endpoint, payload, signal)
+      );
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -18976,7 +18984,14 @@ var TypertGatewaySwitch = class {
           return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
-        return this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal);
+        if (!rc1) {
+          return this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal);
+        }
+        return this.withLocalFallback(
+          endpoint,
+          () => this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal),
+          () => Reflect.apply(open, this.runtime, callArgs)
+        );
       };
     }
     this.installed = true;
@@ -19035,6 +19050,25 @@ var TypertGatewaySwitch = class {
     if (this.remoteSupport[request.method]) return this.remoteInvoke(request);
     if (request.method === "list") return Promise.resolve([]);
     return this.localInvoke(request);
+  }
+  /**
+   * Run a remote call, and answer it locally when the peer turns out not to serve
+   * that endpoint. A remote-mode boot still issues RPCs only the local shell can
+   * answer: the Desktop asks the local Web server for its locale bootstrap over the
+   * remote mux before any remote work happens. Forwarding those swept them to a host
+   * that does not implement them, the locale plugin failed, and every entry
+   * depending on it stayed pending. A genuine business error still propagates.
+   * @param endpoint - endpoint being routed, for the diagnostic warning.
+   * @param remote - the remote carrier call.
+   * @param local - the local call used when the peer could not answer.
+   * @returns the remote or local result.
+   */
+  withLocalFallback(endpoint, remote, local) {
+    return remote().catch((error) => {
+      if (!isUnansweredByPeer(error)) throw error;
+      console.warn(`[dsh-remote] serving ${endpoint} locally: the peer did not answer it`, error);
+      return local();
+    });
   }
   failure(error) {
     const normalized = this.runtime.wireStream?.failure(error);
