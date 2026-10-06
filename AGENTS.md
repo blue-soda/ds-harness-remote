@@ -252,6 +252,18 @@ generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app
 
 ## Authorization recovery (Issue #70)
 
+**状态文件的原子替换在 Windows 上会偶发 `EPERM`，那是"被占用"，不是"没权限"**：`rename` 在
+Windows 上是 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` ✓，当**目标文件**被别的句柄以不含
+`FILE_SHARE_DELETE` 的方式打开时会返回 `EPERM` ✓。持有者都是**短暂且在本进程之外**的：杀毒/
+索引扫描、资源管理器预览、备份同步工具，以及**第二个写同一状态目录的进程** ✗。Node 自己总是带
+`FILE_SHARE_DELETE` 打开文件，所以本进程不可能造成它 ✓，而且**下一次尝试通常就成功** ✓ —— 因此
+排除项、权限或打包都不是修法 ✓✓。所有状态文件（`trusted-peers`、`server-credentials`、`device.*`）
+统一走 `src/atomic-file.ts` 的 `replaceFile`（对 `EPERM`/`EBUSY`/`EACCES` 退避重试 5 次 ✓）与
+`sweepStaleTemporaries`（清理崩溃遗留的 `<name>.<pid>.<uuid>.tmp` ✓，只清超过 10 分钟且名字符合
+本模块规则的 ✓）。**重试不能替代正确的并发模型** ✗：两个实例共用一个 `DSH_HOME` 仍会在
+读-改-写上竞争 ✓ → 同机并行 Host 必须使用不同的 `DSH_HOME` ✓（凭据另有 `.refresh-lock` ✓）。
+回归测试见 `tests/atomic-file.test.ts` ✓。
+
 Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；握手被拒绝后最多刷新恢复一次。
 `4003` 映射为 `CONNECTION_REPLACED` 并停止自动抢占，同机并行 Host 应分别设置 `DSH_HOME`。
 锁不按时间强行抢占；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。

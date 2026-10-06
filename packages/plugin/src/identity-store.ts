@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
+import { replaceFile, sweepStaleTemporaries } from './atomic-file.js'
 import { uuidV7 } from './ids.js'
 
 const identitySchema = z.object({
@@ -200,11 +201,13 @@ async function atomicJsonWrite(path: string, value: unknown, mode: number): Prom
 }
 
 async function atomicTextWrite(path: string, value: string, mode: number): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const directory = dirname(path)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await sweepStaleTemporaries(directory)
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
   await writeFile(temporary, value, { encoding: 'utf8', mode, flag: 'wx' })
   await chmod(temporary, mode)
-  await rename(temporary, path)
+  await replaceFile(temporary, path)
   await chmod(path, mode)
 }
 
