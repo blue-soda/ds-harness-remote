@@ -2,7 +2,7 @@
 
 [English](README.md) · **中文**
 
-单账号 Remote 中继，环境变量配置账号密码，Web 提供首页、登录和设备状态页。Server 不包含在 Host 插件 bundle 中，需要单独部署。
+多账号 Remote 中继，环境变量配置种子账号，Web 提供首页、登录和设备状态页。Server 不包含在 Host 插件 bundle 中，需要单独部署。
 
 ## 自部署页面
 

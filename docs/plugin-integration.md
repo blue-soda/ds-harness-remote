@@ -472,4 +472,4 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 
 ## 最小自部署 Server
 
-本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集，且**支持多账号**（设备与令牌按账号命名空间隔离，跨账号互不可见）。`DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` 只是**启动种子账号**，其余账号在重启后保留；**建号默认关闭**，需要时用 `DSH_SERVER_REGISTRATION_CODE` 开启注册码注册，也可选用 DeepSeek 平台登录（`DSH_SERVER_DEEPSEEK_LOGIN=on`）或扫码 provider。配置自定义 Server 地址后按对应方式登录。运行方法见 [README](../apps/server/README.zh.md)。

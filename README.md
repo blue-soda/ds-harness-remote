@@ -9,8 +9,6 @@
   &nbsp;·&nbsp;
   <a href="docs/README.md">Documentation</a>
   &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
   <a href="https://github.com/blue-soda/ds-harness-remote/releases">Releases</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
@@ -105,31 +103,31 @@ and uninstallation, see the [installation guide](docs/installation.md).
 macOS / Linux:
 
 ```sh
-curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell (run as administrator):
 
 ```powershell
 $installer = "$env:TEMP\install.ps1"
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.ps1 -OutFile $installer
 & $installer
 ```
 
 ## Quick start
 
 1. Open **Remote** from the Harness sidebar.
-2. Sign in with a GitHub or Zhihu QR code, or use your account and password. **Note: this fork's plugin now offers DeepSeek account sign-in only** — the GitHub/Zhihu QR and password entries are gone from the Remote modal (their server-side implementations remain). The rest of this section describes the hosted service, whose own Web sign-in is unaffected. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
+2. Sign in from the Remote card with your **DeepSeek account**: this fork's plugin offers only that method, and the GitHub/Zhihu QR and account-password entries are gone from the modal (their server-side implementations remain).
 3. The Host starts with control of the current computer enabled. Remote terminal access is also enabled by default; you can turn it off in the detailed Remote settings.
-4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
+4. On another device, open the DeepSeek Harness desktop edition or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
 
-The public service uses the hosted Remote relay. For a minimal single-account deployment,
-see the [self-hosted Server](apps/server/README.md); its Web page shows device status only.
+The plugin ships `https://sakakibara.ink:8443` as its default Server. To run your own multi-account
+Server, see the [self-hosted Server](apps/server/README.md); its Web page offers sign-in and device status.
 
 ## Minimal self-hosted Server
 
-Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
+Run the optional single-process, Relay-only Server in [`apps/server`](apps/server/README.md). It **supports multiple accounts**: devices and tokens are namespaced per account and stay invisible across them. `DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` configure a **seed account**; other accounts survive restarts. Account creation is **off by default** - enable it with `DSH_SERVER_REGISTRATION_CODE`, or sign in with a DeepSeek platform account (`DSH_SERVER_DEEPSEEK_LOGIN=on`) or a QR provider (`DSH_SERVER_OAUTH_PROVIDER=github|wechat`); `DSH_SERVER_PASSWORD_LOGIN=off` disables password login. The Web page currently offers login and device status only. Point both Host and Client at your Server URL and sign in to the same account; device credentials survive restarts. It is Relay-only: no Remote Web session UI, Admin or WebRTC/TURN. See [`apps/server/README.md`](apps/server/README.md) for the full configuration.
 
 ## Screenshots
 

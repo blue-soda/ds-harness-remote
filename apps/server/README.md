@@ -2,7 +2,7 @@
 
 **English** · [中文](README.zh.md)
 
-A single-account Remote relay with credentials configured through environment variables. Its Web UI includes a landing page, sign-in, and device status page. The Server is deployed separately from the Host plugin bundle.
+A multi-account Remote relay with a seed account configured through environment variables and sharing the same JSON-file persistence. Its Web UI includes a landing page, sign-in, and device status page. The Server is deployed separately from the Host plugin bundle.
 
 ## Self-hosted Web flow
 

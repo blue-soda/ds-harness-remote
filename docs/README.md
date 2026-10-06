@@ -10,7 +10,7 @@
 - `protocol`、`crypto`、`webrtc`、`client-core`、`ui` 等共享包
 - 用于客户端和插件联调的 Mock Host
 
-本仓库另提供 [最小自部署 Server](../apps/server/README.zh.md)：单账号环境变量鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
+本仓库另提供 [最小自部署 Server](../apps/server/README.zh.md)：多账号（环境变量配置种子账号）鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
 
 完整多账号 Server、Remote Web 会话 UI 和 Admin 仍在独立 Server 项目实现；这里的最小版本复用相同协议子集，保持独立进程，不扩展为完整站点。
 

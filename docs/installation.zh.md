@@ -5,7 +5,7 @@
 macOS / Linux：
 
 ```sh
-curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell（使用安装所属账户，选择「以管理员身份运行」）：
@@ -15,7 +15,7 @@ Windows PowerShell（使用安装所属账户，选择「以管理员身份运�
 # 机器上，irm 失败后向管道传 $null，iex 会报出误导性的 "null-valued
 # expression" 错误，掩盖真实的网络故障。
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile "$env:TEMP\install.ps1"
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.ps1 -OutFile "$env:TEMP\install.ps1"
 if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw '下载的安装脚本异常地小。' }
 & "$env:TEMP\install.ps1"
 ```
@@ -40,7 +40,6 @@ ds-harness-remote login zhihu
 ds-harness-remote status
 ```
 
-重启 DSH 后按[快速开始](../README.zh.md#快速开始)继续。卸载：`curl -fsSL https://dsh.r2049.cn/app/uninstall.sh | bash`
-（Windows：用同样方式下载 `uninstall.ps1` 后执行 `& "$env:TEMP\uninstall.ps1"`；避免 `irm ... | iex`）。若域名不可访问，把
-`https://dsh.r2049.cn/app` 换成
-`https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts` 再执行即可。
+重启 DSH 后按[快速开始](../README.zh.md#快速开始)继续。卸载：`curl -fsSL https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/uninstall.sh | bash`
+（Windows：用同样方式下载 `uninstall.ps1` 后执行 `& "$env:TEMP\uninstall.ps1"`；避免 `irm ... | iex`）。脚本都取自本仓库的
+`https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts`，按需替换文件名即可（`install.sh`、`install.ps1`、`uninstall.sh`、`uninstall.ps1`、`install-token.sh`）。

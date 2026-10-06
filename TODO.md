@@ -3,7 +3,7 @@
 本清单按 2026-09-29 的兼容方向维护：Harness v0.1.1 rc.2 使用官方 ApiProxy，
 v0.1.2 alpha.1–rc.1 使用既有 Typert Remote Gateway，v0.1.5 rc.1 / v0.1.6 alpha.1 / v0.2.0 rc.1 作为 Session V3
 兼容目标。Android 与 VS Code Client 通过 capability 探测兼容这些 Host carrier；完整 Server、Remote Web 和 Admin 在独立
-Server 仓库实现；本仓库 `apps/server` 另提供最小单账号 Relay Server。
+Server 仓库实现；本仓库 `apps/server` 另提供最小多账号 Relay Server。
 
 Desktop 已使用独立 Remote 工作区入口：本地选择账号下的 Host 与远端 Workspace，或通过
 只读目录浏览添加 Workspace，随后复用原生 Harness UI。当前实现已跑通真实设备、Web→Host

@@ -9,8 +9,6 @@
   &nbsp;·&nbsp;
   <a href="docs/README.md">文档</a>
   &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
   <a href="https://github.com/blue-soda/ds-harness-remote/releases">Releases</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
@@ -101,30 +99,30 @@ dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.29
 macOS / Linux：
 
 ```sh
-curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell（以管理员身份运行）：
 
 ```powershell
 $installer = "$env:TEMP\install.ps1"
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/ds-harness-remote/main/scripts/install.ps1 -OutFile $installer
 & $installer
 ```
 
 ## 快速开始
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
-2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。**注意：本 fork 的插件已改为只提供「使用 DeepSeek 账号登录」**——Remote 模态框中的 GitHub/知乎扫码与账号密码入口已移除（服务端实现仍保留）；本节其余内容描述的是官方托管服务，其网页端登录方式不受影响。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
+2. 在 Remote 卡片里**用 DeepSeek 账号登录**：本 fork 的插件只提供这一种登录方式，GitHub/知乎扫码与账号密码入口已从模态框移除（服务端实现仍保留）。
 3. Host 启动后默认允许控制当前机器，远程终端也默认开启；需要时可在详细 Remote 设置中关闭远程终端。
-4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
+4. 在另一台设备上打开 DeepSeek Harness 桌面版或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
-公开服务使用托管的 Remote 中继；单账号自建可使用仓库内的[最小 Server](apps/server/README.zh.md)，其 Web 页面仅提供设备状态。
+插件内置的默认 Server 是 `https://sakakibara.ink:8443`；要自建多账号 Server 见[最小自部署 Server](apps/server/README.zh.md)，其 Web 页面提供登录与设备状态。
 
 ## 最小自部署 Server
 
-仓库内的 [`apps/server`](apps/server/README.zh.md) 提供可独立运行的单账号 Relay Server。通过 `DSH_SERVER_ACCOUNT`、`DSH_SERVER_PASSWORD` 配置账号密码；Web 提供登录和设备状态。Host 与客户端填写同一 Server 地址并使用该账号登录，设备凭据在重启后保留。
+[`apps/server`](apps/server/README.zh.md) 是可独立运行的单进程 Relay Server，**支持多账号**：设备与令牌按账号命名空间隔离，跨账号互不可见。`DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` 配置的是**启动种子账号**，其余账号在重启后保留；**建号默认关闭** —— 需要时用 `DSH_SERVER_REGISTRATION_CODE` 开启注册码注册，或用 `DSH_SERVER_DEEPSEEK_LOGIN=on` 以 DeepSeek 平台账号登录、`DSH_SERVER_OAUTH_PROVIDER=github|wechat` 扫码登录（`DSH_SERVER_PASSWORD_LOGIN=off` 可关闭密码登录）。Web 页面目前只有登录与设备状态。Host 与客户端填写同一 Server 地址并登录同一账号，设备凭据在重启后保留 —— 它只做 Relay，不提供 Remote Web 会话界面、Admin 或 WebRTC/TURN；完整配置与部署见 [`apps/server/README.zh.md`](apps/server/README.zh.md)。
 
 ## 界面截图
 
