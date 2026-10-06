@@ -143,11 +143,13 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 2026-09-20 开源自部署 Server 补充验证：check、11 个核心测试与生产 build 通过；构建产物本地启动后，健康检查、页面及静态资源、账号登录、Cookie 鉴权与未授权拒绝通过。Docker daemon 未运行，未验证镜像构建和容器启动；真实跨机与反向代理长期连接仍待验证。独立 Server 的既有联调结果不等于本版本已完成部署验收。
 
 2026-10-06 Plugin 补充验证：`pnpm --filter ds-harness-remote build` 与 `pnpm -r check` 通过；
-全量 Plugin 测试 **317 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
+全量 Plugin 测试 **318 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
 路径分隔符/目录顺序平台假设，`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡
-影响），**311 通过**；本轮新增 `tests/method-policy.test.ts`（5 个）覆盖 `codex.app.call`
-allowlist 的上游字段与 fail-closed 行为。Codex App Server 版本探测基线为 **0.160.0**
-（`codex app-server generate-json-schema` 产物用于逐字段对照）。
+影响），**312 通过**；本轮新增 `tests/method-policy.test.ts`（5 个）覆盖 `codex.app.call`
+allowlist 的上游字段与 fail-closed 行为，并在 `tests/codex-virtual-harness.test.ts` 增加
+CodeX 领域外端点的委派断言。Codex App Server 版本探测基线为 **0.160.0**
+（`codex app-server generate-json-schema` 产物用于逐字段对照），另有
+`scripts/codex-app-server-smoke.mts` 在真实 0.160.0 上做只读端到端检查。
 
 ## Implementation Rules
 
@@ -265,9 +267,31 @@ Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已�
   `thread/name/set` 的空名字（上游用空串清空名字，`.trim().min(1)` 会拒绝合法重命名）。
   拒绝消息现在点名方法与字段；注意未识别字段在 Zod 的 `issue.keys`，不在 `issue.path`。
 
-未解决：该现象仍会在 Desktop 选中远程工作区时发生，根因在 DSH 远程模式的 mux/引导，
-不在本插件。可用替代路径：浏览器直接打开 Host 自己的 UI，或 Android / VS Code 客户端
-（两者直接消费 `codex.app.*`，不经过 DSH 客户端 shell 的引导）。
+未解决（**2026-10-06 晚更新：已定位并修复，见下**）：曾经的判断是"根因在 DSH 远程模式的 mux/引导"，
+**该判断是错的**，保留在此仅作为排查教训。
+
+**真正的根因与修复**：`client-runtime.ts` 打开远程 CodeX 工作区时执行
+`gatewaySwitch.selectRemote(virtual, …)`，把 `CodexVirtualHarness` 作为**远端目标对象**接上，
+于是它接管了 `/api` 的**每一个**端点；但载体只实现 CodeX 领域，其余全部落到
+`virtual-harness.ts` 的 `default: fail('method-not-found', …)` ✗。Desktop 的原生引导要向
+**本地**服务请求 `settings/describe`（见 `apps/desktop/src/welcome-backend.ts`：HTTP POST
+`/api/<ns>/<method>`，只有 `result.ok === true` 才算成功，否则抛
+`desktop welcome: Web RPC failed`），拿到我们的 `method-not-found` 后 locale 插件失败、
+48 个条目 pending、界面判定不可用；Restart 回到本地模式则不经过该载体，所以必然恢复。
+
+复现证据（在本机 web 实例上直接打 RPC，无需 Desktop）：修复前
+`POST /api/settings/describe` → `{"ok":false,"error":{"code":"method-not-found","message":"CodeX virtual Harness does not implement settings/describe."}}`；
+修复后同一探针 → `{"ok":true,"value":{…}}`。
+
+修复：`virtual-harness.ts` 的 `dispatch` 默认分支与 `open` 的兜底分支改为**先委派给
+`hostCarrier`**（`new RemoteTypertGateway(remote.client)`，即远端 Host 的通用网关，
+这正是远程会话的语义），仅在 `hostCarrier` 缺失时才回 `method-not-found`；新增
+`tests/codex-virtual-harness.test.ts` 的委派断言锁住该行为。
+
+排查教训：`Web RPC failed` 意味着 **RPC 执行了但回答是失败**（传输失败是 `Web request
+failed`）；因此判定"调用是否经过我们"时，不能只看 promise 是否 reject，**必须看返回信封的
+`result.ok`**。此前给四条路由加的"对端无法回答即回退本地"因此一次都没触发，并导致我两次
+误判根因。
 
 `scripts/codex-app-server-smoke.mts` 在真实 Codex **0.160.0** 上只读跑通了客户端使用的完整
 路径：`thread/list`、`thread/read`（元数据与完整历史，含 `cwd=C:\Workspace\opencood` 这类

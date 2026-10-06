@@ -16054,8 +16054,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           return ok(this.commandList(args));
         case "commands/execute":
           return ok(await this.executeCommand(args, signal));
-        default:
+        default: {
+          if (this.hostCarrier !== void 0) return await this.hostCarrier.dispatch(endpoint, payload, signal);
           return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
+        }
       }
     } catch (error) {
       return failFrom(error);
@@ -16077,6 +16079,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg(args), signal);
     if (endpoint === "$events") return this.remoteEvents(signal);
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",

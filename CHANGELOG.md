@@ -17,7 +17,8 @@
 - Fills in the projection fields DSH declares. `WorkspaceBaseline` carries `pinnedSessionIds`, which the client reads directly, and `SessionProjectionHints` is a discriminated union whose `kind` the client switches on exhaustively; omitting either threw inside the client and took the whole session list down with it.
 - Accepts every field the App Server declares in the `codex.app.call` policy — `originators` and `sectionId` on `thread/list`, `clientUserMessageId` on `turn/steer`, and the empty name that `thread/name/set` uses to clear one — and names the method and offending fields when it refuses a call, instead of answering with an unexplained "The CodeX call parameters are invalid.".
 - Falls back to answering locally when the peer does not implement a routed endpoint, or when the connection drops mid-call, and only routes to a remote target while its session is connected. A remote-mode boot still issues RPCs that only the local shell can answer; a business error still propagates.
-- Adds regression coverage for the call policy, the projection kind in the session payloads and the Windows Codex path comparison.
+- Fixes the Desktop failing to start whenever a remote Codex workspace was open. Selecting the virtual Harness as the Codex target made it answer every `/api` endpoint while it only owns the Codex domain, so the Desktop's own bootstrap — which asks the local server for `settings/describe` before its window starts — received `method-not-found`, read that as a failed RPC, and reported the whole application as unavailable until the user restarted into local mode. Endpoints outside the Codex domain now go to the remote Host, which is what a remote session means.
+- Adds regression coverage for the call policy, the projection kind in the session payloads, the Codex-endpoint delegation and the Windows Codex path comparison.
 
 ## 0.4.27 - 2026-09-30
 

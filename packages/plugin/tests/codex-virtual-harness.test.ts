@@ -26,6 +26,30 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  it('delegates endpoints the CodeX domain does not own to the remote Host', async () => {
+    // Selecting this Harness as the Codex target makes it answer every `/api`
+    // endpoint, so anything outside the CodeX domain - the local shell's own
+    // settings bootstrap included - has to reach the remote Host instead of being
+    // refused. Answering "method-not-found" failed the Desktop's native start.
+    const client = fakeCodex()
+    const hostCarrier = {
+      invoke: vi.fn(async () => undefined),
+      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
+      open: vi.fn(async () => (async function* () { yield { type: 'ready' } })()),
+    }
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'legacy', hostCarrier)
+    const signal = new AbortController().signal
+
+    await expect(target.dispatch('settings/describe', { args: {} }, signal))
+      .resolves.toEqual({ ok: true, value: { endpoint: 'settings/describe' } })
+    expect(hostCarrier.dispatch).toHaveBeenCalledWith('settings/describe', { args: {} }, signal)
+
+    const stream = await target.open('theme/follow', { args: {} }, signal)
+    await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
+    expect(hostCarrier.open).toHaveBeenCalledWith('theme/follow', { args: {} }, signal)
+    await target.close()
+  })
+
   it('groups visible CodeX threads into virtual DSH workspaces and sessions', async () => {
     const client = fakeCodex()
 

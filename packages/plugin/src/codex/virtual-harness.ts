@@ -398,7 +398,17 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'skills/list': return business(success({ items: [] }))
         case 'commands/list': return ok(this.commandList(args))
         case 'commands/execute': return ok(await this.executeCommand(args, signal))
-        default: return fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)
+        default: {
+          // Selecting this Harness as the Codex target makes it answer every `/api`
+          // endpoint, but it only owns the CodeX domain. The rest belongs to the
+          // remote Host, which is what a remote session means. Answering
+          // "method-not-found" here broke the local shell's own bootstrap: the
+          // Desktop asks `settings/describe` for its locale before its window
+          // starts, read the failure as "Web RPC failed", and reported the whole
+          // application as unavailable until the user restarted into local mode.
+          if (this.hostCarrier !== undefined) return await this.hostCarrier.dispatch(endpoint, payload, signal)
+          return fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)
+        }
       }
     } catch (error) {
       return failFrom(error)
@@ -421,6 +431,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     if (endpoint === 'session/control') return this.sessionControl(signal)
     if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
     if (endpoint === '$events') return this.remoteEvents(signal)
+    // Same delegation as the unary path: a stream the CodeX domain does not own is
+    // the remote Host's, and refusing it failed the local shell's own subscriptions.
+    if (this.hostCarrier !== undefined) return this.hostCarrier.open(endpoint, payload, signal)
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true as const,
       code: 'method-not-found',
