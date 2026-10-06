@@ -27,6 +27,14 @@
 > **This is a fork.** It continues [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote)
 > (MIT) and is published as [`@blue-soda/dsh-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote).
 > The original project and its contributors are credited in [LICENSE](LICENSE) and `contributors`.
+>
+> What this fork adds:
+>
+> - **Multi-account self-hosted Server**: devices and tokens are isolated per account, with DeepSeek platform sign-in and a WeChat OAuth entry.
+> - **Remote Codex that actually works on Windows**: workspace authority compares paths case-insensitively, and the `codex.exe` bundled with the ChatGPT desktop app is discovered automatically - browsing projects, loading history and chatting all work **without running that app**.
+> - **Real failures fixed**: opening a remote Codex workspace no longer makes the native window unusable, session history loads again, call fields the App Server declares are no longer refused, and the momentary Windows `EPERM` on state-file writes is retried.
+> - **Experience work**: sign-out keeps only the navigation-bar entry and also leaves the borrowed DeepSeek account while keeping the device identity (so it costs no account device slot); returning from the background reconnects automatically; the settings card toggles the Codex connection and confirms or overrides the binary path.
+> - **Published to npm** as `@blue-soda/dsh-remote`, while the plugin instance id, settings namespace and CLI command name stay unchanged, so **existing installs, device authorization and settings need no migration**.
 
 ## Connect once. Ready whenever you are.
 
@@ -37,7 +45,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`@blue-soda/dsh-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.29`
 
 ## Features
 
@@ -58,7 +66,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`@blue-soda/dsh-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.29`
 
 ### dsh-TUI Host
 
@@ -70,7 +78,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.29
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -83,10 +91,9 @@ adds the bundle's configuration layer.
 
 ### Android client
 
-This repository's Android app comes from the upstream Remote repository. For an APK that runs DSH locally on Android and already bundles the Remote plugin, this fork recommends
-[`blue-soda/deepseek-harness-android-app` releases](https://github.com/blue-soda/deepseek-harness-android-app/releases).
-
-Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
+This repository's Android app comes from the upstream Remote repository. We maintain our own build as
+[**blue-soda/deepseek-harness-android-app**](https://github.com/blue-soda/deepseek-harness-android-app/tree/master):
+an APK that runs DSH locally on Android and already bundles the Remote plugin.
 
 Tap **Prompts** beside the composer's `+` button to open the saved prompt list, then tap a prompt to send it. Edit prompts in the same panel. Files, Terminal, and Trajectory remain under `+` → **Tool access**.
 
@@ -146,21 +153,9 @@ connection status shown in the header.
 
 ### Android
 
-Sign in to the Android client with your existing account, select an available computer,
-open a workspace, and continue the conversation with text or image prompts. The conversation
-toolbar also lets you switch the active model and choose any reasoning effort declared by it.
+Sign in with your existing account, pick an available computer and open a workspace, then continue with text or image prompts; the conversation toolbar switches the active model and its declared reasoning effort.
 
-Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.2`) and an updated Remote Host plugin. Remote terminal access is enabled by default and can be turned off in the Host's detailed Remote settings. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
-
-The permission selector supports both older inline options and the separate `permissionPresets/catalog` used by newer DSH 0.1.6 builds. Update the Host Remote plugin too; unsupported Hosts show an actionable error instead of fabricated permission options.
-
-Android Files also previews PNG/JPEG/GIF/WebP images and PDF documents, plus DOC/DOCX/XLS/XLSX/PPT/PPTX when the Host provides `officeToPdf`. Binary previews are limited to 8 MiB (Office sources: 50 MiB). PDF rendering is bundled locally, with no CDN, external viewer, or file export. Unknown binary types are not treated as text. All access remains read-only and authorized by the official Session filesystem; native-device and cross-device preview validation is still pending.
-
-<p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="Sending an image prompt from the Android client" width="30%">
-  <img src="docs/images/image-result.jpg" alt="Viewing the image response in the Android client" width="30%">
-</p>
+**Files** (workspace browsing with paged read-only UTF-8 previews, plus images, PDF and Office documents when the Host provides `officeToPdf`) and **Terminal** sit in the conversation title bar: both are read-only and authorized by the official Session APIs, terminals are restored from the Host snapshot and never replay input after a disconnect, and CodeX conversations do not expose them. See [`apps/android`](apps/android/README.md) for setup, native module requirements and validation status.
 
 ## How it works
 

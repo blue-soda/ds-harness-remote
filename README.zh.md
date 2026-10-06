@@ -27,6 +27,14 @@
 > **这是 fork。** 它基于 [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote)（MIT）
 > 继续开发，并以 [`@blue-soda/dsh-remote`](https://www.npmjs.com/package/@blue-soda/dsh-remote) 发布。
 > 原项目与贡献者致谢见 [LICENSE](LICENSE) 与 `contributors`。
+>
+> 本 fork 的主要工作：
+>
+> - **多账号自部署 Server**：账号之间设备与令牌完全隔离，支持 DeepSeek 平台登录与微信 OAuth 入口。
+> - **Windows 上真正可用的远程 Codex**：工作区授权改为大小写无关比较，并自动发现 ChatGPT 桌面应用内置的 `codex.exe` —— **不需要运行那个应用**就能浏览项目、加载历史并对话。
+> - **修掉几处真实故障**：打开远程 Codex 工作区会导致原生窗口不可用、会话历史加载失败、上游已声明的调用字段被误拒，以及 Windows 上状态文件写入的瞬时 `EPERM`（已加重试）。
+> - **体验优化**：退出登录只保留导航栏入口；登出同时退出借用的 DeepSeek 账号，但保留设备身份（不消耗账号设备名额）；切到后台再回来自动重连；设置卡片里可开关 Codex 连接，并确认或手填二进制路径。
+> - **以 npm 包发布**：包名是 `@blue-soda/dsh-remote`，而插件实例 id、设置命名空间与 CLI 命令名保持不变，**已有安装、设备授权与设置无需迁移**。
 
 ## 一次连接，随时可用。
 
@@ -36,7 +44,7 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.29`
 
 ## 主要特性
 
@@ -56,7 +64,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.4.28`
+`@blue-soda/dsh-remote@0.4.29`
 
 ### dsh-TUI Host
 
@@ -68,7 +76,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.29
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -80,10 +88,9 @@ dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.28
 
 ### Android 客户端
 
-本仓库的安卓版应用来自上游 Remote 仓库。若你需要一个**能在安卓本地运行 DSH、且自带 Remote 插件**的 APK，本 fork 推荐
-[`blue-soda/deepseek-harness-android-app` 的 releases](https://github.com/blue-soda/deepseek-harness-android-app/releases)。
-
-使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
+本仓库的安卓版应用来自上游 Remote 仓库。我们维护自己的构建：
+[**blue-soda/deepseek-harness-android-app**](https://github.com/blue-soda/deepseek-harness-android-app/tree/master)
+—— 一个可在安卓本地运行 DSH、并自带 Remote 插件的 APK。
 
 点击输入栏 `+` 旁的「快捷提示词」打开已保存的提示词列表，点击条目即可发送，并可在同一面板编辑提示词。文件、终端和轨迹仍位于 `+` →「工具访问」。
 
@@ -139,20 +146,9 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 
 ### Android
 
-使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
-会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
+使用已有账号登录，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话；会话工具栏可切换当前模型与它声明的思考程度。
 
-Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.2`）的原生接口及更新后的 Remote Host 插件。远程终端默认开启，可在 Host 的详细 Remote 设置中关闭。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
-
-权限选择器兼容旧版会话内选项与新版 DSH 0.1.6 的独立 `permissionPresets/catalog`。Host Remote 插件也需要更新；不支持的 Host 会显示更新提示，不会凭空补出权限选项。
-
-Android 文件预览还支持 PNG/JPEG/GIF/WebP 图片和 PDF；Host 提供 `officeToPdf` 时可查看 DOC/DOCX/XLS/XLSX/PPT/PPTX。二进制预览上限为 8 MiB（Office 源文件为 50 MiB）。PDF 使用本地打包的渲染器，不依赖 CDN、外部查看器或文件导出；未知二进制类型不会当作文本打开。文件访问仍只读，并由官方 Session 文件系统授权；原生真机与跨设备预览验收尚待完成。
-
-<p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="从 Android 客户端发送图片 Prompt" width="30%">
-  <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
-</p>
+**「文件」**（工作区浏览 + UTF-8 分页只读预览，另支持图片、PDF，以及 Host 提供 `officeToPdf` 时的 Office 文档）与 **「终端」** 位于会话标题栏：都由官方 Session 接口只读授权，终端从 Host 快照恢复、断线不重放输入，CodeX 会话不提供这些工具。环境准备、原生模块要求与验收状态见 [`apps/android`](apps/android/README.md)。
 
 ## 工作方式
 

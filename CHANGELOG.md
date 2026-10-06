@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.29 - 2026-10-06
+
+- Retries the Windows `EPERM` raised while replacing a state file. `rename` there is `MoveFileEx(MOVEFILE_REPLACE_EXISTING)`, which fails while another handle holds the destination without `FILE_SHARE_DELETE` - antivirus and indexer scans, Explorer previews, backup agents, or a second process writing the same directory. Node always opens with `FILE_SHARE_DELETE` itself, so the holder is outside this process and the next attempt succeeds. Every state file (`trusted-peers.json`, `server-credentials.json`, `device.*`) now shares one writer that retries `EPERM`, `EBUSY` and `EACCES` with backoff and removes the temporary files a crashed write left behind. A retry does not make concurrent writers safe: keep parallel Hosts on separate `DSH_HOME` values.
+- Points the Android section at our own client (`blue-soda/deepseek-harness-android-app`) instead of describing the upstream APK, and drops a usage paragraph the Android feature section already covered.
 ## 0.4.28 - 2026-10-06
 
 - Publishes this fork as `@blue-soda/dsh-remote`. The npm name `ds-harness-remote` belongs to the upstream author, so it could not be published here and using it would have been ambiguous. The Cordis instance id, the plugin's exported name, its settings namespace and the CLI command name stay `ds-harness-remote`, so existing profiles, device authorization and settings keep working; only the dependency key and the profile's `dsh.profile.bundles` entry change. The upstream project is credited in `contributors`, in the MIT notice it keeps verbatim in `LICENSE`, and in a fork notice at the top of the READMEs.

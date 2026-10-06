@@ -33,3 +33,5 @@ workspace-baseline fields satisfy what that release declares. The Codex-side bas
 **0.160.0**), the Windows path difference, the maintenance risks and the read-only checks to run
 after either upstream is upgraded are recorded in
 [Codex Remote technical notes](codex-remote.md).
+
+`0.4.29` keeps the same compatibility targets and adds the Windows state-file retry described in the changelog.

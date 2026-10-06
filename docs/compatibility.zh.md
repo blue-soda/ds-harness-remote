@@ -29,3 +29,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
 打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
 前拒绝 Session V3 Host。
+
+`0.4.29` 的兼容目标与 0.4.28 相同，新增 Windows 状态文件写入重试，详见 CHANGELOG。
