@@ -184,7 +184,19 @@ export class TypertGatewaySwitch {
 
   private selectInvoke(request: TypertGatewayRequest): Promise<unknown> {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request)
-    if (this.remoteTarget !== undefined && this.remoteAvailability()) return this.remoteTarget.invoke(request)
+    if (this.remoteTarget !== undefined && this.remoteAvailability()) {
+      // A remote-mode boot still issues RPCs only the local shell can answer: the
+      // Desktop asks the local Web server for its locale bootstrap before any remote
+      // work happens. Sweeping those to the peer failed as "desktop welcome: Web RPC
+      // failed", the locale plugin failed with it, and 48 entries never activated.
+      // Serve locally when the peer does not implement the endpoint, or when it went
+      // away mid-call; a business error still propagates.
+      return this.remoteTarget.invoke(request).catch(error => {
+        if (!isUnansweredByPeer(error)) throw error
+        console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error)
+        return this.localInvoke(request)
+      })
+    }
     if (request.namespace !== 'commands' || !isRemoteCommandMethod(request.method) || this.remoteInvoke === undefined) {
       return this.localInvoke(request)
     }
@@ -280,6 +292,35 @@ function isLocalOnlyEndpoint(endpoint: string): boolean {
 function isRemoteCommandMethod(method: string): method is typeof REMOTE_COMMAND_METHODS[number] {
   return (REMOTE_COMMAND_METHODS as readonly string[]).includes(method)
 }
+
+/**
+ * Whether the peer cannot answer this call at all, as opposed to answering with a
+ * refusal. An unimplemented endpoint (a local-only concern the switch forwarded
+ * anyway) and a connection that dropped mid-call are both permissionless to retry
+ * locally; a business error such as a denied permission is not.
+ * @param error - rejection from the remote carrier.
+ * @returns whether the local shell should answer the call instead.
+ */
+function isUnansweredByPeer(error: unknown): boolean {
+  // A wrapped carrier failure such as "Web RPC failed" often arrives with no code at
+  // all, and refusing to fall back there would leave the local shell unanswered. The
+  // warning emitted at the call site keeps the decision visible in DevTools.
+  if (!isRecord(error)) return error instanceof Error
+  const code = typeof error.code === 'string' ? error.code : ''
+  return code === '' || UNANSWERED_BY_PEER_CODES.has(code)
+}
+
+const UNANSWERED_BY_PEER_CODES = new Set([
+  'METHOD_NOT_ALLOWED',
+  'METHOD_NOT_FOUND',
+  'method-not-found',
+  'not-implemented',
+  'CONNECTION_FAILED',
+  'CONNECTION_REPLACED',
+  'NOT_CONNECTED',
+  'UNAVAILABLE',
+  'internal',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

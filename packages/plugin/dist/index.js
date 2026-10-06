@@ -19021,7 +19021,13 @@ var TypertGatewaySwitch = class {
   }
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
-    if (this.remoteTarget !== void 0 && this.remoteAvailability()) return this.remoteTarget.invoke(request);
+    if (this.remoteTarget !== void 0 && this.remoteAvailability()) {
+      return this.remoteTarget.invoke(request).catch((error) => {
+        if (!isUnansweredByPeer(error)) throw error;
+        console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error);
+        return this.localInvoke(request);
+      });
+    }
     if (request.namespace !== "commands" || !isRemoteCommandMethod(request.method) || this.remoteInvoke === void 0) {
       return this.localInvoke(request);
     }
@@ -19090,6 +19096,22 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
+function isUnansweredByPeer(error) {
+  if (!isRecord7(error)) return error instanceof Error;
+  const code = typeof error.code === "string" ? error.code : "";
+  return code === "" || UNANSWERED_BY_PEER_CODES.has(code);
+}
+var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
+  "METHOD_NOT_ALLOWED",
+  "METHOD_NOT_FOUND",
+  "method-not-found",
+  "not-implemented",
+  "CONNECTION_FAILED",
+  "CONNECTION_REPLACED",
+  "NOT_CONNECTED",
+  "UNAVAILABLE",
+  "internal"
+]);
 function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
