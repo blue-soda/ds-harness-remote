@@ -909,6 +909,10 @@ export class ClientModeRuntime {
 
   private selectCodexTarget(virtual: CodexVirtualHarness, remote: ConnectedRemote): void {
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
+    // The Harness answers every `/api` endpoint once it is the Codex target, so give it
+    // the local carriers: everything outside the CodeX domain (the shell's settings
+    // bootstrap, plugin registry and account reads) has to describe this installation.
+    virtual.setLocalCarrier(this.gatewaySwitch.localCarrier())
     if (this.gatewaySwitch.supportsCarrier()) {
       this.gatewaySwitch.selectRemote(virtual, undefined, target)
       return

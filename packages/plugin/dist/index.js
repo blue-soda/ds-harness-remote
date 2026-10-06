@@ -15921,6 +15921,16 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   commandSeq = 0;
   selectedWorkspaceId;
   closed = false;
+  /**
+   * The local shell's carriers. Once this Harness answers `/api` for a remote Codex
+   * workspace, every endpoint outside the CodeX domain belongs to the shell that
+   * owns the window — its settings bootstrap, plugin registry and account reads.
+   * @param carrier - local carriers, or undefined to fall back to the remote Host.
+   */
+  setLocalCarrier(carrier) {
+    this.localCarrier = carrier;
+  }
+  localCarrier;
   static remote(core, host, sessionGeneration = "legacy", hostCarrier) {
     return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration, hostCarrier);
   }
@@ -16055,6 +16065,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         case "commands/execute":
           return ok(await this.executeCommand(args, signal));
         default: {
+          if (this.localCarrier?.dispatch !== void 0) return await this.localCarrier.dispatch(endpoint, payload, signal);
           if (this.hostCarrier !== void 0) return await this.hostCarrier.dispatch(endpoint, payload, signal);
           return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
         }
@@ -16079,6 +16090,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg(args), signal);
     if (endpoint === "$events") return this.remoteEvents(signal);
+    if (this.localCarrier?.open !== void 0) return this.localCarrier.open(endpoint, payload, signal);
     if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
@@ -19014,6 +19026,19 @@ var TypertGatewaySwitch = class {
     this.remoteSupport = { execute: false, list: false };
     this.target = void 0;
   }
+  /**
+   * The local shell's carriers, for a remote target that owns only part of the
+   * endpoint space. The Codex virtual Harness owns the CodeX domain; the shell's own
+   * settings bootstrap, plugin registry and account reads must stay here, or the
+   * window describes the remote Host instead of this installation.
+   * @returns the captured local carriers, absent when the running release has none.
+   */
+  localCarrier() {
+    return {
+      ...this.localDispatch === void 0 ? {} : { dispatch: this.localDispatch },
+      ...this.localOpen === void 0 ? {} : { open: this.localOpen }
+    };
+  }
   restore() {
     if (!this.installed) return;
     this.selectLocal();
@@ -20846,6 +20871,7 @@ var ClientModeRuntime = class {
   }
   selectCodexTarget(virtual, remote) {
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
+    virtual.setLocalCarrier(this.gatewaySwitch.localCarrier());
     if (this.gatewaySwitch.supportsCarrier()) {
       this.gatewaySwitch.selectRemote(virtual, void 0, target2);
       return;
@@ -22039,6 +22065,7 @@ var permissionPreset = external_exports.enum(["workspace-write", "danger-full-ac
 var projectRoot = external_exports.object({
   path: external_exports.string().min(1).max(4096)
 }).strict();
+var CODEX_HISTORY_MAX_MESSAGES = 200;
 var schemas = {
   "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
   "model/list": external_exports.object({
@@ -22077,7 +22104,7 @@ var schemas = {
     threadId: id2,
     beforeSeq: external_exports.number().int().nonnegative().optional(),
     throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(200).optional()
+    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional()
   }).strict(),
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
@@ -25579,7 +25606,7 @@ function normalizeSessionHistoryPageSize(value) {
   if (value === void 0) return void 0;
   if (!Number.isInteger(value)) return void 0;
   if (value <= 0) return void 0;
-  return Math.max(1, value);
+  return Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, value));
 }
 function payloadMaxMessages(payload) {
   if (payload === null || typeof payload !== "object") return void 0;

@@ -26,27 +26,35 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('delegates endpoints the CodeX domain does not own to the remote Host', async () => {
+  it('answers endpoints outside the CodeX domain from the local shell', async () => {
     // Selecting this Harness as the Codex target makes it answer every `/api`
-    // endpoint, so anything outside the CodeX domain - the local shell's own
-    // settings bootstrap included - has to reach the remote Host instead of being
-    // refused. Answering "method-not-found" failed the Desktop's native start.
+    // endpoint, so anything outside the CodeX domain - the shell's settings bootstrap,
+    // plugin registry and account reads - has to come from the local shell. Refusing it
+    // failed the Desktop's native start; forwarding it to the remote Host showed the
+    // remote Host's welcome flow and account instead of the local ones.
     const client = fakeCodex()
+    const localCarrier = {
+      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
+      open: vi.fn(async () => (async function* () { yield { type: 'local' } })()),
+    }
     const hostCarrier = {
       invoke: vi.fn(async () => undefined),
-      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
-      open: vi.fn(async () => (async function* () { yield { type: 'ready' } })()),
+      dispatch: vi.fn(async () => ({ ok: true as const, value: { endpoint: 'remote' } })),
+      open: vi.fn(async () => (async function* () { yield { type: 'remote' } })()),
     }
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'legacy', hostCarrier)
+    target.setLocalCarrier(localCarrier)
     const signal = new AbortController().signal
 
     await expect(target.dispatch('settings/describe', { args: {} }, signal))
       .resolves.toEqual({ ok: true, value: { endpoint: 'settings/describe' } })
-    expect(hostCarrier.dispatch).toHaveBeenCalledWith('settings/describe', { args: {} }, signal)
+    expect(localCarrier.dispatch).toHaveBeenCalledWith('settings/describe', { args: {} }, signal)
+    expect(hostCarrier.dispatch).not.toHaveBeenCalled()
 
-    const stream = await target.open('theme/follow', { args: {} }, signal)
-    await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
-    expect(hostCarrier.open).toHaveBeenCalledWith('theme/follow', { args: {} }, signal)
+    const stream = await target.open('plugins/events', { args: {} }, signal)
+    await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'local' } })
+    expect(localCarrier.open).toHaveBeenCalledWith('plugins/events', { args: {} }, signal)
+    expect(hostCarrier.open).not.toHaveBeenCalled()
     await target.close()
   })
 

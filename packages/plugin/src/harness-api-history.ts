@@ -1,5 +1,6 @@
 import type { RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { createRpcResponse, encodeMessage, MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
+import { CODEX_HISTORY_MAX_MESSAGES } from './codex/method-policy.js'
 import { RpcError } from './rpc-router.js'
 
 const SESSION_HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1] as const
@@ -54,7 +55,10 @@ function normalizeSessionHistoryPageSize(value: number | undefined): number | un
   if (value === undefined) return undefined
   if (!Number.isInteger(value)) return undefined
   if (value <= 0) return undefined
-  return Math.max(1, value)
+  // The Host's call policy refuses a page larger than this, and the retry ladder only
+  // steps down for an oversized response, so an unclamped request failed outright with
+  // "maxMessages: too_big" and the session history never loaded.
+  return Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, value))
 }
 
 function payloadMaxMessages(payload: unknown): number | undefined {

@@ -54,6 +54,12 @@ function isHostWorkspaceStreamEndpoint(endpoint: string): boolean {
 
 type JsonRecord = Record<string, unknown>
 
+/** The local shell's carriers, used for endpoints outside the CodeX domain. */
+export interface LocalGatewayCarrier {
+  dispatch?: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TypertRpcResult>
+  open?: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<AsyncIterable<unknown>>
+}
+
 export interface CodexVirtualWorkspaceView {
   workspaceId: string
   path: string
@@ -266,6 +272,16 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private selectedWorkspaceId?: string
   private closed = false
 
+  /**
+   * The local shell's carriers. Once this Harness answers `/api` for a remote Codex
+   * workspace, every endpoint outside the CodeX domain belongs to the shell that
+   * owns the window — its settings bootstrap, plugin registry and account reads.
+   * @param carrier - local carriers, or undefined to fall back to the remote Host.
+   */
+  setLocalCarrier(carrier: LocalGatewayCarrier | undefined): void { this.localCarrier = carrier }
+
+  private localCarrier?: LocalGatewayCarrier
+
   constructor(
     private readonly client: CodexClientLike,
     private readonly host: { deviceId: string; name: string },
@@ -400,12 +416,12 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'commands/execute': return ok(await this.executeCommand(args, signal))
         default: {
           // Selecting this Harness as the Codex target makes it answer every `/api`
-          // endpoint, but it only owns the CodeX domain. The rest belongs to the
-          // remote Host, which is what a remote session means. Answering
-          // "method-not-found" here broke the local shell's own bootstrap: the
-          // Desktop asks `settings/describe` for its locale before its window
-          // starts, read the failure as "Web RPC failed", and reported the whole
-          // application as unavailable until the user restarted into local mode.
+          // endpoint, but it only owns the CodeX domain. The rest belongs to the local
+          // shell: its settings bootstrap, plugin registry and account reads describe
+          // *this* installation. Answering "method-not-found" broke the native start,
+          // and answering from the remote Host showed the remote Host's welcome flow
+          // and account instead of the local ones.
+          if (this.localCarrier?.dispatch !== undefined) return await this.localCarrier.dispatch(endpoint, payload, signal)
           if (this.hostCarrier !== undefined) return await this.hostCarrier.dispatch(endpoint, payload, signal)
           return fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)
         }
@@ -431,8 +447,10 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     if (endpoint === 'session/control') return this.sessionControl(signal)
     if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
     if (endpoint === '$events') return this.remoteEvents(signal)
-    // Same delegation as the unary path: a stream the CodeX domain does not own is
-    // the remote Host's, and refusing it failed the local shell's own subscriptions.
+    // Same delegation as the unary path: a stream the CodeX domain does not own is the
+    // local shell's (the plugin registry's own events stream, for instance), and
+    // refusing it failed those subscriptions.
+    if (this.localCarrier?.open !== undefined) return this.localCarrier.open(endpoint, payload, signal)
     if (this.hostCarrier !== undefined) return this.hostCarrier.open(endpoint, payload, signal)
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true as const,

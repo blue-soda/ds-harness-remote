@@ -25,6 +25,9 @@ const projectRoot = z.object({
   path: z.string().min(1).max(4096),
 }).strict()
 
+/** Largest history page the call policy admits; the client clamps its request to this. */
+export const CODEX_HISTORY_MAX_MESSAGES = 200
+
 const schemas = {
   'account/read': z.object({ refreshToken: z.literal(false).optional() }).strict(),
   'model/list': z.object({
@@ -63,7 +66,7 @@ const schemas = {
     threadId: id,
     beforeSeq: z.number().int().nonnegative().optional(),
     throughSeq: z.number().int().min(-1).optional(),
-    maxMessages: z.number().int().min(1).max(200).optional(),
+    maxMessages: z.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional(),
   }).strict(),
   'dsh/directoryList': z.object({
     path: z.string().min(1).max(4096),

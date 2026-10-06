@@ -173,6 +173,20 @@ export class TypertGatewaySwitch {
     this.target = undefined
   }
 
+  /**
+   * The local shell's carriers, for a remote target that owns only part of the
+   * endpoint space. The Codex virtual Harness owns the CodeX domain; the shell's own
+   * settings bootstrap, plugin registry and account reads must stay here, or the
+   * window describes the remote Host instead of this installation.
+   * @returns the captured local carriers, absent when the running release has none.
+   */
+  localCarrier(): { dispatch?: CarrierDispatch; open?: CarrierOpen } {
+    return {
+      ...(this.localDispatch === undefined ? {} : { dispatch: this.localDispatch }),
+      ...(this.localOpen === undefined ? {} : { open: this.localOpen }),
+    }
+  }
+
   restore(): void {
     if (!this.installed) return
     this.selectLocal()

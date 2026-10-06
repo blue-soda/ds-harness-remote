@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CODEX_APP_ALLOWLIST, parseCodexCall } from '../src/codex/method-policy.js'
+import { CODEX_APP_ALLOWLIST, CODEX_HISTORY_MAX_MESSAGES, parseCodexCall } from '../src/codex/method-policy.js'
 
 /**
  * The policy is the Host-side allowlist for `codex.app.call`, so it must accept
@@ -42,6 +42,15 @@ describe('CodeX App Server call policy', () => {
       }))
     expect(() => parseCodexCall('thread/read', { threadId: 'thr_1', surprise: true }))
       .toThrowError(/surprise/u)
+  })
+
+  it('admits a history page up to the cap and refuses a larger one', () => {
+    // The client clamps to this same constant; an unclamped request reached the Host and
+    // failed the whole history load with "maxMessages: too_big".
+    expect(parseCodexCall('dsh/sessionHistory', { threadId: 'thr_1', maxMessages: CODEX_HISTORY_MAX_MESSAGES }).params)
+      .toMatchObject({ maxMessages: CODEX_HISTORY_MAX_MESSAGES })
+    expect(() => parseCodexCall('dsh/sessionHistory', { threadId: 'thr_1', maxMessages: CODEX_HISTORY_MAX_MESSAGES + 1 }))
+      .toThrowError(/maxMessages/u)
   })
 
   it('refuses methods outside the allowlist', () => {
