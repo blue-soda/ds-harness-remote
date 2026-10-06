@@ -29,6 +29,8 @@
 - [端到端加密](end-to-end-encryption.md)：解释 Noise IK、设备身份固定、密钥生命周期、Server 可见元数据、重放保护与安全边界。
 - [网络与传输](network.md)：解释出站连接、Control/Data plane、LAN/P2P/TURN/Relay 选路、NAT、降级、断线恢复与当前验证状态。
 - [版本兼容说明](compatibility.zh.md)（[English](compatibility.md)）：记录 Plugin 与各版本 DeepSeek Harness 的 carrier、Session 和 Desktop 兼容范围。
+- [配置与 `role` 契约](config-and-role.md)：面向发行版集成者，说明 `role` 的真实作用、配置写回路径与 seed 默认值的存活条件。
+- [排查记录](incidents/)：按需阅读的历史排查与验收过程（远程 Codex 打不开原生窗口、Android Files/Terminal 接入）；其中的**当前约束**已摘要进 [`AGENTS.md`](../AGENTS.md)。
 
 ## 阅读路径
 

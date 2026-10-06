@@ -262,6 +262,7 @@ generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app
 - `docs/plugin-integration.md`：Host Plugin 对接 Server 的账号认证、设备认证与凭证状态机，以及最小自部署版本支持的子集。
 - `docs/protocol.md`：跨仓库协议规范。
 - `docs/config-and-role.md`：`role` 语义、配置写回路径与发行版 seed 默认值的契约（按需阅读，勿写入本文件）。
+- `docs/incidents/`：按需阅读的排查记录（叙事与验收过程；其中的**当前约束**已摘要进本文件）。
 - `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
@@ -298,108 +299,21 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 
 开发依赖升级到 Harness `0.2.0-rc.1`（同时兼容 `0.1.7-rc.1`），运行时按能力检测同时支持 ≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径（`typeof settings.register === 'function'` 分流）。终端与 loopback 设置只能在 Host 本地修改，`settings/update|replace|mutate` 禁止远程修改 `ds-harness-remote` 和 `dsh-remote`。终端默认开启；loopback 默认无端口。「远程终端」开关切换即保存并立即更新运行时拦截，「保存访问设置」按钮只提交 Loopback 端口（位于端口输入框右侧）；两者都无需重启 Host。预览入口位于 Remote Header「预览服务」，第一版限 Desktop / 连接本机 Harness 的浏览器；不把本机预览 URL 作为远程 Web 或 Android 可用地址。跨机、Windows 和真实网络热更新回归仍需另行验证。
 
-## Android native tools (2026-09-21)
+## Android 原生 Files/Terminal（2026-09-21 起）
 
-Android Harness 会话已接入 Files/Terminal：官方 workspaceFiles 目录与分页文本只读预览，
-terminal 创建/list/follow/retain/write/resize/close；不对 CodeX 投影开放。终端使用本地打包
-xterm + react-native-webview，需重新构建 APK。`apps/android/scripts/build-terminal.mjs` 生成
-忽略的 `src/generated/terminal-html.ts`，prepare:workspace/check 和 CI APK 工作流负责生成。
-权限控件兼容旧版 permissions.options 与新版仅 currentValue 的投影，后者调用官方
-permissionPresets/catalog（已加入 Host 固定只读 allowlist）；Host 插件需同步更新。
-核心测试覆盖 catalog 合约与终端输入权/事件顺序/断线不重放。跨机和原生 UI 真机验证仍待完成。
+**约束**：Files/Terminal 只走官方 `workspaceFiles` / `terminal` 固定 allowlist，**只读**，且**不对 CodeX
+投影开放**；终端按设备归属、仅标题栏「＋」新建、从 Host 快照恢复、断线**不重放输入**；权限控件同时兼容
+旧版会话内选项与新版 `permissionPresets/catalog`（后者必须在 Host 固定只读 allowlist 内）；预览上限
+8 MiB / Office 源文件 50 MiB，PDF 用本地打包渲染器且不支持导出。过程与验收边界见
+[`docs/incidents/android-native-tools.md`](docs/incidents/android-native-tools.md)。
 
-2026-09-22 标题栏入口（Issue #72 PR1）：Files/Terminal 入口移到会话标题栏图标，终端面板
-标题栏「＋」才新建终端（打开只列出现有终端），文件面板刷新与层级返回同样在标题栏；未改
-公共 TopBar 契约。
+## 远程 Codex 与本地 shell 的端点分工（2026-10-06）
 
-本次本地验证：Android 类型检查与 16 个测试文件 / 174 个测试通过；Plugin 类型检查、
-5 个 Host Remote bridge 核心测试及 DSH bundle 校验通过。Plugin 全量测试首次有 5 个超时，
-相关 3 个文件串行重跑 42 个测试通过。Hermes 导出初次通过；最终原生 APK 预构建未完成，
-workspace 全量 check 在 Server web 类型检查处停滞，不作为通过记录。最终 APK 由 CI 构建，
-原生键盘、TalkBack 和跨设备行为尚未验证。
-
-Android 只读预览（Issue #72）：`workspace-file-preview.ts` 复用官方 stat/readBytes 和
-Office generation/render，校验文件版本、分块、大小和取消；图片/PDF 上限 8 MiB，Office
-源文件上限 50 MiB。PDF.js 固定版本与 xterm 一起经 `build:renderers` 本地打包；prepare/check、
-CI/release APK 均需生成忽略的 renderer 源文件。PDF 仅单页画布预览，无脚本、外链、导出、
-明文文件缓存或文本选择；不增加 Host 端点或写权限。Office 单次调用使用更长客户端超时，
-Host 限额仍生效。原生真机与真实跨设备文件预览验收尚待完成。
-
-该预览分支的全仓 check/生产 build、Android 197 测试、client-core 38 测试及本地 PDF 浏览器
-烟测通过；全仓 test 仍有既有 codex-domain Windows 平台假设的 3 个失败。原生 APK 构建在
-Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已完成 APK 或真机验收。
-
-## DSH 0.2.1 Desktop 远程模式启动失败（2026-10-06）
-
-现象：Desktop 作为 Client 选中远程 CodeX 工作区后，渲染进程的启动判定失败
-（`Error: web boot: 48 entries did not activate`），其中 `@deepseek-ai/dsh-client-locale: failed`，
-所有依赖 `locale` 的插件保持 pending，应用弹出「DeepSeek Harness is unavailable」。
-点 Restart（回到本地模式）必然恢复，因此与本地模式无关。
-
-已确认的事实（每条都有证据，避免重复走弯路）：
-
-- locale 抛出的真实异常只有在给 `dsh-client-locale` 的 `apply()` 临时包一层 try/catch 后才可见
-  （DSH 只记录 `failed` 状态、不记录原因）：
-  `Error invoking remote method 'dsh-desktop:locale-bootstrap': Error: desktop welcome: Web RPC failed`。
-- 该 RPC 走 Desktop 主进程 ↔ 本地 web server 的 `/api/remote.mux`（Gateway 自有 WebSocket，
-  见 `packages/api/gateway/README.md`），**不经过**插件的 Typert 网关切换器：给
-  `invoke` / `dispatchRpc` / `stream` / `openWireStream` 四条路径都加上「对端无法回答即回退本地」
-  后，日志里**没有**出现回退 warning，证明这条调用根本不经被 patch 的 runtime。
-- 因此「我们的远程路由把它转走」这一假设**已被证伪**。`typert-gateway-switch` 的本地回退与
-  「peer 未连接即走本地」保留为防御性改动，**不声称**修复了上述现象。
-- 插件侧确有并已修复的契约缺口：`WorkspaceBaseline.pinnedSessionIds`（客户端直接读其长度）与
-  `SessionProjectionHints.kind`（客户端 `assertNever` 穷尽分支）。修好后客户端控制台里
-  `installPinned` 与 `block kind` 两条硬错误消失。
-- 客户端 `codex.app.call` 调用面与 App Server 字段对照后发现 Host 侧 policy 偏严，已对齐上游：
-  `thread/list` 的 `originators`/`sectionId`、`turn/steer` 的 `clientUserMessageId`、
-  `thread/name/set` 的空名字（上游用空串清空名字，`.trim().min(1)` 会拒绝合法重命名）。
-  拒绝消息现在点名方法与字段；注意未识别字段在 Zod 的 `issue.keys`，不在 `issue.path`。
-
-未解决（**2026-10-06 晚更新：已定位并修复，见下**）：曾经的判断是"根因在 DSH 远程模式的 mux/引导"，
-**该判断是错的**，保留在此仅作为排查教训。
-
-**真正的根因与修复**：`client-runtime.ts` 打开远程 CodeX 工作区时执行
-`gatewaySwitch.selectRemote(virtual, …)`，把 `CodexVirtualHarness` 作为**远端目标对象**接上，
-于是它接管了 `/api` 的**每一个**端点；但载体只实现 CodeX 领域，其余全部落到
-`virtual-harness.ts` 的 `default: fail('method-not-found', …)` ✗。Desktop 的原生引导要向
-**本地**服务请求 `settings/describe`（见 `apps/desktop/src/welcome-backend.ts`：HTTP POST
-`/api/<ns>/<method>`，只有 `result.ok === true` 才算成功，否则抛
-`desktop welcome: Web RPC failed`），拿到我们的 `method-not-found` 后 locale 插件失败、
-48 个条目 pending、界面判定不可用；Restart 回到本地模式则不经过该载体，所以必然恢复。
-
-复现证据（在本机 web 实例上直接打 RPC，无需 Desktop）：修复前
-`POST /api/settings/describe` → `{"ok":false,"error":{"code":"method-not-found","message":"CodeX virtual Harness does not implement settings/describe."}}`；
-修复后同一探针 → `{"ok":true,"value":{…}}`。
-
-修复：`virtual-harness.ts` 的 `dispatch`/`open` 默认分支改为**先委派给本地载体**，本地载体由
-切换器的 `localCarrier()` 提供（`client-runtime.ts` 在 `selectCodexTarget` 里注入）。判定原则是
-**谁拥有窗口谁回答**：CodeX 领域由虚拟载体回答；远端工作区的 `workspaceFiles/*` 与
-`terminal/*` 仍由远端 Host 回答（`hostCarrier`）；**其余一律回本地**（设置引导、插件注册表
-事件流、账号读取）。
-
-> 中途曾把"非 CodeX 领域"一律转给远端 Host，**那是错的**：本地窗口于是显示**远端**的首次
-> 欢迎流程，左下角也显示**远端**的账号（实测"已登录 DeepSeek"而非本机账号）。本地专属端点
-> 必须由拥有窗口的那一侧回答。
-
-第二处缺口：**历史分页大小**。原生 UI 会请求远超策略上限的 `maxMessages`，而
-`readHistoryPage` 原样转发，Host 直接以 `dsh/sessionHistory → maxMessages: too_big` 拒绝，且
-重试阶梯只处理"响应过大"、不处理拒绝，于是历史完全加载不了。现在 `method-policy.ts` 导出
-`CODEX_HISTORY_MAX_MESSAGES`，**两个入口都钳制到同一常量**：虚拟载体的 `readHistoryPage`
-（唯一收口）与 ApiProxy 的 `harness-api-history.ts`。
-
-**2026-10-06 21:00 用户实测确认**：Desktop ↔ web 的远程 CodeX 工作区**可用** —— 连接、会话
-名称、会话历史与对话全部正常，且**不需要运行 ChatGPT 桌面应用**（插件直接以发现到的
-`codex.exe app-server` 工作，桌面应用只是二进制来源）。
-
-排查教训：`Web RPC failed` 意味着 **RPC 执行了但回答是失败**（传输失败是 `Web request
-failed`）；因此判定"调用是否经过我们"时，不能只看 promise 是否 reject，**必须看返回信封的
-`result.ok`**。此前给四条路由加的"对端无法回答即回退本地"因此一次都没触发，并导致我两次
-误判根因。
-
-`scripts/codex-app-server-smoke.mts` 在真实 Codex **0.160.0** 上只读跑通了客户端使用的完整
-路径：`thread/list`、`thread/read`（元数据与完整历史，含 `cwd=C:\Workspace\opencood` 这类
-大小写不同的路径）、`dsh/sessionHistory`、`model/list`、`account/read` 全部成功，
-**`thread/read` 不再返回 `CODEX_THREAD_NOT_ALLOWED`**，因此 Windows 路径比较的大小写修复
-在真数据上得到确认。另外两点是**有意设计**而非缺陷：客户端直调 `thread/turns/list` 返回
-`METHOD_NOT_ALLOWED`（Host 负责上游分页，客户端经 `dsh/sessionHistory` 读取）；`thread/list`
-带 `originators` 会被**上游**拒绝，因为 policy 只负责放行上游声明的字段、取值由上游校验。
+**约束**：打开远程 CodeX 工作区时，虚拟载体只回答 CodeX 领域；远端工作区的 `workspaceFiles/*` 与
+`terminal/*` 由远端 Host 回答；**其余端点一律交回拥有窗口的本地 shell**（设置引导、插件注册表事件流、
+账号读取）—— 载体"拒掉不认识的端点"会让原生窗口整个起不来。判定调用是否经过我们时**必须看返回信封的
+`result.ok`**：`Web RPC failed` 表示 **RPC 执行了但回答失败**（传输失败才是 `Web request failed`）。
+历史页大小由 `CODEX_HISTORY_MAX_MESSAGES` 统一钳制，虚拟载体与 `harness-api-history.ts` **共用同一常量**。
+完整排查记录（含被证伪的假设、复现探针与修复细节）见
+[`docs/incidents/dsh-0.2.1-desktop-remote-boot.md`](docs/incidents/dsh-0.2.1-desktop-remote-boot.md)；
+真实协议自检用 `scripts/codex-app-server-smoke.mts`。
