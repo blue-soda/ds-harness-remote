@@ -2,7 +2,7 @@
 
 Continue DeepSeek Harness sessions and experimental Codex workspaces from another device over an end-to-end encrypted connection.
 
-[GitHub](https://github.com/blue-soda/ds-harness-remote) · [Full guide](https://github.com/blue-soda/ds-harness-remote#readme) · [中文说明](https://github.com/blue-soda/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/blue-soda/ds-harness-remote/releases/latest)
+[GitHub](https://github.com/blue-soda/ds-harness-remote) · [Full guide](https://github.com/blue-soda/ds-harness-remote#readme) · [中文说明](https://github.com/blue-soda/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Releases](https://github.com/blue-soda/ds-harness-remote/releases) · [Android app](https://github.com/blue-soda/deepseek-harness-android-app/releases)
 
 `ds-harness-remote` is the Remote Host and workspace plugin for DeepSeek Harness. Harness keeps running on your work computer with its existing workspaces, tools, and permission controls; Remote gives authorized devices another window into that environment.
 
