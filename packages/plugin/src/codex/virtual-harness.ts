@@ -1474,7 +1474,11 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private async renameSession(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = requiredString(request.sessionId, 'sessionId')
     const title = requiredString(request.title, 'title')
-    await this.client.request('thread/name/set', { threadId: nativeThreadId(sessionId), name: title }, signal)
+    // Codex 0.160.0 refuses an empty name upstream ("Codex App Server rejected the
+    // request"), so clearing a title stays a local projection change.
+    if (title.trim() !== '') {
+      await this.client.request('thread/name/set', { threadId: nativeThreadId(sessionId), name: title }, signal)
+    }
     const seq = this.nextProjectionSeq()
     this.updateThreadName(nativeThreadId(sessionId), title)
     this.publishProjection(sessionId, 'title', title, seq)

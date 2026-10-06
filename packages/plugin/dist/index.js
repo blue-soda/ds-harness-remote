@@ -17008,7 +17008,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   async renameSession(request, signal) {
     const sessionId = requiredString(request.sessionId, "sessionId");
     const title = requiredString(request.title, "title");
-    await this.client.request("thread/name/set", { threadId: nativeThreadId(sessionId), name: title }, signal);
+    if (title.trim() !== "") {
+      await this.client.request("thread/name/set", { threadId: nativeThreadId(sessionId), name: title }, signal);
+    }
     const seq = this.nextProjectionSeq();
     this.updateThreadName(nativeThreadId(sessionId), title);
     this.publishProjection(sessionId, "title", title, seq);

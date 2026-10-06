@@ -63,6 +63,29 @@ if (!listed.ok) {
   }
 }
 
+// The exact call surface the virtual Harness uses, in the order a session open
+// exercises it, so a policy or App Server refusal names the call that broke.
+const first = (listed.ok ? listed.value?.data ?? [] : [])[0]
+if (first !== undefined) {
+  console.log('  --- virtual Harness surface ---')
+  for (const probe of [
+    { method: 'project/list', params: { limit: 100 } },
+    { method: 'thread/list', params: { limit: 100, sortKey: 'updated_at', sortDirection: 'desc', archived: false } },
+    { method: 'thread/read', params: { threadId: first.id, includeTurns: false } },
+    { method: 'dsh/sessionHistory', params: { threadId: first.id } },
+    { method: 'dsh/sessionHistory', params: { threadId: first.id, maxMessages: 25 } },
+    { method: 'dsh/sessionHistory', params: { threadId: first.id, beforeSeq: 10, maxMessages: 25 } },
+    { method: 'thread/resume', params: { threadId: first.id } },
+    { method: 'thread/name/set', params: { threadId: first.id, name: '' } },
+    { method: 'thread/read', params: { threadId: first.id, includeTurns: true } },
+    { method: 'dsh/directoryList', params: { path: 'C:\\Workspace' } },
+  ]) {
+    const result = await call(probe.method, probe.params)
+    const verdict = result.ok ? 'ok' : `${result.code}: ${result.message}`
+    console.log(`  ${probe.method} ${JSON.stringify(probe.params).slice(0, 90)} → ${verdict}`)
+  }
+}
+
 // The fields this release aligned with upstream, so a refusal here means the policy
 // is still stricter than the App Server.
 for (const probe of [
@@ -76,7 +99,6 @@ for (const probe of [
 
 // The history paths: our own endpoint is what the client labels "history load
 // failed", and the legacy full-history read is what an older client still asks for.
-const first = (listed.ok ? listed.value?.data ?? [] : [])[0]
 if (first !== undefined) {
   for (const probe of [
     { method: 'dsh/sessionHistory', params: { threadId: first.id } },
