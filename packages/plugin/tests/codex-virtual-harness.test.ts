@@ -49,6 +49,9 @@ describe('CodexVirtualHarness', () => {
           blank: false,
           cwd: '/workspace/repo',
           projections: {
+            // `SessionProjectionHints` is a discriminated union; the kind is part of
+            // the payload the client switches on.
+            kind: 'sequenced',
             values: {
               title: 'Native renderer',
               modelSelection: {
@@ -181,10 +184,10 @@ describe('CodexVirtualHarness', () => {
       let stream: AsyncIterator<unknown> | undefined
       if (carrier === 'api') {
         expect(await target.dispatch('session/history', { args: { request: { sessionId: 'codex:thr_1' } } }, signal))
-          .toMatchObject({ value: { projections: { values: { permissions: { currentValue: 'danger-full-access' } } } } })
+          .toMatchObject({ value: { projections: { kind: 'sequenced', values: { permissions: { currentValue: 'danger-full-access' } } } } })
       } else {
         stream = (await target.open('session/follow', { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } } }, signal))[Symbol.asyncIterator]()
-        expect(await stream.next()).toMatchObject({ value: { projections: { values: { permissions: { currentValue: 'danger-full-access' } } } } })
+        expect(await stream.next()).toMatchObject({ value: { projections: { kind: 'sequenced', values: { permissions: { currentValue: 'danger-full-access' } } } } })
       }
       expect(client.request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
       client.emit('thr_1', { method: 'thread/settings/updated', params: { threadSettings: {
@@ -350,7 +353,7 @@ describe('CodexVirtualHarness', () => {
     expect(snapshot.value).toMatchObject({
       type: 'snapshot',
       header: { id: 'codex:thr_1', cwd: '/workspace/repo' },
-      projections: { values: { modelSelection: { next: {
+      projections: { kind: 'sequenced', values: { modelSelection: { next: {
         provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'low',
       } } } },
       records: [
@@ -963,7 +966,7 @@ describe('CodexVirtualHarness', () => {
     expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).not.toHaveProperty('permissionPreset')
     expect(await target.dispatch('session/list', { args: {} }, new AbortController().signal))
       .toMatchObject({ value: { items: expect.arrayContaining([expect.objectContaining({
-        sessionId: 'codex:thr_full', projections: { asOfSeq: 0, values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: 'danger-full-access' }) }) },
+        sessionId: 'codex:thr_full', projections: { kind: 'sequenced', asOfSeq: 0, values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: 'danger-full-access' }) }) },
       })]) } })
     await target.close()
   })
@@ -1047,6 +1050,7 @@ describe('CodexVirtualHarness', () => {
     expect(summary).toMatchObject({
       sessionId: 'codex:new_1',
       projections: {
+        kind: 'sequenced',
         values: {
           title: null,
           sessionListMetadata: { blank: true, lastPromptAt: null },
