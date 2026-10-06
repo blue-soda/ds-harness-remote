@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
@@ -998,16 +998,18 @@ export class CodexRemoteDomain {
 export type CodexDomainFrame = CodexAppFrameData | CodexAppStreamClosedData
 
 /**
- * Prefer Codex bundled with the current ChatGPT desktop app on macOS when the
- * user kept the default command. Explicit binary configuration is never
- * rewritten or supplemented.
+ * Prefer Codex bundled with the desktop app when the user kept the default
+ * command, so an app install works without a global CLI. Explicit binary
+ * configuration is never rewritten or supplemented.
  */
 export function codexBinaryCandidates(
   configured: string,
   hostPlatform: NodeJS.Platform = process.platform,
   userHome: string = homedir(),
 ): string[] {
-  if (configured !== 'codex' || hostPlatform !== 'darwin') return [configured]
+  if (configured !== 'codex') return [configured]
+  if (hostPlatform === 'win32') return [...bundledWindowsCodex(userHome), configured]
+  if (hostPlatform !== 'darwin') return [configured]
 
   const bundledCandidates = [
     '/Applications/ChatGPT.app',
@@ -1034,6 +1036,32 @@ export function codexBinaryCandidates(
     join(userHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
     configured,
   ])]
+}
+
+/**
+ * Codex shipped with the desktop app on Windows.
+ *
+ * The app installs each build into its own hash directory under the user's local
+ * app data and adds a new one on every update, so the newest directory is the
+ * current build. Naming one of those directories in configuration would stop
+ * resolving after an update; picking the newest keeps working.
+ * @param userHome - the account's home directory, which anchors the app data path.
+ * @returns the newest bundled binary, or nothing when the app is not installed.
+ */
+function bundledWindowsCodex(userHome: string): string[] {
+  const bin = join(userHome, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin')
+  try {
+    const newest = readdirSync(bin, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(bin, entry.name, 'codex.exe'))
+      .filter(candidate => existsSync(candidate))
+      .map(candidate => ({ candidate, modified: statSync(candidate).mtimeMs }))
+      .sort((left, right) => right.modified - left.modified)
+    const candidate = newest[0]?.candidate
+    return candidate === undefined ? [] : [candidate]
+  } catch {
+    return []
+  }
 }
 
 function parseCallEnvelope(input: unknown): { method: string; params: unknown } {

@@ -24973,7 +24973,7 @@ function isRecord10(value) {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
@@ -26421,7 +26421,9 @@ var CodexRemoteDomain = class {
   }
 };
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "win32") return [...bundledWindowsCodex(userHome), configured];
+  if (hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
     join5(userHome, "Applications", "ChatGPT.app")
@@ -26446,6 +26448,16 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
+}
+function bundledWindowsCodex(userHome) {
+  const bin = join5(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
+  try {
+    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join5(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
+    const candidate = newest[0]?.candidate;
+    return candidate === void 0 ? [] : [candidate];
+  } catch {
+    return [];
+  }
 }
 function parseCallEnvelope(input2) {
   if (!isRecord13(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {

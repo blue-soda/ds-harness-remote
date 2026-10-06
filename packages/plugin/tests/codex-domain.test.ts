@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -32,6 +32,33 @@ describe('CodexRemoteDomain', () => {
     }
     expect(codexBinaryCandidates('/custom/codex', 'darwin', '/Users/tester')).toEqual(['/custom/codex'])
     expect(codexBinaryCandidates('codex', 'linux', '/home/tester')).toEqual(['codex'])
+  })
+
+  /**
+   * The Windows desktop app installs Codex into a per-build hash directory and
+   * adds a new one on every update, so configuration cannot name the path and the
+   * newest build has to win.
+   */
+  it('discovers the newest desktop-app Codex on Windows', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'codex-win-home-'))
+    cleanup.push(home)
+    const bin = join(home, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin')
+    const older = join(bin, 'older-build', 'codex.exe')
+    const newer = join(bin, 'newer-build', 'codex.exe')
+    await mkdir(join(bin, 'older-build'), { recursive: true })
+    await mkdir(join(bin, 'newer-build'), { recursive: true })
+    await writeFile(older, '')
+    await writeFile(newer, '')
+    await utimes(older, new Date(1_000_000), new Date(1_000_000))
+    await utimes(newer, new Date(2_000_000), new Date(2_000_000))
+
+    const candidates = codexBinaryCandidates('codex', 'win32', home)
+    expect(candidates[0]).toBe(newer)
+    expect(candidates.at(-1)).toBe('codex')
+    // An explicit binary is still used exactly as configured.
+    expect(codexBinaryCandidates('C:/custom/codex.exe', 'win32', home)).toEqual(['C:/custom/codex.exe'])
+    // No desktop app installed, no bundled candidate.
+    expect(codexBinaryCandidates('codex', 'win32', join(home, 'elsewhere'))).toEqual(['codex'])
   })
 
   it('stays unavailable when the optional domain is disabled', async () => {
