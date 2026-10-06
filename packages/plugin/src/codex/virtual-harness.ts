@@ -353,6 +353,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
           return business(success({
             items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
             archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id),
+            // `WorkspaceBaseline` declares this field, and the client reads its length
+            // directly: omitting it throws instead of rendering an empty pin list.
+            pinnedSessionIds: [],
           }))
         }
         case 'workspace/create': return business(await this.createWorkspace(requestArg(args), signal))
@@ -615,6 +618,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       blank: options.blank,
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       projections: {
+        // `SessionProjectionHints` is a discriminated union; without its kind the
+        // client's exhaustive switch throws and takes the whole session list down.
+        kind: 'sequenced',
         asOfSeq: options.asOfSeq ?? 0,
         values: {
           title: displayTitle(session),
@@ -658,6 +664,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       value: {
         items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
         archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id),
+        // Required by `WorkspaceBaseline`; CodeX virtual Workspaces hold no pins.
+        pinnedSessionIds: [],
       },
     })
     return queue.iterate(() => this.workspaceStreams.delete(queue))
@@ -715,6 +723,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
+        // Same union as the summary path: the kind is what the client switches on.
+        kind: 'sequenced',
         asOfSeq: history.cursor,
         values: {
           title: this.sessionTitle(sessionId),
@@ -1546,6 +1556,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       hasMore: history.hasMore,
       ...(beforeSeq !== undefined ? {} : {
         projections: {
+          // Same discriminated union as the other projection sites.
+          kind: 'sequenced',
           asOfSeq: history.cursor,
           values: {
             title: this.sessionTitle(sessionId),

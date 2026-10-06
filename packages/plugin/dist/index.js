@@ -15981,7 +15981,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           const catalog = await this.refreshCatalog(signal);
           return business(success({
             items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id)
+            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+            // `WorkspaceBaseline` declares this field, and the client reads its length
+            // directly: omitting it throws instead of rendering an empty pin list.
+            pinnedSessionIds: []
           }));
         }
         case "workspace/create":
@@ -16248,6 +16251,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       blank: options.blank,
       ...session.cwd === void 0 ? {} : { cwd: session.cwd },
       projections: {
+        // `SessionProjectionHints` is a discriminated union; without its kind the
+        // client's exhaustive switch throws and takes the whole session list down.
+        kind: "sequenced",
         asOfSeq: options.asOfSeq ?? 0,
         values: {
           title: displayTitle(session),
@@ -16287,7 +16293,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       type: "baseline",
       value: {
         items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id)
+        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+        // Required by `WorkspaceBaseline`; CodeX virtual Workspaces hold no pins.
+        pinnedSessionIds: []
       }
     });
     return queue.iterate(() => this.workspaceStreams.delete(queue));
@@ -16342,6 +16350,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
+        // Same union as the summary path: the kind is what the client switches on.
+        kind: "sequenced",
         asOfSeq: history.cursor,
         values: {
           title: this.sessionTitle(sessionId),
@@ -17077,6 +17087,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       hasMore: history.hasMore,
       ...beforeSeq !== void 0 ? {} : {
         projections: {
+          // Same discriminated union as the other projection sites.
+          kind: "sequenced",
           asOfSeq: history.cursor,
           values: {
             title: this.sessionTitle(sessionId),
