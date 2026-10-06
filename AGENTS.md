@@ -69,6 +69,23 @@ profile 迁移 = 依赖键 + `package.json` 的 `dsh.profile.bundles` 条目改�
 如需 provenance 请改由 GitHub Actions 发布。上游引用**故意保留**：`docs/design/` 的上游 issue 与
 `.github/release-notes.md` 中致谢的上游 PR。
 
+**发布前必须断开硬链接**：pnpm 会让包文件与 profile 里的安装副本共享 inode，npm 打包时按 inode
+去重并生成 tar 硬链接条目，而 registry 直接拒收：
+
+```
+npm error 415 Unsupported Media Type - Hard link is not allowed
+```
+
+所以 `npm publish` **之前**执行一次（重写被发布文件、各占独立 inode，内容不变）：
+
+```bash
+node scripts/break-hard-links.mjs packages/plugin
+```
+
+脚本按包的 `files` 列表遍历，成功时输出 `0 still shared`。任何重新构建或 profile 安装之后都
+建议再跑一次。另注意 npm **不理解 pnpm workspace**：`npm publish -w packages/plugin` 会报
+`No workspaces found`，必须进入包目录发布。
+
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
 
 ## Current Status
