@@ -37,6 +37,21 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 删除自定义 Session/Agent/Workspace/Permission adapters、event replay 和旧 Host RPC 路由
 - [x] GitHub Actions 使用 Node.js 22 和 pnpm 9.15.4 执行 build、check、test 与 Bundle 校验
 
+## 发行版默认配置与 role
+
+第三方发行版在 profile patch 里 seed `ds-harness-remote` 条目时的契约与待办；完整证据链见
+`AGENTS.md` §发行版默认配置与 `role` 语义。
+
+- [x] 核对"seed 的 `role: both` 在全新 home 下被改写成 `client`"：已确认 **`role` 不是运行时开关**
+      （两个半边都由 `serverUrl + connection` 决定 ✓）、双角色注册来自 `authorizeHostByDefault()` ✓、
+      `both` 为惰性值 ✓、唯一强制写角色的是**远程卡片的 DeepSeek 登录**（`client.ts:2129` 硬编码
+      `role: 'client'` ✓）、其余控制写入与 CLI 都保留或不动 `role` ✓
+- [ ] 让 `both` 有一等语义：放开 `configure`（`control-runtime.ts:224`）与 `setRole`（`:312`）对 `both`
+      的校验，并定义行为（建议：以 host 身份授权后再补授权对侧，与"凭据按角色分目录"的既有模型一致），
+      附最小测试
+- [ ] 若发行版要"钉住"默认 `role`：允许声明"面板登录不改写 `role`"，或在写入前保留 patch 的原始
+      `role`；需先定语义（`both` 是否等于双份授权）再实现
+
 ## P0：Plugin 可用链路
 
 - [ ] Windows 用户目录 WinSW 安装实机回归：管理员权限预检/账户密码、独立 Node、旧登录任务迁移、重启后 Host/CodeX、失败重试与卸载保留凭证（含 ARM64 .NET wrapper）
