@@ -20350,6 +20350,7 @@ var ClientModeRuntime = class {
     this.gatewaySwitch.selectLocal();
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
+    await this.server.clearAuthorization();
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -27404,6 +27405,7 @@ var HostPluginRuntime = class {
    */
   async clearHostAuthorization() {
     await this.serverConnection?.stop();
+    await this.serverApi?.clearAuthorization();
     if (this.serverApi !== void 0 && this.identity !== void 0) {
       this.serverConnection = this.createServerConnection(this.identity);
     }

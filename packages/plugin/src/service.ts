@@ -310,6 +310,11 @@ export class HostPluginRuntime {
    */
   async clearHostAuthorization(): Promise<void> {
     await this.serverConnection?.stop()
+    // Clearing the stored credential is not enough: this API caches the
+    // authorization in memory too, and the stale copy keeps reporting the Host as
+    // authorized. That makes `authorizeHostByDefault()` skip re-authorization and
+    // leaves the connection retrying tokens the Server no longer accepts.
+    await this.serverApi?.clearAuthorization()
     // The connection survives, bound to the identity it keeps.
     if (this.serverApi !== undefined && this.identity !== undefined) {
       this.serverConnection = this.createServerConnection(this.identity)

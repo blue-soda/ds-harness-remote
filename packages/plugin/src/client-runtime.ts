@@ -433,6 +433,12 @@ export class ClientModeRuntime {
     this.gatewaySwitch.selectLocal()
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
+    // Clear the in-memory authorization as well as the stored credential. The
+    // caller clears the credential file, but this API also caches the
+    // authorization in memory, and a stale copy keeps reporting the Client as
+    // authorized — which stops the Host from re-authorizing and leaves the
+    // connection retrying tokens the Server no longer accepts.
+    await this.server.clearAuthorization()
   }
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
