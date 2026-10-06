@@ -280,6 +280,8 @@ interface PluginSettingsView {
   association?: PluginAssociation
   associations?: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  /** The Codex binary the Host found for itself, when the command stays default. */
+  discoveredCodexBinary?: string
 }
 
 interface PluginAssociation {
@@ -340,6 +342,10 @@ const en = {
   codexRemote: 'Codex Remote',
   codexRemoteHint: 'Expose Codex projects through this Host. Restart DSH after changing this setting.',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
+  codexBinaryLabel: 'Codex command or path',
+  codexBinaryDetected: 'Found automatically: {path}',
+  codexBinaryMissing: 'No Codex found automatically. Install the Codex desktop app, or enter the path to a Codex CLI that supports "codex app-server".',
+  codexBinaryHint: 'Leave the default "codex" to use the discovered binary, so a desktop-app update keeps working.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -592,6 +598,10 @@ const zh: Record<keyof typeof en, string> = {
   codexRemote: 'Codex Remote',
   codexRemoteHint: '通过这台 Host 提供 Codex 项目；修改后需重启 DSH 生效。',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
+  codexBinaryLabel: 'Codex 命令或路径',
+  codexBinaryDetected: '自动发现：{path}',
+  codexBinaryMissing: '未自动发现 Codex。请安装 Codex 桌面应用，或填写支持 "codex app-server" 的 Codex CLI 路径。',
+  codexBinaryHint: '保持默认的 "codex" 即使用自动发现的二进制，应用更新后仍然有效。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -1153,6 +1163,8 @@ window.__ModuleLoader__.load({
       const [open, setOpen] = React.useState(props.view === 'page')
       const [serverUrl, setServerUrl] = React.useState('')
       const [codexEnabled, setCodexEnabled] = React.useState(true)
+      /** The configured Codex command or path; empty means "discover it". */
+      const [codexBinary, setCodexBinary] = React.useState('codex')
       const [portsBusy, setPortsBusy] = React.useState(false)
       const [previewPorts, setPreviewPorts] = React.useState('')
       const role = 'host' as const
@@ -1188,6 +1200,7 @@ window.__ModuleLoader__.load({
         setSettingsView(view)
         setServerUrl(view.config.serverUrl ?? DEFAULT_REMOTE_SERVER_URL)
         setCodexEnabled(view.config.codex?.enabled ?? true)
+        setCodexBinary(view.config.codex?.binary ?? 'codex')
         setTerminalEnabled(view.config.terminal?.enabled ?? true)
         setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
         setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
@@ -1298,6 +1311,28 @@ window.__ModuleLoader__.load({
           setNotice({ key: 'codexSaved' })
         } catch (reason) {
           setCodexEnabled(previous)
+          setError(messageOf(reason))
+        } finally {
+          setCodexBusy(false)
+        }
+      }
+
+      /**
+       * Commit the Codex command or path.
+       *
+       * An emptied field goes back to auto-discovery, which is also what survives a
+       * desktop-app update that moves the binary.
+       */
+      const setCodexBinaryPath = async (binary: string): Promise<void> => {
+        setCodexBusy(true)
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.codex.set', { enabled: codexEnabled, binary })
+          applyView(view)
+          setNotice({ key: 'codexSaved' })
+        } catch (reason) {
+          setCodexBinary(settingsView?.config.codex?.binary ?? 'codex')
           setError(messageOf(reason))
         } finally {
           setCodexBusy(false)
@@ -1418,16 +1453,32 @@ window.__ModuleLoader__.load({
               onClick: () => void savePreviewPorts() }, t('developmentSave'))),
           React.createElement('small', null, t('previewPortsHint'))))
 
-      const codexSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('codexRemote')),
-          React.createElement('p', null, t('codexRemoteHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', disabled: busy || codexBusy || !writable,
-          'aria-label': t('codexRemote'),
-          checked: codexEnabled,
-          onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
-        }))
+      const codexSetting = React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+          React.createElement('div', null,
+            React.createElement('strong', null, t('codexRemote')),
+            React.createElement('p', null, t('codexRemoteHint'))),
+          React.createElement('input', {
+            type: 'checkbox', role: 'switch', disabled: busy || codexBusy || !writable,
+            'aria-label': t('codexRemote'),
+            checked: codexEnabled,
+            onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
+          })),
+        React.createElement('div', { className: 'dshRemoteCodexBinary' },
+          React.createElement('input', {
+            type: 'text', value: codexBinary, disabled: busy || codexBusy || !writable,
+            // The discovered path is the placeholder, not the value: leaving the
+            // default keeps discovery working across desktop-app updates.
+            placeholder: settingsView?.discoveredCodexBinary ?? 'codex',
+            'aria-label': t('codexBinaryLabel'),
+            onChange: (event: Event) => setCodexBinary((event.target as HTMLInputElement).value),
+            onBlur: () => void setCodexBinaryPath(codexBinary),
+            onKeyDown: (event: KeyboardEvent) => { if (event.key === 'Enter') void setCodexBinaryPath(codexBinary) },
+          }),
+          React.createElement('p', null,
+            `${settingsView?.discoveredCodexBinary === undefined
+              ? t('codexBinaryMissing')
+              : t('codexBinaryDetected', { path: settingsView.discoveredCodexBinary })} ${t('codexBinaryHint')}`)))
 
       const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
         React.createElement('summary', null,
@@ -3002,7 +3053,7 @@ window.__ModuleLoader__.load({
         '.dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:720px}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}',
         '.dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}',
         '.dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
-        '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
+        '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}.dshRemoteCodexBinary{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 0 12px}.dshRemoteCodexBinary input{flex:1 1 320px;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary)}.dshRemoteCodexBinary input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteCodexBinary p{flex:1 1 100%;margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}',
         '.dshRemoteAssociation{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.dshRemoteAssociation>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteAssociation p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
         '.dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect{appearance:none;flex:0 0 auto;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:34px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteReconnect:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}',
         '.dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',

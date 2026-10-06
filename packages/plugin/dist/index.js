@@ -21359,6 +21359,7 @@ function iceServersForAttempt(attempt, iceServers) {
 
 // src/control-runtime.ts
 import { hostname as hostname2 } from "node:os";
+import { existsSync as existsSync3 } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
@@ -21679,6 +21680,1722 @@ var ControlStatusStream = class {
   }
 };
 
+// src/codex/domain.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
+import { readdir, realpath, stat as stat3 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join5, relative, resolve } from "node:path";
+
+// src/codex/app-server.ts
+import { spawn as spawn2 } from "node:child_process";
+import { Buffer as Buffer2 } from "node:buffer";
+var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
+var APP_SERVER_START_TIMEOUT_MS = 15e3;
+var MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024;
+var MAX_STDERR_CAPTURE_BYTES = 4 * 1024;
+var CodexAppServerError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "CodexAppServerError";
+  }
+};
+var CodexAppServerClient = class {
+  constructor(binary, logger, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
+  })) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAppServer = spawnAppServer;
+  }
+  process;
+  nextId = 1;
+  pending = /* @__PURE__ */ new Map();
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  stdoutBuffer = Buffer2.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  failureNotified = false;
+  startPromise;
+  start() {
+    if (this.closed) return Promise.reject(new CodexAppServerError("CODEX_CLOSED", "The Codex domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  async call(method, params, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS) {
+    if (!this.ready) throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not ready.");
+    return this.request(method, params, timeoutMs);
+  }
+  async respond(id4, result) {
+    this.write({ id: id4, result });
+  }
+  async respondError(id4, code, message) {
+    this.write({ id: id4, error: { code, message } });
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.ready = false;
+    this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve4) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve4();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve4();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new CodexAppServerError("CODEX_STARTING", "Codex App Server is already starting.");
+    }
+    const child = this.spawnAppServer(this.binary);
+    this.process = child;
+    this.failureNotified = false;
+    this.stdoutBuffer = Buffer2.alloc(0);
+    this.stderrBytes = 0;
+    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer2.from(chunk)));
+    child.stderr.on("data", (chunk) => {
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer2.byteLength(chunk));
+    });
+    child.on("error", (error) => this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error));
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      this.failPending(new CodexAppServerError("CODEX_APP_SERVER_EXITED", "Codex App Server exited unexpectedly."));
+      if (!this.closed) {
+        this.logger?.warn("Codex App Server exited", {
+          code: code ?? "none",
+          signal: signal ?? "none",
+          stderrBytes: this.stderrBytes
+        });
+        this.notifyUnavailable("CODEX_APP_SERVER_EXITED");
+      }
+    });
+    try {
+      await this.request("initialize", {
+        clientInfo: {
+          name: "deepseek_harness_remote",
+          title: "DeepSeek Harness Remote",
+          version: PLUGIN_VERSION
+        },
+        capabilities: {
+          experimentalApi: true,
+          mcpServerOpenaiFormElicitation: false
+        }
+      }, APP_SERVER_START_TIMEOUT_MS);
+      this.write({ method: "initialized", params: {} });
+      this.ready = true;
+      this.logger?.info("Codex App Server ready");
+    } catch (error) {
+      child.kill("SIGTERM");
+      if (error instanceof CodexAppServerError) throw error;
+      throw new CodexAppServerError("CODEX_INITIALIZE_FAILED", "Codex App Server initialization failed.", { cause: error });
+    }
+  }
+  request(method, params, timeoutMs) {
+    const id4 = this.nextId++;
+    const result = new Promise((resolve4, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id4);
+        reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id4, { resolve: resolve4, reject, timer });
+    });
+    try {
+      this.write({ id: id4, method, params });
+    } catch (error) {
+      const pending = this.takePending(id4);
+      pending?.reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
+    }
+    return result;
+  }
+  write(message) {
+    const child = this.process;
+    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
+      throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not available.");
+    }
+    child.stdin.write(`${JSON.stringify(message)}
+`);
+  }
+  consumeStdout(chunk) {
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer2.concat([this.stdoutBuffer, chunk]);
+    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
+      this.handleProcessFailure(
+        "CODEX_RESPONSE_TOO_LARGE",
+        new Error("Codex App Server emitted an oversized JSONL message.")
+      );
+      return;
+    }
+    let newline = this.stdoutBuffer.indexOf(10);
+    while (newline >= 0) {
+      const line = this.stdoutBuffer.subarray(0, newline);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
+      if (line.length > 0) this.handleLine(line);
+      newline = this.stdoutBuffer.indexOf(10);
+    }
+  }
+  handleLine(line) {
+    let value;
+    try {
+      value = JSON.parse(line.toString("utf8"));
+    } catch {
+      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
+      return;
+    }
+    if (!isRecord9(value)) {
+      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
+      return;
+    }
+    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
+      const pending = this.takePending(value.id);
+      if (pending === void 0) return;
+      if ("error" in value && value.error !== void 0) {
+        pending.reject(new CodexAppServerError("CODEX_UPSTREAM_ERROR", safeUpstreamError(value.error)));
+      } else {
+        pending.resolve(value.result);
+      }
+      return;
+    }
+    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
+    const params = value.params ?? {};
+    const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
+    for (const handler of this.inboundHandlers) handler(inbound);
+  }
+  handleProcessFailure(code, cause) {
+    this.ready = false;
+    this.failPending(new CodexAppServerError(code, "Codex App Server communication failed.", { cause }));
+    const child = this.process;
+    this.process = void 0;
+    child?.kill("SIGTERM");
+    this.logger?.warn("Codex App Server communication failed", { code });
+    if (!this.closed) this.notifyUnavailable(code);
+  }
+  notifyUnavailable(code) {
+    if (this.failureNotified) return;
+    this.failureNotified = true;
+    for (const handler of this.unavailableHandlers) handler(code);
+  }
+  takePending(id4) {
+    const pending = this.pending.get(id4);
+    if (pending === void 0) return void 0;
+    this.pending.delete(id4);
+    clearTimeout(pending.timer);
+    return pending;
+  }
+  failPending(error) {
+    for (const id4 of [...this.pending.keys()]) this.takePending(id4)?.reject(error);
+  }
+};
+function safeUpstreamError(value) {
+  if (!isRecord9(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  const message = value.message.toLowerCase();
+  if (message.includes("active writer")) return "Codex thread already has an active writer.";
+  return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
+}
+function isRecord9(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/codex/method-policy.ts
+var id2 = external_exports.string().min(1).max(256);
+var cursor = external_exports.string().min(1).max(4096).nullable().optional();
+var textInput = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+  message: "Image data must use canonical base64."
+});
+var imageInput = external_exports.object({
+  type: external_exports.literal("image"),
+  mediaType: imageMediaType,
+  data: canonicalBase64
+}).strict();
+var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
+var projectRoot = external_exports.object({
+  path: external_exports.string().min(1).max(4096)
+}).strict();
+var schemas = {
+  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
+  "model/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    includeHidden: external_exports.boolean().optional()
+  }).strict(),
+  "project/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional()
+  }).strict(),
+  "project/create": external_exports.object({
+    name: external_exports.string().trim().min(1).max(256),
+    roots: external_exports.array(projectRoot).length(1),
+    idempotencyKey: external_exports.string().min(16).max(256)
+  }).strict(),
+  "thread/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
+    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
+    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
+    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
+    archived: external_exports.boolean().optional(),
+    isPinned: external_exports.boolean().optional(),
+    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
+    useStateDbOnly: external_exports.boolean().optional(),
+    searchTerm: external_exports.string().max(1024).optional()
+  }).strict(),
+  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    threadId: id2,
+    beforeSeq: external_exports.number().int().nonnegative().optional(),
+    throughSeq: external_exports.number().int().min(-1).optional(),
+    maxMessages: external_exports.number().int().min(1).max(200).optional()
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "thread/start": external_exports.object({
+    cwd: external_exports.string().min(1).max(4096),
+    model: external_exports.string().min(1).max(128).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/resume": external_exports.object({
+    threadId: id2,
+    model: external_exports.string().min(1).max(128).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/fork": external_exports.object({
+    threadId: id2,
+    lastTurnId: id2.optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().trim().min(1).max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
+  "turn/start": external_exports.object({
+    threadId: id2,
+    input,
+    model: external_exports.string().min(1).max(128).optional(),
+    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "turn/steer": external_exports.object({ threadId: id2, input, expectedTurnId: id2 }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
+};
+var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
+function parseCodexCall(method, params) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
+  }
+  const schema = schemas[method];
+  const parsed = schema.safeParse(params);
+  if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
+  return { method, params: parsed.data };
+}
+function isThreadMutation(method) {
+  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
+}
+function threadIdFromParams(params) {
+  return typeof params.threadId === "string" ? params.threadId : void 0;
+}
+
+// src/codex/peer-bridge.ts
+import { Buffer as Buffer3 } from "node:buffer";
+var streamOpenSchema = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
+  threadId: external_exports.string().min(1).max(256)
+}).strict();
+var streamCloseSchema = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferOpenSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
+}).strict();
+var transferChunkSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
+}).strict();
+var transferIdSchema = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
+var MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION;
+var MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
+var INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024;
+var CodexPeerBridge = class {
+  constructor(domain, context, publish, logger) {
+    this.domain = domain;
+    this.context = context;
+    this.publish = publish;
+    this.logger = logger;
+  }
+  streams = /* @__PURE__ */ new Map();
+  incomingTransfers = /* @__PURE__ */ new Map();
+  outgoingTransfers = /* @__PURE__ */ new Map();
+  closed = false;
+  async call(input2) {
+    return this.callDomain(input2, true);
+  }
+  async callDomain(input2, logFailure) {
+    this.requireOpen();
+    try {
+      return await this.domain.call(this.context.connectionId, input2);
+    } catch (error) {
+      if (logFailure) {
+        this.logger?.warn("Codex call failed", {
+          method: safeMethod(input2),
+          code: safeErrorCode2(error)
+        });
+      }
+      throw error;
+    }
+  }
+  respond(input2) {
+    this.requireOpen();
+    return this.domain.respond(this.context.connectionId, input2);
+  }
+  async openStream(input2) {
+    this.requireOpen();
+    const params = streamOpenSchema.parse(input2);
+    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
+    if (this.streams.size >= MAX_ACTIVE_STREAMS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
+    }
+    await this.domain.call(this.context.connectionId, {
+      method: "thread/read",
+      params: { threadId: params.threadId, includeTurns: false }
+    });
+    this.streams.set(params.streamId, params.threadId);
+    return { opened: true, streamId: params.streamId, threadId: params.threadId };
+  }
+  closeStream(input2) {
+    const params = streamCloseSchema.parse(input2);
+    this.streams.delete(params.streamId);
+    return { closed: true, streamId: params.streamId };
+  }
+  openTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferOpenSchema.parse(input2);
+    if (params.totalChunks !== Math.ceil(params.totalBytes / CODEX_APP_TRANSFER_CHUNK_BYTES)) {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk count is invalid.");
+    }
+    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
+      throw new RpcError("REQUEST_CONFLICT", "The Codex transfer id is already active.");
+    }
+    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex transfers are active.", void 0, true);
+    }
+    this.incomingTransfers.set(params.transferId, {
+      totalBytes: params.totalBytes,
+      totalChunks: params.totalChunks,
+      chunks: [],
+      receivedBytes: 0,
+      touchedAt: Date.now()
+    });
+    return { opened: true, transferId: params.transferId };
+  }
+  appendTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferChunkSchema.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
+    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "Codex transfer chunks must arrive exactly once and in order.");
+    }
+    const chunk = decodeCanonicalBase64(params.data);
+    const expectedBytes = Math.min(
+      CODEX_APP_TRANSFER_CHUNK_BYTES,
+      transfer.totalBytes - params.index * CODEX_APP_TRANSFER_CHUNK_BYTES
+    );
+    if (chunk.byteLength !== expectedBytes) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk size is invalid.");
+    }
+    transfer.chunks.push(chunk);
+    transfer.receivedBytes += chunk.byteLength;
+    transfer.touchedAt = Date.now();
+    return { accepted: true, transferId: params.transferId, index: params.index };
+  }
+  async commitTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferIdSchema.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
+    this.incomingTransfers.delete(params.transferId);
+    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer is incomplete.");
+    }
+    let request;
+    try {
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks(transfer.chunks, transfer.totalBytes)));
+    } catch {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer does not contain a valid request.");
+    }
+    let response;
+    try {
+      response = await this.callDomain(request, false);
+    } catch (error) {
+      this.logger?.warn("Codex transfer call failed", {
+        method: safeMethod(request),
+        code: safeErrorCode2(error)
+      });
+      throw error;
+    }
+    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: "inline", response };
+    if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "The Codex response exceeds the bounded transfer limit.");
+    }
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex response transfers are active.", void 0, true);
+    }
+    const totalChunks = Math.ceil(responseBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
+    this.outgoingTransfers.set(params.transferId, {
+      bytes: responseBytes,
+      totalChunks,
+      nextIndex: 0,
+      touchedAt: Date.now()
+    });
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+  }
+  readTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferReadSchema.parse(input2);
+    const transfer = this.outgoingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex response transfer is not active.");
+    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "Codex response chunks must be read exactly once and in order.");
+    }
+    const start = params.index * CODEX_APP_TRANSFER_CHUNK_BYTES;
+    const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
+    transfer.nextIndex += 1;
+    transfer.touchedAt = Date.now();
+    return {
+      transferId: params.transferId,
+      index: params.index,
+      data: Buffer3.from(transfer.bytes.subarray(start, end)).toString("base64")
+    };
+  }
+  closeTransfer(input2) {
+    const params = transferIdSchema.parse(input2);
+    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
+    return { closed, transferId: params.transferId };
+  }
+  hasThreadSubscription(threadId) {
+    return [...this.streams.values()].includes(threadId);
+  }
+  removeThreadSubscriptions(threadId) {
+    for (const [streamId, targetThreadId] of this.streams) {
+      if (targetThreadId === threadId) this.streams.delete(streamId);
+    }
+  }
+  async publishInbound(threadId, frame) {
+    if (this.closed) return;
+    const streamIds = [...this.streams.entries()].filter(([, targetThreadId]) => targetThreadId === threadId).map(([streamId]) => streamId);
+    for (const streamId of streamIds) {
+      const data2 = { streamId, frame };
+      if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+        this.streams.delete(streamId);
+        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
+        this.logger?.warn("Codex stream closed after oversized frame", { streamId });
+        continue;
+      }
+      await this.publish("codex.app.frame", data2);
+    }
+  }
+  async failStreams(reason = "failed") {
+    if (this.closed) return;
+    const streamIds = [...this.streams.keys()];
+    this.streams.clear();
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
+      streamId,
+      reason
+    }).catch(() => void 0)));
+  }
+  async closeAll() {
+    if (this.closed) return;
+    this.closed = true;
+    const streamIds = [...this.streams.keys()];
+    this.streams.clear();
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
+      streamId,
+      reason: "peer-disconnected"
+    }).catch(() => void 0)));
+    await this.domain.detachPeer(this.context.connectionId);
+  }
+  pruneTransfers() {
+    const staleBefore = Date.now() - TRANSFER_IDLE_MS;
+    for (const [id4, transfer] of this.incomingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id4);
+    }
+    for (const [id4, transfer] of this.outgoingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id4);
+    }
+  }
+  requireOpen() {
+    if (this.closed) throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
+  }
+};
+function decodeCanonicalBase64(value) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
+  }
+  const decoded = Buffer3.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
+  }
+  return decoded;
+}
+function isRecord10(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function safeErrorCode2(error) {
+  if (isRecord10(error) && typeof error.code === "string") return error.code;
+  return "UNKNOWN";
+}
+function safeMethod(input2) {
+  return isRecord10(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+}
+function concatChunks(chunks, totalBytes) {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+// src/codex/domain.ts
+var APPROVAL_TTL_MS = 5 * 6e4;
+var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
+var CODEX_PAGE_LIMIT2 = 100;
+var MAX_CODEX_PAGES2 = 32;
+var CODEX_HISTORY_PAGE_LIMIT = 25;
+var MAX_CODEX_HISTORY_PAGES = 64;
+var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
+var CodexRemoteDomain = class {
+  constructor(config, logger, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
+    this.config = config;
+    this.logger = logger;
+    this.createAppServer = createAppServer;
+    this.restartDelaysMs = restartDelaysMs;
+  }
+  appServer;
+  unsubscribeInbound;
+  unsubscribeUnavailable;
+  peers = /* @__PURE__ */ new Map();
+  peerDeviceIds = /* @__PURE__ */ new Map();
+  turnOwners = /* @__PURE__ */ new Map();
+  approvals = /* @__PURE__ */ new Map();
+  permissionPresets = /* @__PURE__ */ new Map();
+  approvalExpiryTimer;
+  restartTimer;
+  restartAttempt = 0;
+  available = false;
+  closed = false;
+  state = "disabled";
+  unavailableCode;
+  async start() {
+    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
+    if (!this.config.enabled) return;
+    try {
+      this.state = "starting";
+      await this.launchAppServer();
+    } catch (error) {
+      this.available = false;
+      this.state = "unavailable";
+      this.unavailableCode = errorCode2(error);
+      await this.disposeAppServer(this.appServer);
+      this.logger.warn("Codex Remote domain unavailable", { code: this.unavailableCode });
+    }
+  }
+  isAvailable() {
+    return this.available && this.appServer?.isReady() === true;
+  }
+  status() {
+    return {
+      enabled: this.config.enabled,
+      available: this.isAvailable(),
+      state: this.state,
+      restartAttempt: this.restartAttempt,
+      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
+    };
+  }
+  /** Resolve a thread cwd for Host-owned workspace/terminal carriers. */
+  async resolveThreadWorkspace(connectionId, threadId) {
+    if (!this.peers.has(connectionId)) throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available on this connection.");
+    try {
+      const known = await this.readKnownThread(threadId);
+      return known.cwd;
+    } catch (error) {
+      if (error instanceof RpcError && error.code === "CODEX_THREAD_NOT_ALLOWED") {
+        throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
+      }
+      throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
+    }
+  }
+  createPeer(context, publish) {
+    if (!this.config.enabled) return void 0;
+    const bridge = new CodexPeerBridge(this, context, publish, this.logger);
+    this.peers.set(context.connectionId, bridge);
+    this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
+    return bridge;
+  }
+  async call(connectionId, input2) {
+    const envelope = parseCallEnvelope(input2);
+    const call = parseCodexCall(envelope.method, envelope.params);
+    this.requireAppServer();
+    if (call.method === "account/read") {
+      return sanitizeAccount(await this.callUpstream(call.method, call.params));
+    }
+    if (call.method === "project/list") {
+      return sanitizeProjectList(await this.callUpstream(call.method, call.params));
+    }
+    if (call.method === "project/create") {
+      const roots = call.params.roots;
+      const path = await this.requireNewCodexProjectPath(roots[0].path);
+      return sanitizeProjectCreate(await this.callUpstream(call.method, {
+        name: call.params.name,
+        roots: [{ path }],
+        idempotencyKey: call.params.idempotencyKey
+      }));
+    }
+    if (call.method === "thread/list") {
+      const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
+      return filterThreadListByWorkspaceAuthority(
+        result,
+        await this.readWorkspaceAuthority(result.data)
+      );
+    }
+    if (call.method === "thread/start") {
+      const cwd = await this.requireCodexWorkspacePath(call.params.cwd);
+      const permission = codexPermission(call.params, "workspace-write");
+      const result = await this.callUpstream(call.method, {
+        ...permission.params,
+        cwd,
+        ...codexThreadPermissionParams(permission),
+        serviceName: "deepseek_harness_remote"
+      });
+      if (extractThread(result)?.id === void 0) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
+      }
+      this.rememberPermission(extractThread(result).id, result);
+      return result;
+    }
+    const threadId = threadIdFromParams(call.params);
+    if (call.method === "dsh/sessionHistory") {
+      const thread = await this.readThreadForHistory(connectionId, threadId);
+      const page = paginateCodexNativeHistory(
+        projectCodexNativeHistory(thread, `codex:${threadId}`),
+        {
+          beforeSeq: optionalInteger2(call.params.beforeSeq),
+          throughSeq: optionalInteger2(call.params.throughSeq),
+          maxMessages: optionalInteger2(call.params.maxMessages)
+        }
+      );
+      const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
+      return {
+        ...page,
+        ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
+        permissionPreset: this.permissionPresets.get(threadId) ?? null
+      };
+    }
+    if (call.method === "dsh/directoryList") {
+      return this.listCodexDirectory(call.params.path);
+    }
+    const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
+    if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
+      const owner = this.turnOwners.get(threadId);
+      if (owner !== void 0 && owner.connectionId !== connectionId) {
+        throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
+      }
+      return this.changeThreadPermission(threadId, call.params, allowedThread);
+    }
+    if (call.method === "thread/read") {
+      return this.callUpstream(call.method, call.params);
+    }
+    if (call.method === "thread/unsubscribe") {
+      const bridge = this.peers.get(connectionId);
+      bridge?.removeThreadSubscriptions(threadId);
+      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
+      return this.callUpstream(call.method, call.params);
+    }
+    let claimed = false;
+    let previousOwner;
+    if (isThreadMutation(call.method) && threadId !== void 0) {
+      const claim = this.claimTurn(
+        threadId,
+        connectionId,
+        call.method,
+        typeof call.params.turnId === "string" ? call.params.turnId : void 0
+      );
+      claimed = claim.claimed;
+      previousOwner = claim.previous;
+    }
+    try {
+      const permission = codexPermission(call.params);
+      const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
+        ...permission.params,
+        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexThreadPermissionParams(permission),
+        excludeTurns: true
+      } : call.method === "thread/fork" && allowedThread !== void 0 ? {
+        ...permission.params,
+        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexThreadPermissionParams(permission)
+      } : call.method === "turn/start" ? {
+        ...permission.params,
+        ...allowedThread?.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexTurnPermissionParams(permission, allowedThread?.cwd)
+      } : permission.params;
+      let result;
+      try {
+        result = await this.callUpstream(call.method, upstreamParams);
+      } catch (error) {
+        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
+          return { thread: allowedThread.thread };
+        }
+        throw error;
+      }
+      if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
+        await this.assertResultThreadAllowed(result);
+      }
+      if (call.method === "thread/resume" || call.method === "thread/fork") {
+        const resultId = extractThread(result)?.id;
+        if (typeof resultId === "string") {
+          this.rememberPermission(resultId, result);
+          if (call.params.permissionPreset !== void 0) await this.publishPermission(resultId, result);
+        }
+      }
+      if (call.method === "turn/start" && threadId !== void 0) {
+        this.rememberTurnId(threadId, connectionId, extractTurnId(result));
+        if (call.params.permissionPreset !== void 0) {
+          await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
+        }
+      }
+      return result;
+    } catch (error) {
+      if (claimed && threadId !== void 0) {
+        if (previousOwner === void 0) this.turnOwners.delete(threadId);
+        else this.turnOwners.set(threadId, previousOwner);
+      }
+      throw mapAppServerError(error);
+    }
+  }
+  async respond(connectionId, input2) {
+    await this.expireApprovals();
+    const params = parseRespond(input2);
+    const approval = this.approvals.get(params.requestHandle);
+    if (approval === void 0 || approval.connectionId !== connectionId) {
+      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
+    }
+    this.approvals.delete(params.requestHandle);
+    this.scheduleApprovalExpiry();
+    await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
+    return { resolved: true };
+  }
+  async detachPeer(connectionId) {
+    const bridge = this.peers.get(connectionId);
+    if (bridge !== void 0) this.peers.delete(connectionId);
+    this.peerDeviceIds.delete(connectionId);
+    for (const [threadId, owner] of this.turnOwners) {
+      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId);
+    }
+    const appServer = this.appServer;
+    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
+    for (const [handle, approval] of pending) {
+      this.approvals.delete(handle);
+      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    this.scheduleApprovalExpiry();
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.available = false;
+    this.state = this.config.enabled ? "unavailable" : "disabled";
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    for (const bridge of [...this.peers.values()]) await bridge.closeAll();
+    this.peers.clear();
+    this.peerDeviceIds.clear();
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    this.approvals.clear();
+    this.unsubscribeInbound?.();
+    this.unsubscribeInbound = void 0;
+    this.unsubscribeUnavailable?.();
+    this.unsubscribeUnavailable = void 0;
+    await this.appServer?.close();
+    this.appServer = void 0;
+  }
+  async launchAppServer() {
+    let lastError;
+    for (const binary of codexBinaryCandidates(this.config.binary)) {
+      try {
+        await this.launchAppServerCandidate(binary);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!canTryNextBinary(error)) throw error;
+      }
+    }
+    throw lastError ?? new RpcError("CODEX_START_FAILED", "Codex App Server could not be started.");
+  }
+  async launchAppServerCandidate(binary) {
+    const appServer = this.createAppServer(binary, this.logger);
+    this.appServer = appServer;
+    this.unsubscribeInbound = appServer.onInbound((message) => {
+      void this.handleInbound(message).catch((error) => {
+        this.logger.warn("Codex inbound handling failed", { code: errorCode2(error) });
+      });
+    });
+    this.unsubscribeUnavailable = appServer.onUnavailable((code) => {
+      if (this.available && this.appServer === appServer) {
+        void this.handleAppServerUnavailable(appServer, code);
+      }
+    });
+    try {
+      await appServer.start();
+      const account = await appServer.call("account/read", { refreshToken: false }, 15e3);
+      if (!accountCanRun(account)) {
+        throw new RpcError("CODEX_AUTH_REQUIRED", "Codex is not signed in on this Host.");
+      }
+      if (this.closed || this.appServer !== appServer) {
+        await appServer.close().catch(() => void 0);
+        return;
+      }
+      this.available = true;
+      this.state = "ready";
+      this.restartAttempt = 0;
+      this.unavailableCode = void 0;
+      this.logger.info("Codex Remote domain ready");
+    } catch (error) {
+      await this.disposeAppServer(appServer);
+      throw error;
+    }
+  }
+  async handleAppServerUnavailable(appServer, code) {
+    if (this.closed || this.appServer !== appServer) return;
+    this.available = false;
+    this.state = "restarting";
+    this.unavailableCode = code;
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    this.approvals.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    await this.disposeAppServer(appServer);
+    this.scheduleRestart();
+  }
+  scheduleRestart() {
+    if (this.closed || this.restartTimer !== void 0) return;
+    if (this.restartAttempt >= this.restartDelaysMs.length) {
+      this.state = "unavailable";
+      this.logger.warn("Codex App Server restart attempts exhausted", { attempts: this.restartAttempt });
+      return;
+    }
+    const delayMs = Math.max(0, this.restartDelaysMs[this.restartAttempt] ?? 0);
+    this.restartAttempt += 1;
+    this.state = "restarting";
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = void 0;
+      void this.restartAfterFailure();
+    }, delayMs);
+    this.restartTimer.unref?.();
+    this.logger.warn("Codex App Server restart scheduled", { attempt: this.restartAttempt, delayMs });
+  }
+  async restartAfterFailure() {
+    if (this.closed) return;
+    try {
+      await this.launchAppServer();
+    } catch (error) {
+      this.available = false;
+      this.state = "restarting";
+      this.unavailableCode = errorCode2(error);
+      this.logger.warn("Codex App Server restart failed", {
+        attempt: this.restartAttempt,
+        code: this.unavailableCode
+      });
+      this.scheduleRestart();
+    }
+  }
+  async disposeAppServer(appServer) {
+    if (appServer === void 0 || this.appServer !== appServer) return;
+    this.unsubscribeInbound?.();
+    this.unsubscribeInbound = void 0;
+    this.unsubscribeUnavailable?.();
+    this.unsubscribeUnavailable = void 0;
+    this.appServer = void 0;
+    await appServer.close().catch(() => void 0);
+  }
+  async handleInbound(message) {
+    if (!this.available) return;
+    if (message.kind === "request") {
+      await this.handleServerRequest(message);
+      return;
+    }
+    const threadId = extractThreadId(message.params);
+    if (message.method === "thread/settings/updated" && threadId !== void 0) {
+      this.rememberPermission(threadId, message.params);
+    }
+    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
+    if (message.method === "turn/completed" && threadId !== void 0) this.turnOwners.delete(threadId);
+    if (message.method === "turn/started" && threadId !== void 0) {
+      const owner = this.turnOwners.get(threadId);
+      const turnId = extractTurnId(message.params);
+      if (owner !== void 0) {
+        this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
+      }
+    }
+    if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
+    if (threadId === void 0) return;
+    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
+      method: message.method,
+      params: message.params
+    })));
+  }
+  rememberPermission(threadId, value) {
+    const preset = codexPermissionPresetFromResponse(value);
+    if (preset === void 0) this.permissionPresets.delete(threadId);
+    else this.permissionPresets.set(threadId, preset);
+  }
+  async changeThreadPermission(threadId, params, allowed) {
+    const permission = codexPermission(params);
+    const settings = {
+      ...codexTurnPermissionParams(permission, allowed.cwd),
+      ...params.model === void 0 ? {} : { model: params.model }
+    };
+    let result;
+    try {
+      await this.callUpstream("thread/settings/update", { threadId, ...settings });
+      result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
+    } catch {
+      result = await this.callUpstream("thread/resume", {
+        ...permission.params,
+        ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
+        ...codexThreadPermissionParams(permission),
+        excludeTurns: true
+      });
+      await this.assertResultThreadAllowed(result);
+      if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
+        await this.callUpstream("thread/settings/update", { threadId, ...settings });
+        result = { ...isRecord11(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+      }
+    }
+    await this.publishPermission(threadId, result);
+    return result;
+  }
+  async publishPermission(threadId, value) {
+    const source = isRecord11(value) ? value : {};
+    const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
+    await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
+  }
+  async handleServerRequest(message) {
+    const appServer = this.requireAppServer();
+    await this.expireApprovals();
+    if (message.method !== "item/commandExecution/requestApproval" && message.method !== "item/fileChange/requestApproval") {
+      await appServer.respondError(message.id, -32601, "This Remote client does not support the server request.");
+      return;
+    }
+    const threadId = extractThreadId(message.params);
+    const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
+    const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
+    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
+      await appServer.respond(message.id, { decision: "decline" });
+      return;
+    }
+    const requestHandle = randomUUID2();
+    this.approvals.set(requestHandle, {
+      upstreamId: message.id,
+      connectionId: owner.connectionId,
+      threadId,
+      method: message.method,
+      expiresAt: Date.now() + APPROVAL_TTL_MS
+    });
+    this.scheduleApprovalExpiry();
+    try {
+      await peer.publishInbound(threadId, {
+        method: message.method,
+        params: sanitizeApprovalParams(message.params, requestHandle)
+      });
+    } catch (error) {
+      this.approvals.delete(requestHandle);
+      this.scheduleApprovalExpiry();
+      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
+      throw error;
+    }
+  }
+  async readKnownThread(threadId) {
+    const authority = await this.readWorkspaceAuthority();
+    let result;
+    try {
+      result = await this.callUpstream("thread/read", { threadId, includeTurns: false });
+    } catch (error) {
+      if (!isHistoryReadRecoverable(error)) throw error;
+      const listed = await this.findKnownThreadInList(threadId, authority);
+      if (listed === void 0) {
+        throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+      }
+      return { thread: listed, ...typeof listed.cwd === "string" && listed.cwd.length > 0 ? { cwd: listed.cwd } : {} };
+    }
+    const thread = extractThread(result);
+    if (thread === void 0 || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
+      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+    }
+    return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
+  }
+  async readThreadForHistory(connectionId, threadId) {
+    const { thread: metadata } = await this.readKnownThread(threadId);
+    try {
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
+    } catch (fullError) {
+      if (!isHistoryReadRecoverable(fullError)) throw fullError;
+      this.logHistoryFallback(connectionId, "turns-full", fullError);
+    }
+    try {
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
+    } catch (summaryError) {
+      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
+      this.logHistoryFallback(connectionId, "turns-summary", summaryError);
+    }
+    try {
+      const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
+      const legacyThread = extractThread(legacyResult);
+      if (legacyThread === void 0 || legacyThread.id !== threadId) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
+      }
+      return legacyThread;
+    } catch (legacyError) {
+      if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
+      this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
+      return { ...metadata, turns: [] };
+    }
+  }
+  async readThreadTurns(connectionId, threadId, itemsView) {
+    const turns = [];
+    let cursor2;
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream("thread/turns/list", {
+        threadId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: "asc",
+        itemsView,
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      });
+      const pageResult = isRecord11(result) ? result : {};
+      for (const rawTurn of array2(pageResult.data)) {
+        if (!isRecord11(rawTurn)) continue;
+        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
+        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array2(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array2(rawTurn.items));
+        turns.push({ ...rawTurn, items });
+      }
+      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
+      if (cursor2 === void 0) break;
+    }
+    return turns;
+  }
+  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
+    const items = [];
+    let cursor2;
+    try {
+      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+        const result = await this.callUpstream("thread/items/list", {
+          threadId,
+          turnId,
+          limit: CODEX_HISTORY_PAGE_LIMIT,
+          sortDirection: "asc",
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        });
+        const pageResult = isRecord11(result) ? result : {};
+        for (const entry of array2(pageResult.data)) {
+          if (isRecord11(entry) && entry.item !== void 0) items.push(entry.item);
+        }
+        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    } catch (error) {
+      if (!isHistoryReadRecoverable(error)) throw error;
+      this.logHistoryFallback(connectionId, "items", error);
+      return fallbackItems;
+    }
+    return items;
+  }
+  logHistoryFallback(connectionId, stage, error) {
+    this.logger.warn("Codex history read fallback", {
+      connectionId: maskId(connectionId),
+      stage,
+      code: errorCode2(error)
+    });
+  }
+  async assertResultThreadAllowed(result) {
+    const thread = extractThread(result);
+    if (thread === void 0 || typeof thread.id !== "string") {
+      throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
+    }
+    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
+      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+    }
+  }
+  claimTurn(threadId, connectionId, method, turnId) {
+    const owner = this.turnOwners.get(threadId);
+    const peerDeviceId = this.peerDeviceIds.get(connectionId) ?? connectionId;
+    const nextOwner = { connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } };
+    if (method === "turn/interrupt") {
+      if (owner === void 0) {
+        this.turnOwners.set(threadId, nextOwner);
+        return { claimed: true };
+      }
+      if (owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
+        throw new RpcError("CODEX_TURN_OWNED", "Only the connection that started this Codex turn can interrupt it.");
+      }
+      if (owner.connectionId !== connectionId) {
+        this.turnOwners.set(threadId, { ...owner, connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } });
+        return { claimed: true, previous: owner };
+      }
+      if (turnId !== void 0 && owner.turnId === void 0) this.turnOwners.set(threadId, { ...owner, turnId });
+      return { claimed: false };
+    }
+    if (owner !== void 0 && owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
+      throw new RpcError("CODEX_TURN_OWNED", "Another Remote connection owns the active Codex turn.");
+    }
+    if (owner?.connectionId === connectionId) return { claimed: false };
+    this.turnOwners.set(threadId, owner === void 0 ? nextOwner : { ...owner, connectionId, peerDeviceId });
+    return { claimed: true, previous: owner };
+  }
+  rememberTurnId(threadId, connectionId, turnId) {
+    if (turnId === void 0) return;
+    const owner = this.turnOwners.get(threadId);
+    if (owner === void 0 || owner.connectionId !== connectionId) return;
+    this.turnOwners.set(threadId, { ...owner, turnId });
+  }
+  hasSubscriber(threadId) {
+    return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
+  }
+  resolveUpstreamApproval(params) {
+    if (!isRecord11(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    for (const [handle, approval] of this.approvals) {
+      if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
+    }
+  }
+  async expireApprovals() {
+    const now = Date.now();
+    const appServer = this.appServer;
+    for (const [handle, approval] of this.approvals) {
+      if (approval.expiresAt > now) continue;
+      this.approvals.delete(handle);
+      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    this.scheduleApprovalExpiry();
+  }
+  scheduleApprovalExpiry() {
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    const nextExpiry = Math.min(...[...this.approvals.values()].map((approval) => approval.expiresAt));
+    if (!Number.isFinite(nextExpiry)) return;
+    this.approvalExpiryTimer = setTimeout(() => {
+      this.approvalExpiryTimer = void 0;
+      void this.expireApprovals().catch((error) => {
+        this.logger.warn("Codex approval expiry failed", { code: errorCode2(error) });
+      });
+    }, Math.max(0, nextExpiry - Date.now()));
+    this.approvalExpiryTimer.unref?.();
+  }
+  requireAppServer() {
+    if (!this.isAvailable() || this.appServer === void 0) {
+      throw new RpcError("CODEX_UNAVAILABLE", "Codex Remote is disabled or unavailable on this Host.");
+    }
+    return this.appServer;
+  }
+  async callUpstream(method, params) {
+    try {
+      return await this.requireAppServer().call(method, params);
+    } catch (error) {
+      throw mapAppServerError(error);
+    }
+  }
+  async readWorkspaceAuthority(listedThreads) {
+    const projectIds = /* @__PURE__ */ new Set();
+    const roots = [];
+    let cursor2;
+    try {
+      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+        const result = sanitizeProjectList(await this.callUpstream("project/list", {
+          limit: CODEX_PAGE_LIMIT2,
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        }));
+        for (const project of result.data) {
+          const projectRoots = project.roots.map((root) => root.path).filter((path) => isAbsolute2(path));
+          if (projectRoots.length === 0) continue;
+          projectIds.add(project.id);
+          roots.push(...projectRoots);
+        }
+        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    } catch (error) {
+      if (!isProjectListFallbackError(error)) throw error;
+    }
+    if (roots.length > 0) return { projectIds, roots };
+    const threads = listedThreads === void 0 ? [] : [...listedThreads];
+    if (listedThreads === void 0) {
+      cursor2 = void 0;
+      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+        const result = sanitizeThreadList(await this.callUpstream("thread/list", {
+          limit: CODEX_PAGE_LIMIT2,
+          sortKey: "updated_at",
+          sortDirection: "desc",
+          archived: false,
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        }));
+        threads.push(...result.data);
+        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    }
+    for (const workspace of deriveCodexCwdWorkspaces(threads)) {
+      if (isAbsolute2(workspace.path)) roots.push(workspace.path);
+    }
+    return { projectIds, roots };
+  }
+  async findKnownThreadInList(threadId, authority) {
+    let cursor2;
+    for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+      const result = sanitizeThreadList(await this.callUpstream("thread/list", {
+        limit: 100,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        archived: false,
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      }));
+      const thread = result.data.find((item) => item.id === threadId);
+      if (thread !== void 0) {
+        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : void 0;
+      }
+      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+      if (cursor2 === void 0) break;
+    }
+    return void 0;
+  }
+  async requireCodexWorkspacePath(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const paths = await this.listCodexWorkspacePaths();
+    const lexicalCandidate = resolve(path);
+    let candidate;
+    try {
+      candidate = await realpath(path);
+      if (!(await stat3(candidate)).isDirectory()) throw new Error("not a directory");
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    for (const root of paths.values()) {
+      try {
+        if (!containsCodexPath(resolve(root), lexicalCandidate)) continue;
+        const canonicalRoot = await realpath(root);
+        if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
+      } catch {
+      }
+    }
+    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+  }
+  async requireNewCodexProjectPath(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
+    }
+    try {
+      const canonical = await realpath(resolve(path));
+      if (!(await stat3(canonical)).isDirectory()) throw new Error("not a directory");
+      return canonical;
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
+    }
+  }
+  async listCodexDirectory(path) {
+    const target2 = await this.resolveCodexDirectory(path);
+    const rows = await readdir(target2.path, { withFileTypes: true }).catch(() => void 0);
+    if (rows === void 0) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const entries = [];
+    for (const row of rows) {
+      const child = resolve(target2.path, row.name);
+      let directory = row.isDirectory();
+      if (!directory && row.isSymbolicLink()) {
+        directory = await stat3(child).then((value) => value.isDirectory()).catch(() => false);
+      }
+      if (!directory) continue;
+      try {
+        const canonicalChild = await realpath(child);
+        if (!(await stat3(canonicalChild)).isDirectory()) continue;
+        if (!containsCodexPath(target2.canonicalRoot, canonicalChild)) continue;
+      } catch {
+        continue;
+      }
+      entries.push({
+        name: row.name,
+        path: child,
+        hidden: process.platform !== "win32" && row.name.startsWith(".")
+      });
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name, void 0, { sensitivity: "base" }));
+    return {
+      path: target2.path,
+      home: target2.root,
+      crumbs: codexDirectoryCrumbs(target2.root, target2.path),
+      entries: entries.slice(0, CODEX_DIRECTORY_ENTRY_LIMIT),
+      truncated: entries.length > CODEX_DIRECTORY_ENTRY_LIMIT
+    };
+  }
+  async resolveCodexDirectory(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const authority = await this.readWorkspaceAuthority();
+    const lexicalCandidate = resolve(path);
+    let canonicalCandidate;
+    try {
+      canonicalCandidate = await realpath(path);
+      if (!(await stat3(canonicalCandidate)).isDirectory()) throw new Error("not a directory");
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    for (const root of authority.roots) {
+      try {
+        const lexicalRoot = resolve(root);
+        if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
+        const canonicalRoot = await realpath(root);
+        if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
+          return { path: lexicalCandidate, root: lexicalRoot, canonicalRoot };
+        }
+      } catch {
+      }
+    }
+    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+  }
+  async listCodexWorkspacePaths() {
+    const paths = /* @__PURE__ */ new Map();
+    const authority = await this.readWorkspaceAuthority();
+    for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root);
+    return paths;
+  }
+};
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2()) {
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "win32") return [...bundledWindowsCodex(userHome), configured];
+  if (hostPlatform !== "darwin") return [configured];
+  const bundledCandidates = [
+    "/Applications/ChatGPT.app",
+    join5(userHome, "Applications", "ChatGPT.app")
+  ].flatMap((chatGptApp) => {
+    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
+    try {
+      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
+      if (!isRecord11(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+        return [];
+      }
+      const candidate = join5(codexCli, manifest.entrypoint);
+      if (!existsSync2(candidate)) return [];
+      accessSync(candidate, constants.X_OK);
+      return [candidate];
+    } catch {
+      return [];
+    }
+  });
+  return [.../* @__PURE__ */ new Set([
+    ...bundledCandidates,
+    "/Applications/ChatGPT.app/Contents/Resources/codex",
+    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    configured
+  ])];
+}
+function bundledWindowsCodex(userHome) {
+  const bin = join5(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
+  try {
+    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join5(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
+    const candidate = newest[0]?.candidate;
+    return candidate === void 0 ? [] : [candidate];
+  } catch {
+    return [];
+  }
+}
+function parseCallEnvelope(input2) {
+  if (!isRecord11(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
+  }
+  return { method: input2.method, params: input2.params };
+}
+function parseRespond(input2) {
+  if (!isRecord11(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
+  }
+  return input2;
+}
+function accountCanRun(result) {
+  if (!isRecord11(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord11(result.account);
+}
+function sanitizeAccount(result) {
+  if (!isRecord11(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord11(result.account) ? result.account : void 0;
+  return {
+    authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
+    requiresOpenaiAuth: result.requiresOpenaiAuth === true,
+    ...account === void 0 ? {} : {
+      account: {
+        ...typeof account.type === "string" ? { type: account.type } : {},
+        ...typeof account.planType === "string" ? { planType: account.planType } : {}
+      }
+    }
+  };
+}
+function sanitizeThreadList(result) {
+  if (!isRecord11(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
+  }
+  const data2 = result.data.flatMap((value) => {
+    if (!isRecord11(value) || typeof value.id !== "string") return [];
+    return [{
+      id: value.id,
+      ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
+      ...typeof value.projectId === "string" ? { projectId: value.projectId } : {},
+      ...typeof value.name === "string" ? { name: value.name } : {},
+      ...typeof value.preview === "string" ? { preview: value.preview } : {},
+      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
+      ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
+      ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
+      ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
+      ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
+      ...isRecord11(value.status) ? { status: value.status } : {}
+    }];
+  });
+  return {
+    data: data2,
+    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null },
+    ...typeof result.backwardsCursor === "string" && result.backwardsCursor.length > 0 ? { backwardsCursor: result.backwardsCursor } : {}
+  };
+}
+function filterThreadListByWorkspaceAuthority(result, authority) {
+  if (!isRecord11(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
+  }
+  return {
+    ...result,
+    data: result.data.map((record7) => isRecord11(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+  };
+}
+function sanitizeProject(value) {
+  if (!isRecord11(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
+    const path = isRecord11(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    return path === void 0 || !isAbsolute2(path) ? [] : [{ path }];
+  }) : [];
+  if (roots.length === 0) return void 0;
+  return {
+    id: value.id,
+    name: value.name,
+    roots,
+    ...typeof value.position === "number" && Number.isFinite(value.position) ? { position: value.position } : {},
+    ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
+    ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {}
+  };
+}
+function sanitizeProjectList(result) {
+  if (!isRecord11(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
+  }
+  const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
+  return {
+    data: data2,
+    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null }
+  };
+}
+function sanitizeProjectCreate(result) {
+  const project = isRecord11(result) ? sanitizeProject(result.project) : void 0;
+  if (project === void 0) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
+  }
+  return { project };
+}
+function isThreadAllowedByWorkspaceAuthority(thread, authority) {
+  const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
+  if (projectId !== void 0 && authority.projectIds.has(projectId)) return true;
+  const cwd = typeof thread.cwd === "string" ? thread.cwd : void 0;
+  return cwd !== void 0 && authority.roots.some((root) => containsCodexPath(root, cwd));
+}
+function containsCodexPath(root, candidate) {
+  const normalizedRoot = normalizeCodexPathForCompare(root);
+  const normalizedCandidate = normalizeCodexPathForCompare(candidate);
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
+}
+function normalizeCodexPathForCompare(path) {
+  return path.replace(/[\\/]+$/u, "") || path;
+}
+function codexDirectoryCrumbs(root, path) {
+  const crumbs2 = [{ name: basename2(root) || root, path: root, hidden: false }];
+  const remainder = relative(root, path);
+  if (remainder === "") return crumbs2;
+  let current = root;
+  for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
+    current = resolve(current, segment);
+    crumbs2.push({ name: segment, path: current, hidden: false });
+  }
+  return crumbs2;
+}
+function extractThread(result) {
+  return isRecord11(result) && isRecord11(result.thread) ? result.thread : void 0;
+}
+function extractTurnId(result) {
+  if (!isRecord11(result)) return void 0;
+  if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
+  if (isRecord11(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  return void 0;
+}
+function extractThreadId(params) {
+  if (!isRecord11(params)) return void 0;
+  if (typeof params.threadId === "string") return params.threadId;
+  if (isRecord11(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord11(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  return void 0;
+}
+function optionalInteger2(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
+}
+function codexPermission(params, fallbackPreset) {
+  const { permissionPreset: permissionPreset2, ...rest } = params;
+  const preset = permissionPreset2 === "workspace-write" || permissionPreset2 === "danger-full-access" ? permissionPreset2 : fallbackPreset;
+  if (preset === void 0) return { params: mapCodexImageInputs(rest) };
+  const fullAccess = preset === "danger-full-access";
+  return {
+    params: mapCodexImageInputs(rest),
+    approvalPolicy: fullAccess ? "never" : "on-request",
+    sandbox: fullAccess ? "danger-full-access" : "workspace-write"
+  };
+}
+function codexThreadPermissionParams(permission) {
+  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
+  return {
+    approvalPolicy: permission.approvalPolicy,
+    sandbox: permission.sandbox
+  };
+}
+function codexTurnPermissionParams(permission, cwd) {
+  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
+  return {
+    approvalPolicy: permission.approvalPolicy,
+    sandboxPolicy: permission.sandbox === "danger-full-access" ? { type: "dangerFullAccess" } : {
+      type: "workspaceWrite",
+      writableRoots: cwd === void 0 ? [] : [cwd],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false
+    }
+  };
+}
+function mapCodexImageInputs(params) {
+  if (!Array.isArray(params.input)) return params;
+  return {
+    ...params,
+    input: params.input.map((value) => {
+      if (!isRecord11(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
+    })
+  };
+}
+function sanitizeApprovalParams(params, requestHandle) {
+  if (!isRecord11(params)) return { requestHandle };
+  const safe = { ...params };
+  delete safe.proposedExecpolicyAmendment;
+  delete safe.additionalPermissions;
+  safe.availableDecisions = ["accept", "decline", "cancel"];
+  safe.requestHandle = requestHandle;
+  return safe;
+}
+function mapAppServerError(error) {
+  if (error instanceof RpcError) return error;
+  if (error instanceof CodexAppServerError) {
+    if (error.code === "CODEX_UPSTREAM_ERROR" && isActiveWriterMessage(error.message)) {
+      return new RpcError("CODEX_THREAD_BUSY", "The selected CodeX thread is already active in another CodeX client.");
+    }
+    return new RpcError(error.code, error.message, void 0, error.code === "CODEX_REQUEST_TIMEOUT");
+  }
+  return new RpcError("CODEX_UPSTREAM_ERROR", "Codex App Server could not complete the request.");
+}
+function errorCode2(error) {
+  if (error instanceof RpcError || error instanceof CodexAppServerError) return error.code;
+  return "CODEX_START_FAILED";
+}
+function isHistoryReadRecoverable(error) {
+  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR", "CODEX_REQUEST_TIMEOUT", "CODEX_THREAD_BUSY"].includes(error.code);
+}
+function isProjectListFallbackError(error) {
+  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
+}
+function canTryNextBinary(error) {
+  return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
+}
+function isRecord11(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function array2(value) {
+  return Array.isArray(value) ? value : [];
+}
+function maskId(value) {
+  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
+}
+function isActiveWriterMessage(message) {
+  return message.toLowerCase().includes("active writer");
+}
+
 // src/control-runtime.ts
 var PluginControlRuntime = class {
   constructor(config, identityDirectory, settings, client, host, deepseekSession = void 0) {
@@ -21901,10 +23618,20 @@ var PluginControlRuntime = class {
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Codex Remote enabled must be a boolean.");
     }
+    const binary = record5(payload).binary;
+    if (binary !== void 0 && typeof binary !== "string") {
+      throw new ClientModeError("INVALID_MESSAGE", "Codex binary must be a string.");
+    }
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
-      codex: { ...current.codex, enabled }
+      codex: {
+        ...current.codex,
+        enabled,
+        // An emptied field means "find it yourself" again, which is also what
+        // survives a desktop-app update that moves the binary.
+        ...binary === void 0 ? {} : { binary: binary.trim() === "" ? "codex" : binary.trim() }
+      }
     });
     await this.settings.replace(editableConfig(next));
     return this.settingsView();
@@ -22011,6 +23738,7 @@ var PluginControlRuntime = class {
     const associations = await this.associations(config);
     const role = config.role === "client" ? "client" : "host";
     const association = associations[role];
+    const discovered = discoveredCodexBinary(config.codex?.binary ?? "codex");
     return {
       config,
       deviceName: hostname2(),
@@ -22018,7 +23746,8 @@ var PluginControlRuntime = class {
       applies: "restart",
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map((item) => [item.id, commandAvailable(item.command ?? "")])),
-      ...association === void 0 ? {} : { association }
+      ...association === void 0 ? {} : { association },
+      ...discovered === void 0 ? {} : { discoveredCodexBinary: discovered }
     };
   }
   async associations(config) {
@@ -22062,6 +23791,12 @@ function commandAvailable(command) {
     return false;
   }
 }
+function discoveredCodexBinary(configured) {
+  for (const candidate of codexBinaryCandidates(configured)) {
+    if (candidate !== configured && existsSync3(candidate)) return candidate;
+  }
+  return void 0;
+}
 function editableConfig(config) {
   return {
     enabled: config.enabled,
@@ -22084,11 +23819,11 @@ function editableConfig(config) {
     ...config.acp === void 0 ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }
   };
 }
-function isRecord9(value) {
+function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record5(value) {
-  if (!isRecord9(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord12(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -22159,7 +23894,7 @@ var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/close"
 ]);
 var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
-var id2 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var id3 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
 var TerminalPolicy = class {
   constructor(enabled, deviceId, owners) {
     this.enabled = enabled;
@@ -22174,12 +23909,12 @@ var TerminalPolicy = class {
     );
     const args = external_exports.object({ args: external_exports.record(external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
-    const sessionId = id2.parse(rawSessionId);
+    const sessionId = id3.parse(rawSessionId);
     const codexSession = parseCodexSessionId(sessionId);
     void codexSession;
     if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request = endpoint === "terminal/create" ? external_exports.object({ id: id2 }).passthrough().parse(args.request) : void 0;
-    const terminalId = id2.parse(request?.id ?? args.id);
+    const request = endpoint === "terminal/create" ? external_exports.object({ id: id3 }).passthrough().parse(args.request) : void 0;
+    const terminalId = id3.parse(request?.id ?? args.id);
     const key = `${sessionId}/${terminalId}`;
     if (endpoint === "terminal/create") {
       if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
@@ -22189,9 +23924,9 @@ var TerminalPolicy = class {
       return { key, created };
     }
     if (this.owners.get(key) !== this.deviceId) this.deny();
-    if (endpoint === "terminal/follow") this.attachments.set(key, id2.parse(args.attachmentId));
+    if (endpoint === "terminal/follow") this.attachments.set(key, id3.parse(args.attachmentId));
     if (endpoint === "terminal/write" || endpoint === "terminal/resize") {
-      if (this.attachments.get(key) !== id2.parse(args.attachmentId)) this.deny();
+      if (this.attachments.get(key) !== id3.parse(args.attachmentId)) this.deny();
     }
     return { key };
   }
@@ -22838,7 +24573,7 @@ var HostServerConnection = class {
         await this.connectOnce();
         delayMs = this.config.reconnect.initialDelayMs;
       } catch (error) {
-        const code = errorCode2(error);
+        const code = errorCode3(error);
         if (code === "CREDENTIALS_REFRESHED") continue;
         this.terminalError = code;
         this.logger.warn("server control connection failed", {
@@ -22853,7 +24588,7 @@ var HostServerConnection = class {
           try {
             await this.api.clearAuthorization();
           } catch (clearError) {
-            this.logger.error("failed to clear revoked Host authorization", { code: errorCode2(clearError) });
+            this.logger.error("failed to clear revoked Host authorization", { code: errorCode3(clearError) });
           }
         }
         if (TERMINAL_AUTH_ERRORS.has(code) || !this.config.reconnect.enabled) return;
@@ -22933,7 +24668,7 @@ var HostServerConnection = class {
           if (!acknowledged) throw new ControlConnectionError("INVALID_MESSAGE", "Server sent a frame before hello.ack.");
           await this.handleFrame(frame);
         }).catch((error) => {
-          const code = errorCode2(error);
+          const code = errorCode3(error);
           this.terminalError = code;
           this.logger.error("server control frame failed", {
             code,
@@ -23045,7 +24780,7 @@ var HostServerConnection = class {
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by account authorization", {
         clientDeviceId: shortId3(payload.clientDeviceId),
-        code: errorCode2(error)
+        code: errorCode3(error)
       });
       return;
     }
@@ -23194,7 +24929,7 @@ var HostServerConnection = class {
     } catch (error) {
       this.logger.warn("TURN credentials unavailable; trying direct candidates", {
         connectionId: shortId3(tunnel.connectionId),
-        code: errorCode2(error)
+        code: errorCode3(error)
       });
     }
     if (!tunnel.preferredTransports.includes("turn")) iceServers = stunOnlyIceServers(iceServers);
@@ -23631,11 +25366,11 @@ function rtcDiagnostics(rtc) {
     return void 0;
   }
 }
-function errorCode2(error) {
+function errorCode3(error) {
   return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : "CONNECTION_FAILED";
 }
 function isRetryable(error) {
-  return !TERMINAL_AUTH_ERRORS.has(errorCode2(error)) && (!(error instanceof ServerApiError) || error.retryable);
+  return !TERMINAL_AUTH_ERRORS.has(errorCode3(error)) && (!(error instanceof ServerApiError) || error.retryable);
 }
 function closeCode(code) {
   if (code === 4002) return "AUTH_INVALID";
@@ -23647,22 +25382,22 @@ function closeCode(code) {
 }
 
 // src/remote-directory-browser.ts
-import { readdir, stat as stat3 } from "node:fs/promises";
-import { homedir as homedir2, platform as platform2 } from "node:os";
-import { basename as basename2, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
+import { readdir as readdir2, stat as stat4 } from "node:fs/promises";
+import { homedir as homedir3, platform as platform2 } from "node:os";
+import { basename as basename3, dirname as dirname5, isAbsolute as isAbsolute3, parse, resolve as resolve2 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve(homedir2());
-  const target2 = path === void 0 || path.trim() === "" ? home : resolve(path);
-  if (!isAbsolute2(target2)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir(target2, { withFileTypes: true });
+  const home = resolve2(homedir3());
+  const target2 = path === void 0 || path.trim() === "" ? home : resolve2(path);
+  if (!isAbsolute3(target2)) throw new Error("The remote directory path must be absolute.");
+  const rows = await readdir2(target2, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve(target2, row.name);
+    const child = resolve2(target2, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat3(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat4(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -23681,11 +25416,11 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root) {
-    segments.unshift(basename2(current));
+    segments.unshift(basename3(current));
     current = dirname5(current);
   }
   for (const segment of segments) {
-    current = resolve(current, segment);
+    current = resolve2(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -23756,7 +25491,7 @@ var respondSchema = external_exports.object({
     result: external_exports.unknown()
   }).strict()
 }).strict();
-var streamOpenSchema = external_exports.object({
+var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   stream: external_exports.enum(["mux", "host"]),
   rpcId: external_exports.string().min(1).max(128),
@@ -23768,21 +25503,21 @@ var streamOpenSchema = external_exports.object({
     sessionId: external_exports.string().min(1).max(128).optional()
   }).strict()
 }).strict();
-var streamCloseSchema = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferIdSchema = external_exports.string().min(1).max(128);
-var transferOpenSchema = external_exports.object({
-  transferId: transferIdSchema,
+var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferIdSchema2 = external_exports.string().min(1).max(128);
+var transferOpenSchema2 = external_exports.object({
+  transferId: transferIdSchema2,
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive().max(Math.ceil(MAX_HARNESS_API_TRANSFER_BYTES / HARNESS_API_TRANSFER_CHUNK_BYTES))
 }).strict();
-var transferChunkSchema = external_exports.object({
-  transferId: transferIdSchema,
+var transferChunkSchema2 = external_exports.object({
+  transferId: transferIdSchema2,
   index: external_exports.number().int().nonnegative(),
   data: external_exports.string().max(Math.ceil(HARNESS_API_TRANSFER_CHUNK_BYTES / 3) * 4)
 }).strict();
-var transferCommitSchema = external_exports.object({ transferId: transferIdSchema }).strict();
-var transferReadSchema = external_exports.object({ transferId: transferIdSchema, index: external_exports.number().int().nonnegative() }).strict();
-var transferCloseSchema = external_exports.object({ transferId: transferIdSchema }).strict();
+var transferCommitSchema = external_exports.object({ transferId: transferIdSchema2 }).strict();
+var transferReadSchema2 = external_exports.object({ transferId: transferIdSchema2, index: external_exports.number().int().nonnegative() }).strict();
+var transferCloseSchema = external_exports.object({ transferId: transferIdSchema2 }).strict();
 var commandExecuteSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
@@ -23913,7 +25648,7 @@ var HARNESS_API_ALLOWLIST = [
 var NATIVE_CALL_TIMEOUT_MS = 3e4;
 var MAX_ACTIVE_API_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var API_TRANSFER_IDLE_MS = TRANSFER_IDLE_MS;
-var INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024;
+var INLINE_TRANSFER_RESPONSE_BYTES2 = 2 * 1024 * 1024;
 var HarnessApiBridge = class {
   constructor(api, publish, maxStreams = 8, logger, typertGateway, harnessVersion) {
     this.api = api;
@@ -24005,7 +25740,7 @@ var HarnessApiBridge = class {
   }
   openTransfer(input2) {
     this.pruneTransfers();
-    const params = transferOpenSchema.parse(input2);
+    const params = transferOpenSchema2.parse(input2);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk count is invalid.");
     }
@@ -24026,7 +25761,7 @@ var HarnessApiBridge = class {
   }
   appendTransfer(input2) {
     this.pruneTransfers();
-    const params = transferChunkSchema.parse(input2);
+    const params = transferChunkSchema2.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -24035,7 +25770,7 @@ var HarnessApiBridge = class {
     }
     let chunk;
     try {
-      chunk = decodeCanonicalBase64(params.data);
+      chunk = decodeCanonicalBase642(params.data);
     } catch (error) {
       this.incomingTransfers.delete(params.transferId);
       throw error;
@@ -24064,7 +25799,7 @@ var HarnessApiBridge = class {
     }
     let request;
     try {
-      const bytes = concatChunks(transfer.chunks, transfer.totalBytes);
+      const bytes = concatChunks2(transfer.chunks, transfer.totalBytes);
       request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer does not contain a valid request.");
@@ -24072,7 +25807,7 @@ var HarnessApiBridge = class {
     const nativeRequest = callSchema2.parse(request);
     const response = await this.call(nativeRequest);
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) {
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) {
       return { kind: "inline", response };
     }
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -24093,7 +25828,7 @@ var HarnessApiBridge = class {
   }
   readTransfer(input2) {
     this.pruneTransfers();
-    const params = transferReadSchema.parse(input2);
+    const params = transferReadSchema2.parse(input2);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -24127,7 +25862,7 @@ var HarnessApiBridge = class {
     return receipt;
   }
   openStream(input2) {
-    const params = streamOpenSchema.parse(input2);
+    const params = streamOpenSchema2.parse(input2);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness event stream is already open.");
     if (this.streams.size >= this.maxStreams) throw new RpcError("RATE_LIMITED", "Too many Harness event streams are open.", void 0, true);
     const controller = new AbortController();
@@ -24144,7 +25879,7 @@ var HarnessApiBridge = class {
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input2) {
-    const params = streamCloseSchema.parse(input2);
+    const params = streamCloseSchema2.parse(input2);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -24492,14 +26227,14 @@ function withTimeout(promise, ms, message) {
 function shortId4(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
-function decodeCanonicalBase64(value) {
+function decodeCanonicalBase642(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk is not canonical base64.");
   }
   return bytes;
 }
-function concatChunks(chunks, totalBytes) {
+function concatChunks2(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -24512,12 +26247,12 @@ function concatChunks(chunks, totalBytes) {
 // src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
-var streamOpenSchema2 = external_exports.object({
+var streamOpenSchema3 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
   payload: external_exports.unknown()
 }).strict();
-var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var commandExecuteArgsSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
@@ -24536,27 +26271,27 @@ var commandExecuteArgsSchema = external_exports.object({
   }
 });
 var commandExecutePayloadSchema = external_exports.object({ args: commandExecuteArgsSchema }).strict();
-var transferOpenSchema2 = external_exports.object({
+var transferOpenSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema2 = external_exports.object({
+var transferChunkSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative(),
   data: external_exports.string().min(1)
 }).strict();
-var transferIdSchema2 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema2 = external_exports.object({
+var transferIdSchema3 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative()
 }).strict();
 var directoryListSchema2 = external_exports.object({
   path: external_exports.string().min(1).max(4096).optional()
 }).strict();
-var MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION;
-var MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var INLINE_TRANSFER_RESPONSE_BYTES2 = 2 * 1024 * 1024;
+var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
+var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
+var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -24708,14 +26443,14 @@ var HarnessRemoteBridge = class {
   }
   openTransfer(input2) {
     this.pruneTransfers();
-    const params = transferOpenSchema2.parse(input2);
+    const params = transferOpenSchema3.parse(input2);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk count is invalid.");
     }
     if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
       throw new RpcError("REQUEST_CONFLICT", "The Harness Remote transfer id is already active.");
     }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote transfers are active.", void 0, true);
     }
     this.incomingTransfers.set(params.transferId, {
@@ -24729,14 +26464,14 @@ var HarnessRemoteBridge = class {
   }
   appendTransfer(input2) {
     this.pruneTransfers();
-    const params = transferChunkSchema2.parse(input2);
+    const params = transferChunkSchema3.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
       this.incomingTransfers.delete(params.transferId);
       throw new RpcError("INVALID_MESSAGE", "Harness Remote transfer chunks must arrive exactly once and in order.");
     }
-    const chunk = decodeCanonicalBase642(params.data);
+    const chunk = decodeCanonicalBase643(params.data);
     const expectedBytes = Math.min(
       HARNESS_API_TRANSFER_CHUNK_BYTES,
       transfer.totalBytes - params.index * HARNESS_API_TRANSFER_CHUNK_BYTES
@@ -24752,7 +26487,7 @@ var HarnessRemoteBridge = class {
   }
   async commitTransfer(input2) {
     this.pruneTransfers();
-    const params = transferIdSchema2.parse(input2);
+    const params = transferIdSchema3.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -24761,17 +26496,17 @@ var HarnessRemoteBridge = class {
     }
     let request;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks2(transfer.chunks, transfer.totalBytes)));
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
     const response = await this.call(callSchema3.parse(request));
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) return { kind: "inline", response };
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Harness Remote response exceeds the bounded transfer limit.");
     }
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote response transfers are active.", void 0, true);
     }
     const totalChunks = Math.ceil(responseBytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
@@ -24785,7 +26520,7 @@ var HarnessRemoteBridge = class {
   }
   readTransfer(input2) {
     this.pruneTransfers();
-    const params = transferReadSchema2.parse(input2);
+    const params = transferReadSchema3.parse(input2);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -24803,18 +26538,18 @@ var HarnessRemoteBridge = class {
     };
   }
   closeTransfer(input2) {
-    const params = transferIdSchema2.parse(input2);
+    const params = transferIdSchema3.parse(input2);
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
   async openStream(input2) {
-    const params = streamOpenSchema2.parse(input2);
+    const params = streamOpenSchema3.parse(input2);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness Remote stream is already open.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS) {
+    if (this.streams.size >= MAX_ACTIVE_STREAMS2) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote streams are open.", void 0, true);
     }
     const controller = new AbortController();
@@ -24832,7 +26567,7 @@ var HarnessRemoteBridge = class {
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input2) {
-    const params = streamCloseSchema2.parse(input2);
+    const params = streamCloseSchema3.parse(input2);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -24889,11 +26624,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord10(payload) || !isRecord10(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord13(payload) || !isRecord13(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord10(payload) || !isRecord10(payload.args)) return payload;
+  if (!isRecord13(payload) || !isRecord13(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -24939,12 +26674,12 @@ async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) 
     signal
   );
 }
-function decodeCanonicalBase642(value) {
+function decodeCanonicalBase643(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
 }
-function concatChunks2(chunks, totalBytes) {
+function concatChunks3(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -24961,1730 +26696,14 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record6(payload);
-  const args = isRecord10(root.args) ? root.args : root;
+  const args = isRecord13(root.args) ? root.args : root;
   return record6(args.request ?? args._request ?? args);
 }
 function record6(value) {
-  return isRecord10(value) ? value : {};
-}
-function isRecord10(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/codex/domain.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
-import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
-
-// src/codex/app-server.ts
-import { spawn as spawn2 } from "node:child_process";
-import { Buffer as Buffer2 } from "node:buffer";
-var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
-var APP_SERVER_START_TIMEOUT_MS = 15e3;
-var MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024;
-var MAX_STDERR_CAPTURE_BYTES = 4 * 1024;
-var CodexAppServerError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "CodexAppServerError";
-  }
-};
-var CodexAppServerClient = class {
-  constructor(binary, logger, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true
-  })) {
-    this.binary = binary;
-    this.logger = logger;
-    this.spawnAppServer = spawnAppServer;
-  }
-  process;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  inboundHandlers = /* @__PURE__ */ new Set();
-  unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer2.alloc(0);
-  stderrBytes = 0;
-  ready = false;
-  closed = false;
-  failureNotified = false;
-  startPromise;
-  start() {
-    if (this.closed) return Promise.reject(new CodexAppServerError("CODEX_CLOSED", "The Codex domain is closed."));
-    if (this.ready) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  isReady() {
-    return this.ready;
-  }
-  async call(method, params, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS) {
-    if (!this.ready) throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not ready.");
-    return this.request(method, params, timeoutMs);
-  }
-  async respond(id4, result) {
-    this.write({ id: id4, result });
-  }
-  async respondError(id4, code, message) {
-    this.write({ id: id4, error: { code, message } });
-  }
-  onInbound(handler) {
-    this.inboundHandlers.add(handler);
-    return () => this.inboundHandlers.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailableHandlers.add(handler);
-    return () => this.unavailableHandlers.delete(handler);
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
-    this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve4) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve4();
-      }, 2e3);
-      timer.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve4();
-      });
-      child.kill("SIGTERM");
-    });
-  }
-  async startOnce() {
-    if (this.process !== void 0) {
-      throw new CodexAppServerError("CODEX_STARTING", "Codex App Server is already starting.");
-    }
-    const child = this.spawnAppServer(this.binary);
-    this.process = child;
-    this.failureNotified = false;
-    this.stdoutBuffer = Buffer2.alloc(0);
-    this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer2.from(chunk)));
-    child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer2.byteLength(chunk));
-    });
-    child.on("error", (error) => this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error));
-    child.on("exit", (code, signal) => {
-      if (this.process !== child) return;
-      this.process = void 0;
-      this.ready = false;
-      this.failPending(new CodexAppServerError("CODEX_APP_SERVER_EXITED", "Codex App Server exited unexpectedly."));
-      if (!this.closed) {
-        this.logger?.warn("Codex App Server exited", {
-          code: code ?? "none",
-          signal: signal ?? "none",
-          stderrBytes: this.stderrBytes
-        });
-        this.notifyUnavailable("CODEX_APP_SERVER_EXITED");
-      }
-    });
-    try {
-      await this.request("initialize", {
-        clientInfo: {
-          name: "deepseek_harness_remote",
-          title: "DeepSeek Harness Remote",
-          version: PLUGIN_VERSION
-        },
-        capabilities: {
-          experimentalApi: true,
-          mcpServerOpenaiFormElicitation: false
-        }
-      }, APP_SERVER_START_TIMEOUT_MS);
-      this.write({ method: "initialized", params: {} });
-      this.ready = true;
-      this.logger?.info("Codex App Server ready");
-    } catch (error) {
-      child.kill("SIGTERM");
-      if (error instanceof CodexAppServerError) throw error;
-      throw new CodexAppServerError("CODEX_INITIALIZE_FAILED", "Codex App Server initialization failed.", { cause: error });
-    }
-  }
-  request(method, params, timeoutMs) {
-    const id4 = this.nextId++;
-    const result = new Promise((resolve4, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id4);
-        reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
-      }, timeoutMs);
-      timer.unref?.();
-      this.pending.set(id4, { resolve: resolve4, reject, timer });
-    });
-    try {
-      this.write({ id: id4, method, params });
-    } catch (error) {
-      const pending = this.takePending(id4);
-      pending?.reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
-    }
-    return result;
-  }
-  write(message) {
-    const child = this.process;
-    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not available.");
-    }
-    child.stdin.write(`${JSON.stringify(message)}
-`);
-  }
-  consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer2.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
-      this.handleProcessFailure(
-        "CODEX_RESPONSE_TOO_LARGE",
-        new Error("Codex App Server emitted an oversized JSONL message.")
-      );
-      return;
-    }
-    let newline = this.stdoutBuffer.indexOf(10);
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline);
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
-      if (line.length > 0) this.handleLine(line);
-      newline = this.stdoutBuffer.indexOf(10);
-    }
-  }
-  handleLine(line) {
-    let value;
-    try {
-      value = JSON.parse(line.toString("utf8"));
-    } catch {
-      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
-      return;
-    }
-    if (!isRecord11(value)) {
-      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
-      return;
-    }
-    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
-      const pending = this.takePending(value.id);
-      if (pending === void 0) return;
-      if ("error" in value && value.error !== void 0) {
-        pending.reject(new CodexAppServerError("CODEX_UPSTREAM_ERROR", safeUpstreamError(value.error)));
-      } else {
-        pending.resolve(value.result);
-      }
-      return;
-    }
-    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
-    const params = value.params ?? {};
-    const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    for (const handler of this.inboundHandlers) handler(inbound);
-  }
-  handleProcessFailure(code, cause) {
-    this.ready = false;
-    this.failPending(new CodexAppServerError(code, "Codex App Server communication failed.", { cause }));
-    const child = this.process;
-    this.process = void 0;
-    child?.kill("SIGTERM");
-    this.logger?.warn("Codex App Server communication failed", { code });
-    if (!this.closed) this.notifyUnavailable(code);
-  }
-  notifyUnavailable(code) {
-    if (this.failureNotified) return;
-    this.failureNotified = true;
-    for (const handler of this.unavailableHandlers) handler(code);
-  }
-  takePending(id4) {
-    const pending = this.pending.get(id4);
-    if (pending === void 0) return void 0;
-    this.pending.delete(id4);
-    clearTimeout(pending.timer);
-    return pending;
-  }
-  failPending(error) {
-    for (const id4 of [...this.pending.keys()]) this.takePending(id4)?.reject(error);
-  }
-};
-function safeUpstreamError(value) {
-  if (!isRecord11(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
-  const message = value.message.toLowerCase();
-  if (message.includes("active writer")) return "Codex thread already has an active writer.";
-  return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
-}
-function isRecord11(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/codex/method-policy.ts
-var id3 = external_exports.string().min(1).max(256);
-var cursor = external_exports.string().min(1).max(4096).nullable().optional();
-var textInput = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
-  message: "Image data must use canonical base64."
-});
-var imageInput = external_exports.object({
-  type: external_exports.literal("image"),
-  mediaType: imageMediaType,
-  data: canonicalBase64
-}).strict();
-var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
-var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
-var projectRoot = external_exports.object({
-  path: external_exports.string().min(1).max(4096)
-}).strict();
-var schemas = {
-  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
-  "model/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    includeHidden: external_exports.boolean().optional()
-  }).strict(),
-  "project/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional()
-  }).strict(),
-  "project/create": external_exports.object({
-    name: external_exports.string().trim().min(1).max(256),
-    roots: external_exports.array(projectRoot).length(1),
-    idempotencyKey: external_exports.string().min(16).max(256)
-  }).strict(),
-  "thread/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
-    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
-    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
-    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
-    archived: external_exports.boolean().optional(),
-    isPinned: external_exports.boolean().optional(),
-    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
-    useStateDbOnly: external_exports.boolean().optional(),
-    searchTerm: external_exports.string().max(1024).optional()
-  }).strict(),
-  "thread/read": external_exports.object({ threadId: id3, includeTurns: external_exports.boolean().optional() }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    threadId: id3,
-    beforeSeq: external_exports.number().int().nonnegative().optional(),
-    throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(200).optional()
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "thread/start": external_exports.object({
-    cwd: external_exports.string().min(1).max(4096),
-    model: external_exports.string().min(1).max(128).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/resume": external_exports.object({
-    threadId: id3,
-    model: external_exports.string().min(1).max(128).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/fork": external_exports.object({
-    threadId: id3,
-    lastTurnId: id3.optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/name/set": external_exports.object({ threadId: id3, name: external_exports.string().trim().min(1).max(256) }).strict(),
-  "thread/archive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unarchive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unsubscribe": external_exports.object({ threadId: id3 }).strict(),
-  "turn/start": external_exports.object({
-    threadId: id3,
-    input,
-    model: external_exports.string().min(1).max(128).optional(),
-    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
-    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "turn/steer": external_exports.object({ threadId: id3, input, expectedTurnId: id3 }).strict(),
-  "turn/interrupt": external_exports.object({ threadId: id3, turnId: id3 }).strict()
-};
-var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
-function parseCodexCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
-  }
-  const schema = schemas[method];
-  const parsed = schema.safeParse(params);
-  if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
-  return { method, params: parsed.data };
-}
-function isThreadMutation(method) {
-  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
-}
-function threadIdFromParams(params) {
-  return typeof params.threadId === "string" ? params.threadId : void 0;
-}
-
-// src/codex/peer-bridge.ts
-import { Buffer as Buffer3 } from "node:buffer";
-var streamOpenSchema3 = external_exports.object({
-  streamId: external_exports.string().min(1).max(128),
-  threadId: external_exports.string().min(1).max(256)
-}).strict();
-var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferOpenSchema3 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  totalBytes: external_exports.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
-  totalChunks: external_exports.number().int().positive()
-}).strict();
-var transferChunkSchema3 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  index: external_exports.number().int().nonnegative(),
-  data: external_exports.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
-}).strict();
-var transferIdSchema3 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema3 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
-var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
-var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
-var CodexPeerBridge = class {
-  constructor(domain, context, publish, logger) {
-    this.domain = domain;
-    this.context = context;
-    this.publish = publish;
-    this.logger = logger;
-  }
-  streams = /* @__PURE__ */ new Map();
-  incomingTransfers = /* @__PURE__ */ new Map();
-  outgoingTransfers = /* @__PURE__ */ new Map();
-  closed = false;
-  async call(input2) {
-    return this.callDomain(input2, true);
-  }
-  async callDomain(input2, logFailure) {
-    this.requireOpen();
-    try {
-      return await this.domain.call(this.context.connectionId, input2);
-    } catch (error) {
-      if (logFailure) {
-        this.logger?.warn("Codex call failed", {
-          method: safeMethod(input2),
-          code: safeErrorCode2(error)
-        });
-      }
-      throw error;
-    }
-  }
-  respond(input2) {
-    this.requireOpen();
-    return this.domain.respond(this.context.connectionId, input2);
-  }
-  async openStream(input2) {
-    this.requireOpen();
-    const params = streamOpenSchema3.parse(input2);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
-    }
-    await this.domain.call(this.context.connectionId, {
-      method: "thread/read",
-      params: { threadId: params.threadId, includeTurns: false }
-    });
-    this.streams.set(params.streamId, params.threadId);
-    return { opened: true, streamId: params.streamId, threadId: params.threadId };
-  }
-  closeStream(input2) {
-    const params = streamCloseSchema3.parse(input2);
-    this.streams.delete(params.streamId);
-    return { closed: true, streamId: params.streamId };
-  }
-  openTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferOpenSchema3.parse(input2);
-    if (params.totalChunks !== Math.ceil(params.totalBytes / CODEX_APP_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk count is invalid.");
-    }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError("REQUEST_CONFLICT", "The Codex transfer id is already active.");
-    }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex transfers are active.", void 0, true);
-    }
-    this.incomingTransfers.set(params.transferId, {
-      totalBytes: params.totalBytes,
-      totalChunks: params.totalChunks,
-      chunks: [],
-      receivedBytes: 0,
-      touchedAt: Date.now()
-    });
-    return { opened: true, transferId: params.transferId };
-  }
-  appendTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferChunkSchema3.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
-    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Codex transfer chunks must arrive exactly once and in order.");
-    }
-    const chunk = decodeCanonicalBase643(params.data);
-    const expectedBytes = Math.min(
-      CODEX_APP_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * CODEX_APP_TRANSFER_CHUNK_BYTES
-    );
-    if (chunk.byteLength !== expectedBytes) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk size is invalid.");
-    }
-    transfer.chunks.push(chunk);
-    transfer.receivedBytes += chunk.byteLength;
-    transfer.touchedAt = Date.now();
-    return { accepted: true, transferId: params.transferId, index: params.index };
-  }
-  async commitTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferIdSchema3.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
-    this.incomingTransfers.delete(params.transferId);
-    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer is incomplete.");
-    }
-    let request;
-    try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
-    } catch {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer does not contain a valid request.");
-    }
-    let response;
-    try {
-      response = await this.callDomain(request, false);
-    } catch (error) {
-      this.logger?.warn("Codex transfer call failed", {
-        method: safeMethod(request),
-        code: safeErrorCode2(error)
-      });
-      throw error;
-    }
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
-      throw new RpcError("RESPONSE_TOO_LARGE", "The Codex response exceeds the bounded transfer limit.");
-    }
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex response transfers are active.", void 0, true);
-    }
-    const totalChunks = Math.ceil(responseBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
-    this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
-      totalChunks,
-      nextIndex: 0,
-      touchedAt: Date.now()
-    });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
-  }
-  readTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferReadSchema3.parse(input2);
-    const transfer = this.outgoingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex response transfer is not active.");
-    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
-      this.outgoingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Codex response chunks must be read exactly once and in order.");
-    }
-    const start = params.index * CODEX_APP_TRANSFER_CHUNK_BYTES;
-    const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
-    transfer.nextIndex += 1;
-    transfer.touchedAt = Date.now();
-    return {
-      transferId: params.transferId,
-      index: params.index,
-      data: Buffer3.from(transfer.bytes.subarray(start, end)).toString("base64")
-    };
-  }
-  closeTransfer(input2) {
-    const params = transferIdSchema3.parse(input2);
-    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
-    return { closed, transferId: params.transferId };
-  }
-  hasThreadSubscription(threadId) {
-    return [...this.streams.values()].includes(threadId);
-  }
-  removeThreadSubscriptions(threadId) {
-    for (const [streamId, targetThreadId] of this.streams) {
-      if (targetThreadId === threadId) this.streams.delete(streamId);
-    }
-  }
-  async publishInbound(threadId, frame) {
-    if (this.closed) return;
-    const streamIds = [...this.streams.entries()].filter(([, targetThreadId]) => targetThreadId === threadId).map(([streamId]) => streamId);
-    for (const streamId of streamIds) {
-      const data2 = { streamId, frame };
-      if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
-        this.streams.delete(streamId);
-        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
-        this.logger?.warn("Codex stream closed after oversized frame", { streamId });
-        continue;
-      }
-      await this.publish("codex.app.frame", data2);
-    }
-  }
-  async failStreams(reason = "failed") {
-    if (this.closed) return;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
-      streamId,
-      reason
-    }).catch(() => void 0)));
-  }
-  async closeAll() {
-    if (this.closed) return;
-    this.closed = true;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
-      streamId,
-      reason: "peer-disconnected"
-    }).catch(() => void 0)));
-    await this.domain.detachPeer(this.context.connectionId);
-  }
-  pruneTransfers() {
-    const staleBefore = Date.now() - TRANSFER_IDLE_MS;
-    for (const [id4, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id4);
-    }
-    for (const [id4, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id4);
-    }
-  }
-  requireOpen() {
-    if (this.closed) throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
-  }
-};
-function decodeCanonicalBase643(value) {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
-  }
-  const decoded = Buffer3.from(value, "base64");
-  if (decoded.toString("base64") !== value) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
-  }
-  return decoded;
-}
-function isRecord12(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function safeErrorCode2(error) {
-  if (isRecord12(error) && typeof error.code === "string") return error.code;
-  return "UNKNOWN";
-}
-function safeMethod(input2) {
-  return isRecord12(input2) && typeof input2.method === "string" ? input2.method : "invalid";
-}
-function concatChunks3(chunks, totalBytes) {
-  const output = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output;
-}
-
-// src/codex/domain.ts
-var APPROVAL_TTL_MS = 5 * 6e4;
-var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
-var CODEX_PAGE_LIMIT2 = 100;
-var MAX_CODEX_PAGES2 = 32;
-var CODEX_HISTORY_PAGE_LIMIT = 25;
-var MAX_CODEX_HISTORY_PAGES = 64;
-var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
-var CodexRemoteDomain = class {
-  constructor(config, logger, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
-    this.config = config;
-    this.logger = logger;
-    this.createAppServer = createAppServer;
-    this.restartDelaysMs = restartDelaysMs;
-  }
-  appServer;
-  unsubscribeInbound;
-  unsubscribeUnavailable;
-  peers = /* @__PURE__ */ new Map();
-  peerDeviceIds = /* @__PURE__ */ new Map();
-  turnOwners = /* @__PURE__ */ new Map();
-  approvals = /* @__PURE__ */ new Map();
-  permissionPresets = /* @__PURE__ */ new Map();
-  approvalExpiryTimer;
-  restartTimer;
-  restartAttempt = 0;
-  available = false;
-  closed = false;
-  state = "disabled";
-  unavailableCode;
-  async start() {
-    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
-    if (!this.config.enabled) return;
-    try {
-      this.state = "starting";
-      await this.launchAppServer();
-    } catch (error) {
-      this.available = false;
-      this.state = "unavailable";
-      this.unavailableCode = errorCode3(error);
-      await this.disposeAppServer(this.appServer);
-      this.logger.warn("Codex Remote domain unavailable", { code: this.unavailableCode });
-    }
-  }
-  isAvailable() {
-    return this.available && this.appServer?.isReady() === true;
-  }
-  status() {
-    return {
-      enabled: this.config.enabled,
-      available: this.isAvailable(),
-      state: this.state,
-      restartAttempt: this.restartAttempt,
-      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
-    };
-  }
-  /** Resolve a thread cwd for Host-owned workspace/terminal carriers. */
-  async resolveThreadWorkspace(connectionId, threadId) {
-    if (!this.peers.has(connectionId)) throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available on this connection.");
-    try {
-      const known = await this.readKnownThread(threadId);
-      return known.cwd;
-    } catch (error) {
-      if (error instanceof RpcError && error.code === "CODEX_THREAD_NOT_ALLOWED") {
-        throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
-      }
-      throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
-    }
-  }
-  createPeer(context, publish) {
-    if (!this.config.enabled) return void 0;
-    const bridge = new CodexPeerBridge(this, context, publish, this.logger);
-    this.peers.set(context.connectionId, bridge);
-    this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
-    return bridge;
-  }
-  async call(connectionId, input2) {
-    const envelope = parseCallEnvelope(input2);
-    const call = parseCodexCall(envelope.method, envelope.params);
-    this.requireAppServer();
-    if (call.method === "account/read") {
-      return sanitizeAccount(await this.callUpstream(call.method, call.params));
-    }
-    if (call.method === "project/list") {
-      return sanitizeProjectList(await this.callUpstream(call.method, call.params));
-    }
-    if (call.method === "project/create") {
-      const roots = call.params.roots;
-      const path = await this.requireNewCodexProjectPath(roots[0].path);
-      return sanitizeProjectCreate(await this.callUpstream(call.method, {
-        name: call.params.name,
-        roots: [{ path }],
-        idempotencyKey: call.params.idempotencyKey
-      }));
-    }
-    if (call.method === "thread/list") {
-      const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
-      return filterThreadListByWorkspaceAuthority(
-        result,
-        await this.readWorkspaceAuthority(result.data)
-      );
-    }
-    if (call.method === "thread/start") {
-      const cwd = await this.requireCodexWorkspacePath(call.params.cwd);
-      const permission = codexPermission(call.params, "workspace-write");
-      const result = await this.callUpstream(call.method, {
-        ...permission.params,
-        cwd,
-        ...codexThreadPermissionParams(permission),
-        serviceName: "deepseek_harness_remote"
-      });
-      if (extractThread(result)?.id === void 0) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
-      }
-      this.rememberPermission(extractThread(result).id, result);
-      return result;
-    }
-    const threadId = threadIdFromParams(call.params);
-    if (call.method === "dsh/sessionHistory") {
-      const thread = await this.readThreadForHistory(connectionId, threadId);
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger2(call.params.beforeSeq),
-          throughSeq: optionalInteger2(call.params.throughSeq),
-          maxMessages: optionalInteger2(call.params.maxMessages)
-        }
-      );
-      const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
-      return {
-        ...page,
-        ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
-        permissionPreset: this.permissionPresets.get(threadId) ?? null
-      };
-    }
-    if (call.method === "dsh/directoryList") {
-      return this.listCodexDirectory(call.params.path);
-    }
-    const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
-    if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
-      const owner = this.turnOwners.get(threadId);
-      if (owner !== void 0 && owner.connectionId !== connectionId) {
-        throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
-      }
-      return this.changeThreadPermission(threadId, call.params, allowedThread);
-    }
-    if (call.method === "thread/read") {
-      return this.callUpstream(call.method, call.params);
-    }
-    if (call.method === "thread/unsubscribe") {
-      const bridge = this.peers.get(connectionId);
-      bridge?.removeThreadSubscriptions(threadId);
-      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
-      return this.callUpstream(call.method, call.params);
-    }
-    let claimed = false;
-    let previousOwner;
-    if (isThreadMutation(call.method) && threadId !== void 0) {
-      const claim = this.claimTurn(
-        threadId,
-        connectionId,
-        call.method,
-        typeof call.params.turnId === "string" ? call.params.turnId : void 0
-      );
-      claimed = claim.claimed;
-      previousOwner = claim.previous;
-    }
-    try {
-      const permission = codexPermission(call.params);
-      const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
-        ...permission.params,
-        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true
-      } : call.method === "thread/fork" && allowedThread !== void 0 ? {
-        ...permission.params,
-        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexThreadPermissionParams(permission)
-      } : call.method === "turn/start" ? {
-        ...permission.params,
-        ...allowedThread?.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexTurnPermissionParams(permission, allowedThread?.cwd)
-      } : permission.params;
-      let result;
-      try {
-        result = await this.callUpstream(call.method, upstreamParams);
-      } catch (error) {
-        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
-          return { thread: allowedThread.thread };
-        }
-        throw error;
-      }
-      if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
-        await this.assertResultThreadAllowed(result);
-      }
-      if (call.method === "thread/resume" || call.method === "thread/fork") {
-        const resultId = extractThread(result)?.id;
-        if (typeof resultId === "string") {
-          this.rememberPermission(resultId, result);
-          if (call.params.permissionPreset !== void 0) await this.publishPermission(resultId, result);
-        }
-      }
-      if (call.method === "turn/start" && threadId !== void 0) {
-        this.rememberTurnId(threadId, connectionId, extractTurnId(result));
-        if (call.params.permissionPreset !== void 0) {
-          await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
-        }
-      }
-      return result;
-    } catch (error) {
-      if (claimed && threadId !== void 0) {
-        if (previousOwner === void 0) this.turnOwners.delete(threadId);
-        else this.turnOwners.set(threadId, previousOwner);
-      }
-      throw mapAppServerError(error);
-    }
-  }
-  async respond(connectionId, input2) {
-    await this.expireApprovals();
-    const params = parseRespond(input2);
-    const approval = this.approvals.get(params.requestHandle);
-    if (approval === void 0 || approval.connectionId !== connectionId) {
-      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
-    }
-    this.approvals.delete(params.requestHandle);
-    this.scheduleApprovalExpiry();
-    await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
-    return { resolved: true };
-  }
-  async detachPeer(connectionId) {
-    const bridge = this.peers.get(connectionId);
-    if (bridge !== void 0) this.peers.delete(connectionId);
-    this.peerDeviceIds.delete(connectionId);
-    for (const [threadId, owner] of this.turnOwners) {
-      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId);
-    }
-    const appServer = this.appServer;
-    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
-    for (const [handle, approval] of pending) {
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-    }
-    this.scheduleApprovalExpiry();
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.available = false;
-    this.state = this.config.enabled ? "unavailable" : "disabled";
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = void 0;
-    for (const bridge of [...this.peers.values()]) await bridge.closeAll();
-    this.peers.clear();
-    this.peerDeviceIds.clear();
-    this.turnOwners.clear();
-    this.permissionPresets.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    this.approvals.clear();
-    this.unsubscribeInbound?.();
-    this.unsubscribeInbound = void 0;
-    this.unsubscribeUnavailable?.();
-    this.unsubscribeUnavailable = void 0;
-    await this.appServer?.close();
-    this.appServer = void 0;
-  }
-  async launchAppServer() {
-    let lastError;
-    for (const binary of codexBinaryCandidates(this.config.binary)) {
-      try {
-        await this.launchAppServerCandidate(binary);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (!canTryNextBinary(error)) throw error;
-      }
-    }
-    throw lastError ?? new RpcError("CODEX_START_FAILED", "Codex App Server could not be started.");
-  }
-  async launchAppServerCandidate(binary) {
-    const appServer = this.createAppServer(binary, this.logger);
-    this.appServer = appServer;
-    this.unsubscribeInbound = appServer.onInbound((message) => {
-      void this.handleInbound(message).catch((error) => {
-        this.logger.warn("Codex inbound handling failed", { code: errorCode3(error) });
-      });
-    });
-    this.unsubscribeUnavailable = appServer.onUnavailable((code) => {
-      if (this.available && this.appServer === appServer) {
-        void this.handleAppServerUnavailable(appServer, code);
-      }
-    });
-    try {
-      await appServer.start();
-      const account = await appServer.call("account/read", { refreshToken: false }, 15e3);
-      if (!accountCanRun(account)) {
-        throw new RpcError("CODEX_AUTH_REQUIRED", "Codex is not signed in on this Host.");
-      }
-      if (this.closed || this.appServer !== appServer) {
-        await appServer.close().catch(() => void 0);
-        return;
-      }
-      this.available = true;
-      this.state = "ready";
-      this.restartAttempt = 0;
-      this.unavailableCode = void 0;
-      this.logger.info("Codex Remote domain ready");
-    } catch (error) {
-      await this.disposeAppServer(appServer);
-      throw error;
-    }
-  }
-  async handleAppServerUnavailable(appServer, code) {
-    if (this.closed || this.appServer !== appServer) return;
-    this.available = false;
-    this.state = "restarting";
-    this.unavailableCode = code;
-    this.turnOwners.clear();
-    this.permissionPresets.clear();
-    this.approvals.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
-    await this.disposeAppServer(appServer);
-    this.scheduleRestart();
-  }
-  scheduleRestart() {
-    if (this.closed || this.restartTimer !== void 0) return;
-    if (this.restartAttempt >= this.restartDelaysMs.length) {
-      this.state = "unavailable";
-      this.logger.warn("Codex App Server restart attempts exhausted", { attempts: this.restartAttempt });
-      return;
-    }
-    const delayMs = Math.max(0, this.restartDelaysMs[this.restartAttempt] ?? 0);
-    this.restartAttempt += 1;
-    this.state = "restarting";
-    this.restartTimer = setTimeout(() => {
-      this.restartTimer = void 0;
-      void this.restartAfterFailure();
-    }, delayMs);
-    this.restartTimer.unref?.();
-    this.logger.warn("Codex App Server restart scheduled", { attempt: this.restartAttempt, delayMs });
-  }
-  async restartAfterFailure() {
-    if (this.closed) return;
-    try {
-      await this.launchAppServer();
-    } catch (error) {
-      this.available = false;
-      this.state = "restarting";
-      this.unavailableCode = errorCode3(error);
-      this.logger.warn("Codex App Server restart failed", {
-        attempt: this.restartAttempt,
-        code: this.unavailableCode
-      });
-      this.scheduleRestart();
-    }
-  }
-  async disposeAppServer(appServer) {
-    if (appServer === void 0 || this.appServer !== appServer) return;
-    this.unsubscribeInbound?.();
-    this.unsubscribeInbound = void 0;
-    this.unsubscribeUnavailable?.();
-    this.unsubscribeUnavailable = void 0;
-    this.appServer = void 0;
-    await appServer.close().catch(() => void 0);
-  }
-  async handleInbound(message) {
-    if (!this.available) return;
-    if (message.kind === "request") {
-      await this.handleServerRequest(message);
-      return;
-    }
-    const threadId = extractThreadId(message.params);
-    if (message.method === "thread/settings/updated" && threadId !== void 0) {
-      this.rememberPermission(threadId, message.params);
-    }
-    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
-    if (message.method === "turn/completed" && threadId !== void 0) this.turnOwners.delete(threadId);
-    if (message.method === "turn/started" && threadId !== void 0) {
-      const owner = this.turnOwners.get(threadId);
-      const turnId = extractTurnId(message.params);
-      if (owner !== void 0) {
-        this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
-      }
-    }
-    if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
-    if (threadId === void 0) return;
-    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
-      method: message.method,
-      params: message.params
-    })));
-  }
-  rememberPermission(threadId, value) {
-    const preset = codexPermissionPresetFromResponse(value);
-    if (preset === void 0) this.permissionPresets.delete(threadId);
-    else this.permissionPresets.set(threadId, preset);
-  }
-  async changeThreadPermission(threadId, params, allowed) {
-    const permission = codexPermission(params);
-    const settings = {
-      ...codexTurnPermissionParams(permission, allowed.cwd),
-      ...params.model === void 0 ? {} : { model: params.model }
-    };
-    let result;
-    try {
-      await this.callUpstream("thread/settings/update", { threadId, ...settings });
-      result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
-    } catch {
-      result = await this.callUpstream("thread/resume", {
-        ...permission.params,
-        ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true
-      });
-      await this.assertResultThreadAllowed(result);
-      if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
-        await this.callUpstream("thread/settings/update", { threadId, ...settings });
-        result = { ...isRecord13(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
-      }
-    }
-    await this.publishPermission(threadId, result);
-    return result;
-  }
-  async publishPermission(threadId, value) {
-    const source = isRecord13(value) ? value : {};
-    const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
-    await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
-  }
-  async handleServerRequest(message) {
-    const appServer = this.requireAppServer();
-    await this.expireApprovals();
-    if (message.method !== "item/commandExecution/requestApproval" && message.method !== "item/fileChange/requestApproval") {
-      await appServer.respondError(message.id, -32601, "This Remote client does not support the server request.");
-      return;
-    }
-    const threadId = extractThreadId(message.params);
-    const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
-    const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
-    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
-      await appServer.respond(message.id, { decision: "decline" });
-      return;
-    }
-    const requestHandle = randomUUID2();
-    this.approvals.set(requestHandle, {
-      upstreamId: message.id,
-      connectionId: owner.connectionId,
-      threadId,
-      method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS
-    });
-    this.scheduleApprovalExpiry();
-    try {
-      await peer.publishInbound(threadId, {
-        method: message.method,
-        params: sanitizeApprovalParams(message.params, requestHandle)
-      });
-    } catch (error) {
-      this.approvals.delete(requestHandle);
-      this.scheduleApprovalExpiry();
-      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
-      throw error;
-    }
-  }
-  async readKnownThread(threadId) {
-    const authority = await this.readWorkspaceAuthority();
-    let result;
-    try {
-      result = await this.callUpstream("thread/read", { threadId, includeTurns: false });
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      const listed = await this.findKnownThreadInList(threadId, authority);
-      if (listed === void 0) {
-        throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-      }
-      return { thread: listed, ...typeof listed.cwd === "string" && listed.cwd.length > 0 ? { cwd: listed.cwd } : {} };
-    }
-    const thread = extractThread(result);
-    if (thread === void 0 || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
-      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-    }
-    return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
-  }
-  async readThreadForHistory(connectionId, threadId) {
-    const { thread: metadata } = await this.readKnownThread(threadId);
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
-    } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError;
-      this.logHistoryFallback(connectionId, "turns-full", fullError);
-    }
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
-    } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
-      this.logHistoryFallback(connectionId, "turns-summary", summaryError);
-    }
-    try {
-      const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
-      const legacyThread = extractThread(legacyResult);
-      if (legacyThread === void 0 || legacyThread.id !== threadId) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
-      }
-      return legacyThread;
-    } catch (legacyError) {
-      if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
-      this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
-      return { ...metadata, turns: [] };
-    }
-  }
-  async readThreadTurns(connectionId, threadId, itemsView) {
-    const turns = [];
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream("thread/turns/list", {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: "asc",
-        itemsView,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      });
-      const pageResult = isRecord13(result) ? result : {};
-      for (const rawTurn of array2(pageResult.data)) {
-        if (!isRecord13(rawTurn)) continue;
-        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
-        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array2(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array2(rawTurn.items));
-        turns.push({ ...rawTurn, items });
-      }
-      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-    return turns;
-  }
-  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
-    const items = [];
-    let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream("thread/items/list", {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: "asc",
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        });
-        const pageResult = isRecord13(result) ? result : {};
-        for (const entry of array2(pageResult.data)) {
-          if (isRecord13(entry) && entry.item !== void 0) items.push(entry.item);
-        }
-        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      this.logHistoryFallback(connectionId, "items", error);
-      return fallbackItems;
-    }
-    return items;
-  }
-  logHistoryFallback(connectionId, stage, error) {
-    this.logger.warn("Codex history read fallback", {
-      connectionId: maskId(connectionId),
-      stage,
-      code: errorCode3(error)
-    });
-  }
-  async assertResultThreadAllowed(result) {
-    const thread = extractThread(result);
-    if (thread === void 0 || typeof thread.id !== "string") {
-      throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
-    }
-    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
-      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-    }
-  }
-  claimTurn(threadId, connectionId, method, turnId) {
-    const owner = this.turnOwners.get(threadId);
-    const peerDeviceId = this.peerDeviceIds.get(connectionId) ?? connectionId;
-    const nextOwner = { connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } };
-    if (method === "turn/interrupt") {
-      if (owner === void 0) {
-        this.turnOwners.set(threadId, nextOwner);
-        return { claimed: true };
-      }
-      if (owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
-        throw new RpcError("CODEX_TURN_OWNED", "Only the connection that started this Codex turn can interrupt it.");
-      }
-      if (owner.connectionId !== connectionId) {
-        this.turnOwners.set(threadId, { ...owner, connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } });
-        return { claimed: true, previous: owner };
-      }
-      if (turnId !== void 0 && owner.turnId === void 0) this.turnOwners.set(threadId, { ...owner, turnId });
-      return { claimed: false };
-    }
-    if (owner !== void 0 && owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
-      throw new RpcError("CODEX_TURN_OWNED", "Another Remote connection owns the active Codex turn.");
-    }
-    if (owner?.connectionId === connectionId) return { claimed: false };
-    this.turnOwners.set(threadId, owner === void 0 ? nextOwner : { ...owner, connectionId, peerDeviceId });
-    return { claimed: true, previous: owner };
-  }
-  rememberTurnId(threadId, connectionId, turnId) {
-    if (turnId === void 0) return;
-    const owner = this.turnOwners.get(threadId);
-    if (owner === void 0 || owner.connectionId !== connectionId) return;
-    this.turnOwners.set(threadId, { ...owner, turnId });
-  }
-  hasSubscriber(threadId) {
-    return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
-  }
-  resolveUpstreamApproval(params) {
-    if (!isRecord13(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
-    for (const [handle, approval] of this.approvals) {
-      if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
-    }
-  }
-  async expireApprovals() {
-    const now = Date.now();
-    const appServer = this.appServer;
-    for (const [handle, approval] of this.approvals) {
-      if (approval.expiresAt > now) continue;
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-    }
-    this.scheduleApprovalExpiry();
-  }
-  scheduleApprovalExpiry() {
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    const nextExpiry = Math.min(...[...this.approvals.values()].map((approval) => approval.expiresAt));
-    if (!Number.isFinite(nextExpiry)) return;
-    this.approvalExpiryTimer = setTimeout(() => {
-      this.approvalExpiryTimer = void 0;
-      void this.expireApprovals().catch((error) => {
-        this.logger.warn("Codex approval expiry failed", { code: errorCode3(error) });
-      });
-    }, Math.max(0, nextExpiry - Date.now()));
-    this.approvalExpiryTimer.unref?.();
-  }
-  requireAppServer() {
-    if (!this.isAvailable() || this.appServer === void 0) {
-      throw new RpcError("CODEX_UNAVAILABLE", "Codex Remote is disabled or unavailable on this Host.");
-    }
-    return this.appServer;
-  }
-  async callUpstream(method, params) {
-    try {
-      return await this.requireAppServer().call(method, params);
-    } catch (error) {
-      throw mapAppServerError(error);
-    }
-  }
-  async readWorkspaceAuthority(listedThreads) {
-    const projectIds = /* @__PURE__ */ new Set();
-    const roots = [];
-    let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-        const result = sanitizeProjectList(await this.callUpstream("project/list", {
-          limit: CODEX_PAGE_LIMIT2,
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        }));
-        for (const project of result.data) {
-          const projectRoots = project.roots.map((root) => root.path).filter((path) => isAbsolute3(path));
-          if (projectRoots.length === 0) continue;
-          projectIds.add(project.id);
-          roots.push(...projectRoots);
-        }
-        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    } catch (error) {
-      if (!isProjectListFallbackError(error)) throw error;
-    }
-    if (roots.length > 0) return { projectIds, roots };
-    const threads = listedThreads === void 0 ? [] : [...listedThreads];
-    if (listedThreads === void 0) {
-      cursor2 = void 0;
-      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-        const result = sanitizeThreadList(await this.callUpstream("thread/list", {
-          limit: CODEX_PAGE_LIMIT2,
-          sortKey: "updated_at",
-          sortDirection: "desc",
-          archived: false,
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        }));
-        threads.push(...result.data);
-        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    }
-    for (const workspace of deriveCodexCwdWorkspaces(threads)) {
-      if (isAbsolute3(workspace.path)) roots.push(workspace.path);
-    }
-    return { projectIds, roots };
-  }
-  async findKnownThreadInList(threadId, authority) {
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-      const result = sanitizeThreadList(await this.callUpstream("thread/list", {
-        limit: 100,
-        sortKey: "updated_at",
-        sortDirection: "desc",
-        archived: false,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      }));
-      const thread = result.data.find((item) => item.id === threadId);
-      if (thread !== void 0) {
-        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : void 0;
-      }
-      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-    return void 0;
-  }
-  async requireCodexWorkspacePath(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const paths = await this.listCodexWorkspacePaths();
-    const lexicalCandidate = resolve2(path);
-    let candidate;
-    try {
-      candidate = await realpath(path);
-      if (!(await stat4(candidate)).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    for (const root of paths.values()) {
-      try {
-        if (!containsCodexPath(resolve2(root), lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
-        if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
-      } catch {
-      }
-    }
-    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-  }
-  async requireNewCodexProjectPath(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
-    }
-    try {
-      const canonical = await realpath(resolve2(path));
-      if (!(await stat4(canonical)).isDirectory()) throw new Error("not a directory");
-      return canonical;
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
-    }
-  }
-  async listCodexDirectory(path) {
-    const target2 = await this.resolveCodexDirectory(path);
-    const rows = await readdir2(target2.path, { withFileTypes: true }).catch(() => void 0);
-    if (rows === void 0) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const entries = [];
-    for (const row of rows) {
-      const child = resolve2(target2.path, row.name);
-      let directory = row.isDirectory();
-      if (!directory && row.isSymbolicLink()) {
-        directory = await stat4(child).then((value) => value.isDirectory()).catch(() => false);
-      }
-      if (!directory) continue;
-      try {
-        const canonicalChild = await realpath(child);
-        if (!(await stat4(canonicalChild)).isDirectory()) continue;
-        if (!containsCodexPath(target2.canonicalRoot, canonicalChild)) continue;
-      } catch {
-        continue;
-      }
-      entries.push({
-        name: row.name,
-        path: child,
-        hidden: process.platform !== "win32" && row.name.startsWith(".")
-      });
-    }
-    entries.sort((left, right) => left.name.localeCompare(right.name, void 0, { sensitivity: "base" }));
-    return {
-      path: target2.path,
-      home: target2.root,
-      crumbs: codexDirectoryCrumbs(target2.root, target2.path),
-      entries: entries.slice(0, CODEX_DIRECTORY_ENTRY_LIMIT),
-      truncated: entries.length > CODEX_DIRECTORY_ENTRY_LIMIT
-    };
-  }
-  async resolveCodexDirectory(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const authority = await this.readWorkspaceAuthority();
-    const lexicalCandidate = resolve2(path);
-    let canonicalCandidate;
-    try {
-      canonicalCandidate = await realpath(path);
-      if (!(await stat4(canonicalCandidate)).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    for (const root of authority.roots) {
-      try {
-        const lexicalRoot = resolve2(root);
-        if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
-        if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
-          return { path: lexicalCandidate, root: lexicalRoot, canonicalRoot };
-        }
-      } catch {
-      }
-    }
-    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-  }
-  async listCodexWorkspacePaths() {
-    const paths = /* @__PURE__ */ new Map();
-    const authority = await this.readWorkspaceAuthority();
-    for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root);
-    return paths;
-  }
-};
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex") return [configured];
-  if (hostPlatform === "win32") return [...bundledWindowsCodex(userHome), configured];
-  if (hostPlatform !== "darwin") return [configured];
-  const bundledCandidates = [
-    "/Applications/ChatGPT.app",
-    join5(userHome, "Applications", "ChatGPT.app")
-  ].flatMap((chatGptApp) => {
-    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
-    try {
-      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
-      if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
-        return [];
-      }
-      const candidate = join5(codexCli, manifest.entrypoint);
-      if (!existsSync2(candidate)) return [];
-      accessSync(candidate, constants.X_OK);
-      return [candidate];
-    } catch {
-      return [];
-    }
-  });
-  return [.../* @__PURE__ */ new Set([
-    ...bundledCandidates,
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
-  ])];
-}
-function bundledWindowsCodex(userHome) {
-  const bin = join5(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
-  try {
-    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join5(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
-    const candidate = newest[0]?.candidate;
-    return candidate === void 0 ? [] : [candidate];
-  } catch {
-    return [];
-  }
-}
-function parseCallEnvelope(input2) {
-  if (!isRecord13(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
-  }
-  return { method: input2.method, params: input2.params };
-}
-function parseRespond(input2) {
-  if (!isRecord13(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
-  }
-  return input2;
-}
-function accountCanRun(result) {
-  if (!isRecord13(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord13(result.account);
-}
-function sanitizeAccount(result) {
-  if (!isRecord13(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord13(result.account) ? result.account : void 0;
-  return {
-    authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
-    requiresOpenaiAuth: result.requiresOpenaiAuth === true,
-    ...account === void 0 ? {} : {
-      account: {
-        ...typeof account.type === "string" ? { type: account.type } : {},
-        ...typeof account.planType === "string" ? { planType: account.planType } : {}
-      }
-    }
-  };
-}
-function sanitizeThreadList(result) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
-  }
-  const data2 = result.data.flatMap((value) => {
-    if (!isRecord13(value) || typeof value.id !== "string") return [];
-    return [{
-      id: value.id,
-      ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
-      ...typeof value.projectId === "string" ? { projectId: value.projectId } : {},
-      ...typeof value.name === "string" ? { name: value.name } : {},
-      ...typeof value.preview === "string" ? { preview: value.preview } : {},
-      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
-      ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
-      ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
-      ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
-      ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord13(value.status) ? { status: value.status } : {}
-    }];
-  });
-  return {
-    data: data2,
-    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null },
-    ...typeof result.backwardsCursor === "string" && result.backwardsCursor.length > 0 ? { backwardsCursor: result.backwardsCursor } : {}
-  };
-}
-function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
-  }
-  return {
-    ...result,
-    data: result.data.map((record7) => isRecord13(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
-  };
-}
-function sanitizeProject(value) {
-  if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
-  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
-    return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
-  }) : [];
-  if (roots.length === 0) return void 0;
-  return {
-    id: value.id,
-    name: value.name,
-    roots,
-    ...typeof value.position === "number" && Number.isFinite(value.position) ? { position: value.position } : {},
-    ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
-    ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {}
-  };
-}
-function sanitizeProjectList(result) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
-  }
-  const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
-  return {
-    data: data2,
-    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null }
-  };
-}
-function sanitizeProjectCreate(result) {
-  const project = isRecord13(result) ? sanitizeProject(result.project) : void 0;
-  if (project === void 0) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
-  }
-  return { project };
-}
-function isThreadAllowedByWorkspaceAuthority(thread, authority) {
-  const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
-  if (projectId !== void 0 && authority.projectIds.has(projectId)) return true;
-  const cwd = typeof thread.cwd === "string" ? thread.cwd : void 0;
-  return cwd !== void 0 && authority.roots.some((root) => containsCodexPath(root, cwd));
-}
-function containsCodexPath(root, candidate) {
-  const normalizedRoot = normalizeCodexPathForCompare(root);
-  const normalizedCandidate = normalizeCodexPathForCompare(candidate);
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
-}
-function normalizeCodexPathForCompare(path) {
-  return path.replace(/[\\/]+$/u, "") || path;
-}
-function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
-  const remainder = relative(root, path);
-  if (remainder === "") return crumbs2;
-  let current = root;
-  for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
-    current = resolve2(current, segment);
-    crumbs2.push({ name: segment, path: current, hidden: false });
-  }
-  return crumbs2;
-}
-function extractThread(result) {
-  return isRecord13(result) && isRecord13(result.thread) ? result.thread : void 0;
-}
-function extractTurnId(result) {
-  if (!isRecord13(result)) return void 0;
-  if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord13(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
-  return void 0;
-}
-function extractThreadId(params) {
-  if (!isRecord13(params)) return void 0;
-  if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord13(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord13(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
-  return void 0;
-}
-function optionalInteger2(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
-}
-function codexPermission(params, fallbackPreset) {
-  const { permissionPreset: permissionPreset2, ...rest } = params;
-  const preset = permissionPreset2 === "workspace-write" || permissionPreset2 === "danger-full-access" ? permissionPreset2 : fallbackPreset;
-  if (preset === void 0) return { params: mapCodexImageInputs(rest) };
-  const fullAccess = preset === "danger-full-access";
-  return {
-    params: mapCodexImageInputs(rest),
-    approvalPolicy: fullAccess ? "never" : "on-request",
-    sandbox: fullAccess ? "danger-full-access" : "workspace-write"
-  };
-}
-function codexThreadPermissionParams(permission) {
-  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
-  return {
-    approvalPolicy: permission.approvalPolicy,
-    sandbox: permission.sandbox
-  };
-}
-function codexTurnPermissionParams(permission, cwd) {
-  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
-  return {
-    approvalPolicy: permission.approvalPolicy,
-    sandboxPolicy: permission.sandbox === "danger-full-access" ? { type: "dangerFullAccess" } : {
-      type: "workspaceWrite",
-      writableRoots: cwd === void 0 ? [] : [cwd],
-      networkAccess: false,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false
-    }
-  };
-}
-function mapCodexImageInputs(params) {
-  if (!Array.isArray(params.input)) return params;
-  return {
-    ...params,
-    input: params.input.map((value) => {
-      if (!isRecord13(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
-      return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
-    })
-  };
-}
-function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord13(params)) return { requestHandle };
-  const safe = { ...params };
-  delete safe.proposedExecpolicyAmendment;
-  delete safe.additionalPermissions;
-  safe.availableDecisions = ["accept", "decline", "cancel"];
-  safe.requestHandle = requestHandle;
-  return safe;
-}
-function mapAppServerError(error) {
-  if (error instanceof RpcError) return error;
-  if (error instanceof CodexAppServerError) {
-    if (error.code === "CODEX_UPSTREAM_ERROR" && isActiveWriterMessage(error.message)) {
-      return new RpcError("CODEX_THREAD_BUSY", "The selected CodeX thread is already active in another CodeX client.");
-    }
-    return new RpcError(error.code, error.message, void 0, error.code === "CODEX_REQUEST_TIMEOUT");
-  }
-  return new RpcError("CODEX_UPSTREAM_ERROR", "Codex App Server could not complete the request.");
-}
-function errorCode3(error) {
-  if (error instanceof RpcError || error instanceof CodexAppServerError) return error.code;
-  return "CODEX_START_FAILED";
-}
-function isHistoryReadRecoverable(error) {
-  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR", "CODEX_REQUEST_TIMEOUT", "CODEX_THREAD_BUSY"].includes(error.code);
-}
-function isProjectListFallbackError(error) {
-  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
-}
-function canTryNextBinary(error) {
-  return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
+  return isRecord13(value) ? value : {};
 }
 function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array2(value) {
-  return Array.isArray(value) ? value : [];
-}
-function maskId(value) {
-  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
-}
-function isActiveWriterMessage(message) {
-  return message.toLowerCase().includes("active writer");
 }
 
 // src/acp.ts

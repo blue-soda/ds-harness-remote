@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { resolveConfig, type Config, type ConfigInput, type ResolvedConfig } from './config.js'
@@ -13,6 +14,7 @@ import { ClientServerApi, HostServerApi, type DeviceAuthorization } from './serv
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
+import { codexBinaryCandidates } from './codex/domain.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -22,6 +24,12 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  /**
+   * The Codex binary the Host found for itself, when the configured command was
+   * left at its default. Absent means nothing was found, and the settings UI says
+   * so instead of showing an empty field the user cannot interpret.
+   */
+  discoveredCodexBinary?: string
 }
 
 export interface PluginAssociation {
@@ -339,10 +347,20 @@ export class PluginControlRuntime {
     if (typeof enabled !== 'boolean') {
       throw new ClientModeError('INVALID_MESSAGE', 'Codex Remote enabled must be a boolean.')
     }
+    const binary = record(payload).binary
+    if (binary !== undefined && typeof binary !== 'string') {
+      throw new ClientModeError('INVALID_MESSAGE', 'Codex binary must be a string.')
+    }
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({
       ...current,
-      codex: { ...current.codex, enabled },
+      codex: {
+        ...current.codex,
+        enabled,
+        // An emptied field means "find it yourself" again, which is also what
+        // survives a desktop-app update that moves the binary.
+        ...(binary === undefined ? {} : { binary: binary.trim() === '' ? 'codex' : binary.trim() }),
+      },
     })
     await this.settings.replace(editableConfig(next))
     return this.settingsView()
@@ -472,6 +490,7 @@ export class PluginControlRuntime {
     const associations = await this.associations(config)
     const role = config.role === 'client' ? 'client' : 'host'
     const association = associations[role]
+    const discovered = discoveredCodexBinary(config.codex?.binary ?? 'codex')
     return {
       config,
       deviceName: hostname(),
@@ -480,6 +499,7 @@ export class PluginControlRuntime {
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, commandAvailable(item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
+      ...(discovered === undefined ? {} : { discoveredCodexBinary: discovered }),
     }
   }
 
@@ -521,6 +541,23 @@ export class PluginControlRuntime {
 
 function commandAvailable(command: string): boolean {
   try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
+}
+
+/**
+ * The Codex binary discovery found for a configured command.
+ *
+ * Only the bundled candidates count here: the plain command is left to the
+ * process `PATH` at spawn time, so reporting it would claim a discovery that was
+ * never made. The settings UI shows this path so the user can see what will run
+ * before enabling anything.
+ * @param configured - the configured binary or command.
+ * @returns the discovered absolute path, or undefined when nothing was found.
+ */
+function discoveredCodexBinary(configured: string): string | undefined {
+  for (const candidate of codexBinaryCandidates(configured)) {
+    if (candidate !== configured && existsSync(candidate)) return candidate
+  }
+  return undefined
 }
 
 function editableConfig(config: ResolvedConfig): Config {
