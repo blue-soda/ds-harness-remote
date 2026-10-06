@@ -144,12 +144,6 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
   <img src="docs/images/remote.png" alt="通过端到端加密远程连接运行的 Harness 会话" width="900">
 </p>
 
-### Android
-
-使用已有账号登录，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话；会话工具栏可切换当前模型与它声明的思考程度。
-
-**「文件」**（工作区浏览 + UTF-8 分页只读预览，另支持图片、PDF，以及 Host 提供 `officeToPdf` 时的 Office 文档）与 **「终端」** 位于会话标题栏：都由官方 Session 接口只读授权，终端从 Host 快照恢复、断线不重放输入，CodeX 会话不提供这些工具。环境准备、原生模块要求与验收状态见 [`apps/android`](apps/android/README.md)。
-
 ## 工作方式
 
 ```text

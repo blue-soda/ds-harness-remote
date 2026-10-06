@@ -151,12 +151,6 @@ connection status shown in the header.
   <img src="docs/images/remote.png" alt="A Harness conversation running through an encrypted remote connection" width="900">
 </p>
 
-### Android
-
-Sign in with your existing account, pick an available computer and open a workspace, then continue with text or image prompts; the conversation toolbar switches the active model and its declared reasoning effort.
-
-**Files** (workspace browsing with paged read-only UTF-8 previews, plus images, PDF and Office documents when the Host provides `officeToPdf`) and **Terminal** sit in the conversation title bar: both are read-only and authorized by the official Session APIs, terminals are restored from the Host snapshot and never replay input after a disconnect, and CodeX conversations do not expose them. See [`apps/android`](apps/android/README.md) for setup, native module requirements and validation status.
-
 ## How it works
 
 ```text
