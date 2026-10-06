@@ -184,8 +184,9 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 **登出会消耗一个设备身份**：`clearClientAuthorization()` 先 `revokeCurrentDevice()` 再
 `identities.reset()`，所以每次登出都会吊销当前设备**并轮换本机身份**（新 `deviceId` 与密钥对），
 下次登录必然注册成新设备。换身份是必需的——被吊销的设备用原 `identityKey` 重新注册会被
-`DEVICE_REVOKED` 拒绝。自部署 Server 只置位 `revoked`、**不自动清理**，也没有每账号设备数上限，
-所以反复登出不会锁死任何人，但 `state.json` 会持续累积（每次登出留下 host/client 各一条死记录），
+`DEVICE_REVOKED` 拒绝。自部署 Server 只置位 `revoked`、**不自动清理**；每账号设备数上限 **256**，
+且**只在新 `deviceId` 注册时判定**（已有设备复用同一行、不占名额），所以约 **128 次登出**后该账号会
+无法再注册新设备（`RATE_LIMITED`）。`state.json` 也会持续累积（每次登出留下 host/client 各一条死记录），
 且身份更换会使已 pin 该设备的对端信任失效。不要把"登出再登录"当排障手段；运行期间不要直接编辑
 `state.json`（会被内存状态覆盖）。机制与代价见 `docs/plugin-integration.md` §6.1。
 
