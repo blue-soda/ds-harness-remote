@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.28 - 2026-10-06
+
+- Signs in with the DeepSeek account DSH already uses: the Remote card starts the official browser authorization, the Server verifies the grant against the platform and discards it, and the same DeepSeek user always lands in the same account.
+- Points the bundled Remote Server address at this project's own Server — in the profile patch as well as in the code — because a patch value overrides the fallback, and an install otherwise kept the upstream address no matter what the code said.
+- Chooses the sign-in panel from the credentials already stored on this machine, so a signed-out install no longer shows an empty Host list and a "checking connection" line while a network round trip fails.
+- Waits for the authorization page instead of requiring a second click: the account service returns before the platform answers, so the pending address is polled and opened as soon as it exists.
+- Signs out of the borrowed DSH DeepSeek account too, and warns before doing it rather than explaining afterwards, because the old notice outlived the state it described.
+- Reduces the remote-access switch to pausing the connection: it keeps the authorization and the device identity and survives a restart, so a user who only wants to stop being reachable no longer pays with a re-authorization.
+- Keeps a route back to the local shell when a remote Host drops. The automatic fallback to local mode removed it together with every control gated on remote mode, which left signing out as the only way back.
+- Keeps the device identity across sign-out, so signing in again reuses the same device instead of registering a new one. An account holds at most 256 devices and the limit only counts new identities, so the previous behaviour could exhaust an account.
+- Documents what sign-out does and does not do: the device stays in the account, its previous tokens stay valid until the next sign-in, and removing a device is an operator action on the Server's state file.
+- Adds regression coverage for the DeepSeek verifier and its per-grant binding, the local-authorization answer, the sign-out paths and the pause/resume endpoint.
+
 ## 0.4.27 - 2026-09-30
 
 - Fixes Harness version discovery for globally installed DSH CLI symlinks, so Hosts running `dsh 0.2.0-rc.2` report their Harness version again.
