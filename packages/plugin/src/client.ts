@@ -343,7 +343,6 @@ const en = {
   codexRemoteHint: 'Expose Codex projects through this Host. Restart DSH after changing this setting.',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
   codexBinaryLabel: 'Codex command or path',
-  codexBinaryDetected: 'Found automatically: {path}',
   codexBinaryMissing: 'No Codex found automatically. Install the Codex desktop app, or enter the path to a Codex CLI that supports "codex app-server".',
   codexBinaryConfirm: 'Confirm',
   codexBinaryAuto: 'Use auto-discovery',
@@ -602,7 +601,6 @@ const zh: Record<keyof typeof en, string> = {
   codexRemoteHint: '通过这台 Host 提供 Codex 项目；修改后需重启 DSH 生效。',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
   codexBinaryLabel: 'Codex 命令或路径',
-  codexBinaryDetected: '自动发现：{path}',
   codexBinaryMissing: '未自动发现 Codex。请安装 Codex 桌面应用，或填写支持 "codex app-server" 的 Codex CLI 路径。',
   codexBinaryConfirm: '确认',
   codexBinaryAuto: '恢复自动发现',
@@ -1507,12 +1505,11 @@ window.__ModuleLoader__.load({
               onClick: () => { setCodexBinary(''); void setCodexBinaryPath('') },
             }, t('codexBinaryAuto'))
             : null,
-          React.createElement('p', null,
-            codexBinaryPinned
-              ? t('codexBinaryPinned')
-              : codexBinaryDiscovered === undefined
-                ? t('codexBinaryMissing')
-                : t('codexBinaryDetected', { path: codexBinaryDiscovered }))))
+          // The greyed field already shows the discovered path, so the only line
+          // worth printing is the one that asks the user for something.
+          codexBinaryPinned || codexBinaryDiscovered === undefined
+            ? React.createElement('p', null, codexBinaryPinned ? t('codexBinaryPinned') : t('codexBinaryMissing'))
+            : null))
 
       const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
         React.createElement('summary', null,
