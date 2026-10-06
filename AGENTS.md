@@ -86,6 +86,29 @@ node scripts/break-hard-links.mjs packages/plugin
 建议再跑一次。另注意 npm **不理解 pnpm workspace**：`npm publish -w packages/plugin` 会报
 `No workspaces found`，必须进入包目录发布。
 
+**发版清单**（`verify-version-sync.mjs` 要求**三处版本号一致**：根 `package.json`、
+`packages/plugin/package.json`、`packages/plugin/src/version.ts`）：
+
+```bash
+# 1) 三处改成同一个新版本号
+# 2) 构建：会校验版本一致并重新生成两个 client bundle
+pnpm --filter @blue-soda/dsh-remote build
+# 3) 校验 DSH bundle 契约（包名、bin、exports、patch id、客户端 module id）
+node scripts/verify-dsh-plugin.mjs
+# 4) 断开硬链接（否则 registry 以 415 拒收）
+node scripts/break-hard-links.mjs packages/plugin
+# 5) 发布（必须进包目录；scoped 包需要 --access public）
+cd packages/plugin && npm publish --access public
+# 6) 打 tag 并推送（推送目标是 fork 与自建 Server 的镜像）
+git tag -f -a vX.Y.Z -m "ds-harness-remote X.Y.Z" && git push -f fork vX.Y.Z && git push fork main
+# 7) 核对（registry 传播有几秒延迟，404 时稍等再查）
+npm view @blue-soda/dsh-remote version
+```
+
+首次发布的实测记录（2026-10-06）：`@blue-soda/dsh-remote@0.4.28` ✓；期间依次遇到
+E403（账号未开 2FA + `.npmrc` 里残留旧 `_authToken`，用 `npm logout` 清除并开启 2FA 后解决）
+与 E415（硬链接，用上面的脚本解决）。
+
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
 
 ## Current Status

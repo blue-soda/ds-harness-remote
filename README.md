@@ -13,7 +13,7 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/blue-soda/ds-harness-remote/releases/latest">Android</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/blue-soda/ds-harness-remote/issues/20">iOS</a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
