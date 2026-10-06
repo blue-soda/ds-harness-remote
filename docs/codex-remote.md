@@ -80,8 +80,10 @@ ds-harness-remote:
     binary: codex
 ```
 
-`binary` 必须指向支持 `codex app-server` 的 Codex CLI。在 macOS 保持默认 `codex` 时，Plugin 会先
-尝试当前 ChatGPT App 内置的 Codex，再回退到 `PATH`；显式配置的 binary 始终原样使用。
+`binary` 必须指向支持 `codex app-server` 的 Codex CLI。保持默认 `codex` 时，Plugin 会自动查找桌面
+应用内置的 Codex，再回退到 `PATH`：macOS 先看当前 ChatGPT App 内置的 `codex-cli`；Windows 看
+`%LOCALAPPDATA%\OpenAI\Codex\bin` 下**最新的构建目录**（应用每次更新都会换一个哈希目录，所以不能
+在配置里写死路径）。显式配置的 binary 始终原样使用。
 
 已有安装若仍使用旧的 `dsh-remote` 设置命名空间，Plugin 会一次性复制到 `ds-harness-remote`，同时
 保留旧配置作为回退。
