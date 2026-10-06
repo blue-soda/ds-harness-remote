@@ -143,13 +143,14 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 2026-09-20 开源自部署 Server 补充验证：check、11 个核心测试与生产 build 通过；构建产物本地启动后，健康检查、页面及静态资源、账号登录、Cookie 鉴权与未授权拒绝通过。Docker daemon 未运行，未验证镜像构建和容器启动；真实跨机与反向代理长期连接仍待验证。独立 Server 的既有联调结果不等于本版本已完成部署验收。
 
 2026-10-06 Plugin 补充验证：`pnpm --filter ds-harness-remote build` 与 `pnpm -r check` 通过；
-全量 Plugin 测试 **318 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
+全量 Plugin 测试 **322 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
 路径分隔符/目录顺序平台假设，`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡
-影响），**312 通过**；本轮新增 `tests/method-policy.test.ts`（5 个）覆盖 `codex.app.call`
-allowlist 的上游字段与 fail-closed 行为，并在 `tests/codex-virtual-harness.test.ts` 增加
-CodeX 领域外端点的委派断言。Codex App Server 版本探测基线为 **0.160.0**
-（`codex app-server generate-json-schema` 产物用于逐字段对照），另有
-`scripts/codex-app-server-smoke.mts` 在真实 0.160.0 上做只读端到端检查。
+影响），**316 通过**；本轮新增 `tests/method-policy.test.ts`（6 个，覆盖 `codex.app.call`
+allowlist 的上游字段、历史分页上限与 fail-closed 行为）、`tests/harness-api-history.test.ts`
+（2 个，页大小钳制），并在 `tests/codex-virtual-harness.test.ts` 增加本地端点委派与载体历史
+页钳制的断言。Codex App Server 版本探测基线为 **0.160.0**（`codex app-server
+generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app-server-smoke.mts` 在真实
+0.160.0 上做只读端到端检查。真实跨机结论见下节"用户实测确认"。
 
 ## Implementation Rules
 
@@ -283,10 +284,25 @@ Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已�
 `POST /api/settings/describe` → `{"ok":false,"error":{"code":"method-not-found","message":"CodeX virtual Harness does not implement settings/describe."}}`；
 修复后同一探针 → `{"ok":true,"value":{…}}`。
 
-修复：`virtual-harness.ts` 的 `dispatch` 默认分支与 `open` 的兜底分支改为**先委派给
-`hostCarrier`**（`new RemoteTypertGateway(remote.client)`，即远端 Host 的通用网关，
-这正是远程会话的语义），仅在 `hostCarrier` 缺失时才回 `method-not-found`；新增
-`tests/codex-virtual-harness.test.ts` 的委派断言锁住该行为。
+修复：`virtual-harness.ts` 的 `dispatch`/`open` 默认分支改为**先委派给本地载体**，本地载体由
+切换器的 `localCarrier()` 提供（`client-runtime.ts` 在 `selectCodexTarget` 里注入）。判定原则是
+**谁拥有窗口谁回答**：CodeX 领域由虚拟载体回答；远端工作区的 `workspaceFiles/*` 与
+`terminal/*` 仍由远端 Host 回答（`hostCarrier`）；**其余一律回本地**（设置引导、插件注册表
+事件流、账号读取）。
+
+> 中途曾把"非 CodeX 领域"一律转给远端 Host，**那是错的**：本地窗口于是显示**远端**的首次
+> 欢迎流程，左下角也显示**远端**的账号（实测"已登录 DeepSeek"而非本机账号）。本地专属端点
+> 必须由拥有窗口的那一侧回答。
+
+第二处缺口：**历史分页大小**。原生 UI 会请求远超策略上限的 `maxMessages`，而
+`readHistoryPage` 原样转发，Host 直接以 `dsh/sessionHistory → maxMessages: too_big` 拒绝，且
+重试阶梯只处理"响应过大"、不处理拒绝，于是历史完全加载不了。现在 `method-policy.ts` 导出
+`CODEX_HISTORY_MAX_MESSAGES`，**两个入口都钳制到同一常量**：虚拟载体的 `readHistoryPage`
+（唯一收口）与 ApiProxy 的 `harness-api-history.ts`。
+
+**2026-10-06 21:00 用户实测确认**：Desktop ↔ web 的远程 CodeX 工作区**可用** —— 连接、会话
+名称、会话历史与对话全部正常，且**不需要运行 ChatGPT 桌面应用**（插件直接以发现到的
+`codex.exe app-server` 工作，桌面应用只是二进制来源）。
 
 排查教训：`Web RPC failed` 意味着 **RPC 执行了但回答是失败**（传输失败是 `Web request
 failed`）；因此判定"调用是否经过我们"时，不能只看 promise 是否 reject，**必须看返回信封的

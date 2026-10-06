@@ -189,8 +189,11 @@ Web and Desktop approval controls show the Host-confirmed mode for the selected 
 If it has not been reported, they indicate that Host settings are inherited. Changing the mode
 requires Host confirmation; sending a prompt preserves the session's current policy.
 
-Codex is enabled by default and can be turned off in the DeepSeek Remote settings card. Advanced
-configuration and implementation notes live in [Codex Remote technical notes](docs/codex-remote.md).
+Codex is enabled by default and can be turned off in the DeepSeek Remote settings card. When the Host
+has the ChatGPT desktop app installed, the Plugin finds the `codex.exe` it bundles and talks to
+`codex app-server` directly, so **the desktop app does not need to be running** to browse Codex
+projects, load their history and chat. Advanced configuration and implementation notes live in
+[Codex Remote technical notes](docs/codex-remote.md).
 
 ## End-to-end encryption
 

@@ -85,6 +85,10 @@ ds-harness-remote:
 `%LOCALAPPDATA%\OpenAI\Codex\bin` 下**最新的构建目录**（应用每次更新都会换一个哈希目录，所以不能
 在配置里写死路径）。显式配置的 binary 始终原样使用。
 
+桌面应用只是这个 `codex.exe` 的**来源**：Plugin 直接以 `codex app-server` 通信，所以**不需要
+运行 ChatGPT 桌面应用**（也不必开着它的窗口）就能浏览 Codex 项目、加载会话历史并对话。
+应用升级会新增一个哈希目录，Plugin 每次启动按修改时间取最新，因此升级后无需改配置。
+
 已有安装若仍使用旧的 `dsh-remote` 设置命名空间，Plugin 会一次性复制到 `ds-harness-remote`，同时
 保留旧配置作为回退。
 

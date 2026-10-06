@@ -176,7 +176,9 @@ Codex Remote 是面向自有设备的便捷入口。它支持文本 Prompt、可
 Web 和 Desktop 的审批控件显示所选 Codex 会话经 Host 确认的模式；尚未获知时标明沿用 Host
 设置。切换须等 Host 确认成功，发送消息沿用会话当前策略。
 
-Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。高级配置和实现细节见
+Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。Host 上装有 ChatGPT 桌面应用时，插件会
+自动发现它内置的 `codex.exe` 并直接以 `codex app-server` 通信，**因此不需要运行桌面应用**就能浏览
+Codex 项目、加载历史并对话。高级配置和实现细节见
 [Codex Remote 技术说明](docs/codex-remote.md)。
 
 ## 端到端加密
