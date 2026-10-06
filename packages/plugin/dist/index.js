@@ -15620,6 +15620,135 @@ function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+// src/codex/method-policy.ts
+var id2 = external_exports.string().min(1).max(256);
+var cursor = external_exports.string().min(1).max(4096).nullable().optional();
+var textInput = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+  message: "Image data must use canonical base64."
+});
+var imageInput = external_exports.object({
+  type: external_exports.literal("image"),
+  mediaType: imageMediaType,
+  data: canonicalBase64
+}).strict();
+var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
+var projectRoot = external_exports.object({
+  path: external_exports.string().min(1).max(4096)
+}).strict();
+var CODEX_HISTORY_MAX_MESSAGES = 200;
+var schemas = {
+  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
+  "model/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    includeHidden: external_exports.boolean().optional()
+  }).strict(),
+  "project/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional()
+  }).strict(),
+  "project/create": external_exports.object({
+    name: external_exports.string().trim().min(1).max(256),
+    roots: external_exports.array(projectRoot).length(1),
+    idempotencyKey: external_exports.string().min(16).max(256)
+  }).strict(),
+  "thread/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
+    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
+    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
+    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
+    archived: external_exports.boolean().optional(),
+    isPinned: external_exports.boolean().optional(),
+    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
+    useStateDbOnly: external_exports.boolean().optional(),
+    searchTerm: external_exports.string().max(1024).optional(),
+    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
+    // legitimate client query into "The CodeX call parameters are invalid.".
+    originators: external_exports.array(external_exports.string().min(1).max(256)).max(32).nullable().optional(),
+    sectionId: external_exports.string().max(256).nullable().optional()
+  }).strict(),
+  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    threadId: id2,
+    beforeSeq: external_exports.number().int().nonnegative().optional(),
+    throughSeq: external_exports.number().int().min(-1).optional(),
+    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional()
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "thread/start": external_exports.object({
+    cwd: external_exports.string().min(1).max(4096),
+    model: external_exports.string().min(1).max(128).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/resume": external_exports.object({
+    threadId: id2,
+    model: external_exports.string().min(1).max(128).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/fork": external_exports.object({
+    threadId: id2,
+    lastTurnId: id2.optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  // Upstream declares a plain string and uses the empty value to clear a name, so the
+  // trim-based minimum rejected a legitimate rename.
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
+  "turn/start": external_exports.object({
+    threadId: id2,
+    input,
+    model: external_exports.string().min(1).max(128).optional(),
+    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "turn/steer": external_exports.object({
+    threadId: id2,
+    input,
+    expectedTurnId: id2,
+    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
+    clientUserMessageId: external_exports.string().max(256).nullable().optional()
+  }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
+};
+var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
+function parseCodexCall(method, params) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
+  }
+  const schema = schemas[method];
+  const parsed = schema.safeParse(params);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.slice(0, 4).map((issue) => {
+      const path = issue.path.length === 0 ? "(root)" : issue.path.join(".");
+      const keys = "keys" in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(", ")}]` : "";
+      return `${path}${keys}: ${issue.code}`;
+    }).join(", ");
+    throw new RpcError("INVALID_MESSAGE", `The CodeX call parameters are invalid. (${method} \u2192 ${detail})`);
+  }
+  return { method, params: parsed.data };
+}
+function isThreadMutation(method) {
+  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
+}
+function threadIdFromParams(params) {
+  return typeof params.threadId === "string" ? params.threadId : void 0;
+}
+
 // src/codex/codex-image-codec.ts
 var CODEX_IMAGE_MEDIA_TYPES2 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var CODEX_IMAGE_ATTACHMENT_PREFIX = "codex-image:";
@@ -17049,13 +17178,14 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     return thread;
   }
   async readHistoryPage(threadId, page, signal) {
+    const maxMessages = page.maxMessages === void 0 ? void 0 : Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, page.maxMessages));
     let value;
     try {
       value = record3(await this.client.request("dsh/sessionHistory", {
         threadId,
         ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
         ...page.throughSeq === void 0 ? {} : { throughSeq: page.throughSeq },
-        ...page.maxMessages === void 0 ? {} : { maxMessages: page.maxMessages }
+        ...maxMessages === void 0 ? {} : { maxMessages }
       }, signal));
     } catch (error) {
       if (!isLegacySessionHistoryUnsupported(error)) throw error;
@@ -17067,7 +17197,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         {
           beforeSeq: page.beforeSeq,
           throughSeq: page.throughSeq,
-          maxMessages: page.maxMessages
+          maxMessages
         }
       );
     }
@@ -22042,135 +22172,6 @@ function safeUpstreamError(value) {
 }
 function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/codex/method-policy.ts
-var id2 = external_exports.string().min(1).max(256);
-var cursor = external_exports.string().min(1).max(4096).nullable().optional();
-var textInput = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
-  message: "Image data must use canonical base64."
-});
-var imageInput = external_exports.object({
-  type: external_exports.literal("image"),
-  mediaType: imageMediaType,
-  data: canonicalBase64
-}).strict();
-var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
-var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
-var projectRoot = external_exports.object({
-  path: external_exports.string().min(1).max(4096)
-}).strict();
-var CODEX_HISTORY_MAX_MESSAGES = 200;
-var schemas = {
-  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
-  "model/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    includeHidden: external_exports.boolean().optional()
-  }).strict(),
-  "project/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional()
-  }).strict(),
-  "project/create": external_exports.object({
-    name: external_exports.string().trim().min(1).max(256),
-    roots: external_exports.array(projectRoot).length(1),
-    idempotencyKey: external_exports.string().min(16).max(256)
-  }).strict(),
-  "thread/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
-    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
-    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
-    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
-    archived: external_exports.boolean().optional(),
-    isPinned: external_exports.boolean().optional(),
-    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
-    useStateDbOnly: external_exports.boolean().optional(),
-    searchTerm: external_exports.string().max(1024).optional(),
-    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
-    // legitimate client query into "The CodeX call parameters are invalid.".
-    originators: external_exports.array(external_exports.string().min(1).max(256)).max(32).nullable().optional(),
-    sectionId: external_exports.string().max(256).nullable().optional()
-  }).strict(),
-  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    threadId: id2,
-    beforeSeq: external_exports.number().int().nonnegative().optional(),
-    throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional()
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "thread/start": external_exports.object({
-    cwd: external_exports.string().min(1).max(4096),
-    model: external_exports.string().min(1).max(128).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/resume": external_exports.object({
-    threadId: id2,
-    model: external_exports.string().min(1).max(128).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/fork": external_exports.object({
-    threadId: id2,
-    lastTurnId: id2.optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  // Upstream declares a plain string and uses the empty value to clear a name, so the
-  // trim-based minimum rejected a legitimate rename.
-  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().max(256) }).strict(),
-  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
-  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
-  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
-  "turn/start": external_exports.object({
-    threadId: id2,
-    input,
-    model: external_exports.string().min(1).max(128).optional(),
-    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
-    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "turn/steer": external_exports.object({
-    threadId: id2,
-    input,
-    expectedTurnId: id2,
-    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
-    clientUserMessageId: external_exports.string().max(256).nullable().optional()
-  }).strict(),
-  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
-};
-var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
-function parseCodexCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
-  }
-  const schema = schemas[method];
-  const parsed = schema.safeParse(params);
-  if (!parsed.success) {
-    const detail = parsed.error.issues.slice(0, 4).map((issue) => {
-      const path = issue.path.length === 0 ? "(root)" : issue.path.join(".");
-      const keys = "keys" in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(", ")}]` : "";
-      return `${path}${keys}: ${issue.code}`;
-    }).join(", ");
-    throw new RpcError("INVALID_MESSAGE", `The CodeX call parameters are invalid. (${method} \u2192 ${detail})`);
-  }
-  return { method, params: parsed.data };
-}
-function isThreadMutation(method) {
-  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
-}
-function threadIdFromParams(params) {
-  return typeof params.threadId === "string" ? params.threadId : void 0;
 }
 
 // src/codex/peer-bridge.ts

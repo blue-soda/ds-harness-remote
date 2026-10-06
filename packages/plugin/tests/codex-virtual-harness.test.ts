@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { CODEX_HISTORY_MAX_MESSAGES } from '../src/codex/method-policy.js'
 import {
   CodexVirtualHarness,
   discoverCodexVirtualWorkspaces,
@@ -1181,6 +1182,23 @@ describe('CodexVirtualHarness', () => {
     if (!older.ok) throw new Error('older history failed')
     expect((older.value as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
       .toEqual([0, 1, 2])
+    await target.close()
+  })
+
+  it('clamps a requested history page to the call policy limit', async () => {
+    // The native UI asks for a far larger page than the Host's call policy admits, and
+    // forwarding it failed the whole history load with "maxMessages: too_big".
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    await target.dispatch('session/page', { args: { request: {
+      address: { kind: 'session', sessionId: 'codex:thr_1' },
+      maxMessages: 5000,
+    } } }, new AbortController().signal)
+    const historyCalls = client.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory')
+    expect(historyCalls.length).toBeGreaterThan(0)
+    for (const call of historyCalls) {
+      expect((call[1] as { maxMessages?: number }).maxMessages).toBeLessThanOrEqual(CODEX_HISTORY_MAX_MESSAGES)
+    }
     await target.close()
   })
 

@@ -11,6 +11,7 @@ import type {
   TypertRpcResult,
 } from '../typert-gateway-contract.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
+import { CODEX_HISTORY_MAX_MESSAGES } from './method-policy.js'
 import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
 import type { HarnessSessionGeneration } from '../harness-version.js'
 import {
@@ -1531,13 +1532,20 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
     signal?: AbortSignal,
   ): Promise<CodexNativeHistoryPage> {
+    // The Host's call policy caps a history page at CODEX_HISTORY_MAX_MESSAGES, and the
+    // native UI asks for a far larger page. Forwarding that request was refused outright
+    // ("dsh/sessionHistory -> maxMessages: too_big") and the session history never loaded,
+    // so every read clamps to the same constant the policy uses.
+    const maxMessages = page.maxMessages === undefined
+      ? undefined
+      : Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, page.maxMessages))
     let value: unknown
     try {
       value = record(await this.client.request('dsh/sessionHistory', {
         threadId,
         ...(page.beforeSeq === undefined ? {} : { beforeSeq: page.beforeSeq }),
         ...(page.throughSeq === undefined ? {} : { throughSeq: page.throughSeq }),
-        ...(page.maxMessages === undefined ? {} : { maxMessages: page.maxMessages }),
+        ...(maxMessages === undefined ? {} : { maxMessages }),
       }, signal))
     } catch (error) {
       if (!isLegacySessionHistoryUnsupported(error)) throw error
@@ -1549,7 +1557,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         {
           beforeSeq: page.beforeSeq,
           throughSeq: page.throughSeq,
-          maxMessages: page.maxMessages,
+          maxMessages,
         },
       )
     }
