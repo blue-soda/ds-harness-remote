@@ -109,6 +109,21 @@ npm view @blue-soda/dsh-remote version
 E403（账号未开 2FA + `.npmrc` 里残留旧 `_authToken`，用 `npm logout` 清除并开启 2FA 后解决）
 与 E415（硬链接，用上面的脚本解决）。
 
+第二次发布记录（2026-10-06，`0.4.29`）：
+
+- **EOTP**：开启 2FA 后，非交互式发布会在**最后一步**要求一次性密码 ✗，npm 会打印一个
+  `https://www.npmjs.com/auth/cli/...` 的浏览器授权链接 ✓。该链接**只能由人工在浏览器完成** ✗
+  （它的 URL 内含凭据，会被日志/工具输出屏蔽 ✓），所以发布必须由人执行，或由人提供 6 位码后用
+  `npm publish --access public --otp=<码>` ✓。EOTP 发生在真正上传之前 ✓，因此失败不会留下半成品 ✓
+  （可用 `npm view @blue-soda/dsh-remote version` 确认仍是旧版本 ✓）。
+- **npm 会改写 `bin`**：`"ds-harness-remote": "./bin/ds-harness-remote.js"` 会在发布时被归一化为
+  去掉 `./` 的写法 ✓ 并把结果**写回 `package.json`** ✓，同时打印一条 "auto-corrected … was
+  invalid and removed" 警告 ✗。**该警告是虚惊** ✓：registry 元数据与实装测试（把打包结果
+  `npm install -g --prefix <临时目录>` ✓ 后 `ds-harness-remote.cmd` 存在 ✓）都证明 CLI 正常 ✓。
+  现已采纳 npm 的写法，`scripts/verify-dsh-plugin.mjs` 对**npm 包**断言归一化路径 ✓
+  （根包不发布，保留显式路径 ✓）。
+- **发布前必须先断硬链接** ✓（见上节 ✓），且重新构建/安装 profile 之后要再跑一次 ✓。
+
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
 
 ## Current Status
