@@ -23,3 +23,4 @@ artifacts/
 
 # Minimal self-hosted Server credentials and local state
 apps/server/data/
+packages/plugin/dist-types/

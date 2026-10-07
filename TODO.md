@@ -301,3 +301,12 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   而不是整个用例；
   (c) 隐藏目录断言假设"点号前缀即隐藏"，而实现在 Windows 上按平台返回 `hidden: false` → 期望按平台收敛。
   (c) 是链接修好后**首次**在 Windows 上真正执行到的断言。至此全量测试 330/330 通过。
+- [x] **构建会损坏 profile 副本的硬链接（2026-10-08 定案并修复）**：`tsc -p tsconfig.emit.json` 的 `outDir` 是
+  `./dist`，所以它**原地截断** `dist/index.js`（写成 20KB 的源码直出），随后 `build-bundles.mjs` 用原子重命名把
+  工作区换成新的 1072KB 文件 —— 但 pnpm 安装到 profile 的是**硬链接**，仍指向被截断的旧 inode，于是 Desktop 加载即
+  语法报错、插件崩溃（Host 掉线 → 客户端灾难回退 → 重连拿不到 Host）。两个连带坑：`emitDeclarationOnly` 在
+  `tsconfig.emit.json` 顶层无效（`--showConfig` 里根本不出现，且 tsc 要求 `outDir` 必须写在 `compilerOptions` 内，
+  写错会让构建直接失败并留下坏文件）；`fsutil hardlink list` 的输出不足以判断是否硬链接。**修复**：emit 输出改到
+  `dist-types/`（已加入 .gitignore），`dist/index.js` 从此只由打包器写；实测"构建 → 再构建"后 profile 副本稳定
+  保持 1072KB。**规则**：刷新 profile 副本前先比对大小（≈1MB），且刷新后不要再构建（或构建后重新刷新）。
+
