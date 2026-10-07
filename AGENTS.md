@@ -45,86 +45,21 @@ docs/
   server.md            完整 Server 设计与互操作契约、自部署版本范围入口
 ```
 
-仓库根包同时是 DSH Desktop 的 GitHub 安装边界：根 `package.json` 必须保留
-`dsh.bundle.patch`、Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用
-构建脚本，所以根 `index.js`、`packages/plugin/dist/index.js`、`client.github.js` 与
-`packages/plugin/bin/ds-harness-remote.js` 是需要提交的发布入口。
+仓库根包同时是 DSH Desktop 的 GitHub 安装边界：根 `package.json` 必须保留 `dsh.bundle.patch`、
+Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建脚本，因此根 `index.js`、
+`packages/plugin/dist/index.js`、`client.github.js` 与 `packages/plugin/bin/ds-harness-remote.js` 必须提交。
 
-**发布名与上游归属（2026-10-06）**：本仓库是 `liguobao/ds-harness-remote` 的 fork（MIT），
-npm 上的 `ds-harness-remote` 属于上游作者，因此**本 fork 以 `@blue-soda/dsh-remote` 发布**。
-发布入口是包目录内的 `npm publish`（`npm publish -w packages/plugin` **不可用**：npm 不读
-pnpm workspace，会报 `No workspaces found`）：
+**发版三条硬规则**（做错任一条发布会直接失败）：
 
-```bash
-cd packages/plugin && npm publish --access public
-```
+1. 发布前执行 `node scripts/break-hard-links.mjs packages/plugin`，否则 registry 以 `415 … Hard link is
+   not allowed` 拒收（pnpm 让包内文件与 profile 里的安装副本共享 inode）。
+2. npm **不读 pnpm workspace**：`npm publish -w packages/plugin` 报 `No workspaces found`；必须
+   `cd packages/plugin && npm publish --access public`。
+3. 开启 2FA 后非交互式发布会在**最后一步**要求一次性密码（EOTP）：需人工在浏览器完成授权，或由人提供
+   6 位码后加 `--otp=<码>`；该失败发生在真正上传之前，不会留下半成品。
 
-改名只涉及**包名与解析入口**：根与包的 `package.json`、两个 `cordis.patch.yml` 的 `name:`、
-客户端 module id（`scripts/build-bundles.mjs` 与 `src/client.ts` 兜底）、两个 `dsh-plugin.json`
-的 `name` 与 `source.repository`、`scripts/verify-dsh-plugin.mjs` 的包名断言。**保持不变**：
-Cordis 实例 `id:`、插件导出的 `name`、设置命名空间 `ds-harness-remote`/`dsh-remote`、控制路由
-`/ds-harness-remote`、CLI bin 名、`dsh-plugin.json` 的 `id` —— 因此设备授权与设置**不迁移**。
-profile 迁移 = 依赖键 + `package.json` 的 `dsh.profile.bundles` 条目改新名（`cordis.patch.yml`
-只按 `id` 覆盖配置，无需改）。`publishConfig` 已移除 `provenance`（本地发布无法生成 ✓），
-如需 provenance 请改由 GitHub Actions 发布。上游引用**故意保留**：`docs/design/` 的上游 issue 与
-`.github/release-notes.md` 中致谢的上游 PR。
-
-**发布前必须断开硬链接**：pnpm 会让包文件与 profile 里的安装副本共享 inode，npm 打包时按 inode
-去重并生成 tar 硬链接条目，而 registry 直接拒收：
-
-```
-npm error 415 Unsupported Media Type - Hard link is not allowed
-```
-
-所以 `npm publish` **之前**执行一次（重写被发布文件、各占独立 inode，内容不变）：
-
-```bash
-node scripts/break-hard-links.mjs packages/plugin
-```
-
-脚本按包的 `files` 列表遍历，成功时输出 `0 still shared`。任何重新构建或 profile 安装之后都
-建议再跑一次。另注意 npm **不理解 pnpm workspace**：`npm publish -w packages/plugin` 会报
-`No workspaces found`，必须进入包目录发布。
-
-**发版清单**（`verify-version-sync.mjs` 要求**三处版本号一致**：根 `package.json`、
-`packages/plugin/package.json`、`packages/plugin/src/version.ts`）：
-
-```bash
-# 1) 三处改成同一个新版本号
-# 2) 构建：会校验版本一致并重新生成两个 client bundle
-pnpm --filter @blue-soda/dsh-remote build
-# 3) 校验 DSH bundle 契约（包名、bin、exports、patch id、客户端 module id）
-node scripts/verify-dsh-plugin.mjs
-# 4) 断开硬链接（否则 registry 以 415 拒收）
-node scripts/break-hard-links.mjs packages/plugin
-# 5) 发布（必须进包目录；scoped 包需要 --access public）
-cd packages/plugin && npm publish --access public
-# 6) 打 tag 并推送（推送目标是 fork 与自建 Server 的镜像）
-git tag -f -a vX.Y.Z -m "ds-harness-remote X.Y.Z" && git push -f fork vX.Y.Z && git push fork main
-# 7) 核对（registry 传播有几秒延迟，404 时稍等再查）
-npm view @blue-soda/dsh-remote version
-```
-
-首次发布的实测记录（2026-10-06）：`@blue-soda/dsh-remote@0.4.28` ✓；期间依次遇到
-E403（账号未开 2FA + `.npmrc` 里残留旧 `_authToken`，用 `npm logout` 清除并开启 2FA 后解决）
-与 E415（硬链接，用上面的脚本解决）。
-
-第二次发布记录（2026-10-06，`0.4.29`）：
-
-- **EOTP**：开启 2FA 后，非交互式发布会在**最后一步**要求一次性密码 ✗，npm 会打印一个
-  `https://www.npmjs.com/auth/cli/...` 的浏览器授权链接 ✓。该链接**只能由人工在浏览器完成** ✗
-  （它的 URL 内含凭据，会被日志/工具输出屏蔽 ✓），所以发布必须由人执行，或由人提供 6 位码后用
-  `npm publish --access public --otp=<码>` ✓。EOTP 发生在真正上传之前 ✓，因此失败不会留下半成品 ✓
-  （可用 `npm view @blue-soda/dsh-remote version` 确认仍是旧版本 ✓）。
-- **npm 会改写 `bin`**：`"ds-harness-remote": "./bin/ds-harness-remote.js"` 会在发布时被归一化为
-  去掉 `./` 的写法 ✓ 并把结果**写回 `package.json`** ✓，同时打印一条 "auto-corrected … was
-  invalid and removed" 警告 ✗。**该警告是虚惊** ✓：registry 元数据与实装测试（把打包结果
-  `npm install -g --prefix <临时目录>` ✓ 后 `ds-harness-remote.cmd` 存在 ✓）都证明 CLI 正常 ✓。
-  现已采纳 npm 的写法，`scripts/verify-dsh-plugin.mjs` 对**npm 包**断言归一化路径 ✓
-  （根包不发布，保留显式路径 ✓）。
-- **发布前必须先断硬链接** ✓（见上节 ✓），且重新构建/安装 profile 之后要再跑一次 ✓。
-
-空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
+包名与上游归属、完整发版清单（含三处版本号必须一致）与两次发布的实测复盘见
+[`docs/release.md`](docs/release.md)。
 
 ## Current Status
 
@@ -200,31 +135,22 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 
 ## Validation Baseline
 
-截至 2026-09-16：
+截至 2026-10-06（当前基线）：
 
-- workspace check 与 DSH bundle 校验通过
-- Plugin test：28 个测试文件、228 个测试；Android test 通过：14 个测试文件、163 个测试。本机
-  Windows 运行 `tests/codex-domain.test.ts` 有 3 个既有的路径分隔符/目录顺序平台假设失败，
-  `tests/werift-rtc.test.ts` 的 `lan` 候选断言受本机 VPN/虚拟网卡候选池影响，两者均与
-  Remote status 推送改动无关；完整 workspace 数量以当前 CI 输出为准
-- workspace build 通过，包括 Android Hermes bundle
-- 真实设备验证已覆盖 Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC、CodeX Desktop/Android E2E 与独立 Server 跨仓库联调
-- 独立 `dsh-v0.1.6-alpha.1` 实例验证通过：Plugin 树加载、Host identity、Codex 域与 client bundle 下发正常，Web → Host 主链路可用；peer range 与构建/测试基线已升级到 `@deepseek-ai/dsh-*@0.1.6-alpha.1`
-- `git diff --check` 通过
+- workspace check 与 DSH bundle 校验通过；`git diff --check` 通过
+- Plugin 测试 **326 个**：**320 通过**、**6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
+  路径分隔符/目录顺序平台假设；`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡影响）
+- 本次新增测试：`tests/method-policy.test.ts`（6）、`tests/harness-api-history.test.ts`（2）、
+  `tests/atomic-file.test.ts`（4）
+- Codex App Server 版本基线 **0.160.0**（`generate-json-schema` 产物用于逐字段对照）；只读端到端自检
+  脚本 `scripts/codex-app-server-smoke.mts`
+- 真实设备验证：Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC，以及
+  Desktop ↔ Web 的远程 CodeX 工作区（会话名称、历史与对话）
+- 已知构建警告：Metro 对 `@noble/hashes/crypto.js` 使用 package exports fallback（见 `TODO.md`，
+  不得静默删除说明）
 
-已知构建警告：Metro 对 `@noble/hashes/crypto.js` 使用 package exports fallback。该问题记录在 `TODO.md`，不得静默删除说明。
-
-2026-09-20 开源自部署 Server 补充验证：check、11 个核心测试与生产 build 通过；构建产物本地启动后，健康检查、页面及静态资源、账号登录、Cookie 鉴权与未授权拒绝通过。Docker daemon 未运行，未验证镜像构建和容器启动；真实跨机与反向代理长期连接仍待验证。独立 Server 的既有联调结果不等于本版本已完成部署验收。
-
-2026-10-06 Plugin 补充验证：`pnpm --filter ds-harness-remote build` 与 `pnpm -r check` 通过；
-全量 Plugin 测试 **322 个**，其中 **6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
-路径分隔符/目录顺序平台假设，`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡
-影响），**316 通过**；本轮新增 `tests/method-policy.test.ts`（6 个，覆盖 `codex.app.call`
-allowlist 的上游字段、历史分页上限与 fail-closed 行为）、`tests/harness-api-history.test.ts`
-（2 个，页大小钳制），并在 `tests/codex-virtual-harness.test.ts` 增加本地端点委派与载体历史
-页钳制的断言。Codex App Server 版本探测基线为 **0.160.0**（`codex app-server
-generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app-server-smoke.mts` 在真实
-0.160.0 上做只读端到端检查。真实跨机结论见下节"用户实测确认"。
+按日期追加的历史验证记录（当时的构建、实机结论与尚未完成的验收边界）见
+[`docs/validation-history.md`](docs/validation-history.md)。
 
 ## Implementation Rules
 
@@ -263,6 +189,7 @@ generate-json-schema` 产物用于逐字段对照），另有 `scripts/codex-app
 - `docs/protocol.md`：跨仓库协议规范。
 - `docs/config-and-role.md`：`role` 语义、配置写回路径与发行版 seed 默认值的契约（按需阅读，勿写入本文件）。
 - `docs/incidents/`：按需阅读的排查记录（叙事与验收过程；其中的**当前约束**已摘要进本文件）。
+- `docs/release.md`、`docs/validation-history.md`：发版清单与实测复盘、按日期追加的验证历史（按需阅读）。
 - `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
