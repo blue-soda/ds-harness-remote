@@ -6,6 +6,7 @@ import { generateKeyPair } from '@dsh-remote/crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
+  livenessProbeTimedOut,
   probeRemoteHostFeatures,
   remoteHostFeatures,
   type HostAuthorizationControl,
@@ -877,3 +878,84 @@ function gatewayWithCarrier() {
     },
   }
 }
+
+describe('remote liveness watch', () => {
+  const buildRuntime = async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-liveness-'))
+    directories.push(directory)
+    return new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+  }
+
+  const internals = (runtime: ClientModeRuntime) => runtime as unknown as {
+    connected: { client: unknown } | undefined
+    fellBackToLocal: boolean
+    startRemoteLivenessWatch: (client: unknown, targetDeviceId: string) => void
+  }
+
+  it('treats two unanswered probes as a lost connection and falls back for reconnecting', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = await buildRuntime()
+      const rpc = vi.fn(async () => {
+        throw Object.assign(new Error('RPC ping timed out after 5000ms'), { code: 'RPC_TIMEOUT' })
+      })
+      const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
+      const state = internals(runtime)
+      state.connected = { client }
+      state.fellBackToLocal = false
+      state.startRemoteLivenessWatch(client, 'device-a')
+
+      // The first interval probes once and tolerates the silence.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(rpc).toHaveBeenCalledTimes(1)
+      expect(state.connected).toBeDefined()
+
+      // The second consecutive silence marks the transport lost, exactly as a close would.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(rpc).toHaveBeenCalledTimes(2)
+      expect(state.connected).toBeUndefined()
+      expect(state.fellBackToLocal).toBe(true)
+      vi.clearAllTimers()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a connection whose probe is answered with a refusal', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = await buildRuntime()
+      const rpc = vi.fn(async () => {
+        throw Object.assign(new Error('METHOD_NOT_ALLOWED'), { code: 'METHOD_NOT_ALLOWED' })
+      })
+      const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
+      const state = internals(runtime)
+      state.connected = { client }
+      state.fellBackToLocal = false
+      state.startRemoteLivenessWatch(client, 'device-a')
+
+      await vi.advanceTimersByTimeAsync(10_000 * 3)
+      expect(rpc.mock.calls.length).toBeGreaterThanOrEqual(3)
+      expect(state.connected).toBeDefined()
+      expect(state.fellBackToLocal).toBe(false)
+      vi.clearAllTimers()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('only treats a timeout as proof the peer is gone', () => {
+    expect(livenessProbeTimedOut({ code: 'RPC_TIMEOUT' })).toBe(true)
+    expect(livenessProbeTimedOut({ code: 'METHOD_NOT_ALLOWED' })).toBe(false)
+    expect(livenessProbeTimedOut({ code: 'method-not-found' })).toBe(false)
+    expect(livenessProbeTimedOut(new Error('socket closed'))).toBe(false)
+    expect(livenessProbeTimedOut(undefined)).toBe(false)
+  })
+})

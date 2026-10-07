@@ -223,3 +223,13 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] 真机验证新旧 DSH 权限切换、Host 热开启/关闭终端、跨机重连、Windows 路径与 shell、长输出、IME/TalkBack/大字体
 - [ ] Android 图片/PDF/Office 只读预览真实 Host 与真机验收：大文件、转换超时/字体缺失、取消与断线、内存峰值、分页缩放
 - [ ] PDF 文本选择与 TalkBack 验收（当前已有受限文本叠层，真机未验证）
+
+## 远程连接：半开连接与列表兜底
+
+- [x] **半开连接导致重连失灵**（2026-10-07 用户实测）：客户端长时间后台后对端已被回收，但本端收不到 close，
+  connected 一直存在 → 不重连、UI 仍渲染远程工作区且每次调用失败。修法：client-runtime.ts 的
+  startRemoteLivenessWatch 每 10s 用带 5s 超时的 `ping` 探测（**有应答即活着，含拒绝**；只有超时算断），
+  连续 2 次超时即走与 close 相同的收尾（handleRemoteTransportLost）并进入既有重连循环。
+- [ ] **断连期间会话列表出现"本地+远程"混合**：远程目标仍被选中时，对端无法应答的**数据类**端点会落到
+  本地兜底，于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点
+  （`settings/describe`、插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。

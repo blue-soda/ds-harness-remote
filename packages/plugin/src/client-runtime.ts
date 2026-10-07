@@ -513,6 +513,88 @@ export class ClientModeRuntime {
     return this.status()
   }
 
+  /** Identifies the live liveness watch. */
+  private livenessRun = 0
+
+  /**
+   * Treat a remote transport as lost: clear the target and start the reconnect loop.
+   *
+   * Reached from the transport's own close event and from the liveness watch. Both paths
+   * must leave the runtime in exactly the same state, which is why they share this method:
+   * a suspended client can come back to a connection the peer already reaped without any
+   * close event ever arriving here.
+   * @param client - the connection that is gone.
+   * @param targetDeviceId - the Host it was bound to.
+   */
+  private handleRemoteTransportLost(client: RemoteClientCore, targetDeviceId: string): void {
+    if (this.connected?.client !== client) return
+    void this.closePreview()
+    this.connected = undefined
+    this.connectionProgress = undefined
+    this.pendingWorkspaceSelection = undefined
+    void this.closeCodexVirtual()
+    this.proxySwitch?.selectLocal()
+    this.gatewaySwitch.selectLocal()
+    // The UI keeps whatever the remote session rendered and offers no exit
+    // route once the mode reads 'local' again, so remember that the session
+    // dropped. The card uses this to keep a way back to the local shell.
+    this.fellBackToLocal = true
+    this.livenessRun += 1
+    void client.close().catch(() => undefined)
+    this.logger.warn('remote Harness transport lost; reconnecting', {
+      targetDeviceId: shortId(targetDeviceId),
+    })
+    void this.reconnectRemoteSession(targetDeviceId)
+  }
+
+  /**
+   * Probe a live remote session, because no close event reports a half-open link.
+   *
+   * A client that spends a long time in the background comes back to a connection the peer
+   * already dropped: nothing closed the socket here, so the session still looks connected,
+   * every call fails, and the UI keeps rendering a remote workspace it can no longer read.
+   * A short `ping` separates the two states - any reply, including a refusal, proves the
+   * peer is there, and only a timeout means it is gone. Detection then reuses the close path,
+   * so recovery is the same reconnect loop a user would otherwise trigger by exiting.
+   *
+   * Timers do not run while the client is suspended, so a pending wait lands on resume,
+   * which is exactly when the probe is needed.
+   * @param client - the connection to probe.
+   * @param targetDeviceId - the Host it is bound to.
+   */
+  private startRemoteLivenessWatch(client: RemoteClientCore, targetDeviceId: string): void {
+    const run = ++this.livenessRun
+    const intervalMs = 10_000
+    const timeoutMs = 5_000
+    const toleratedFailures = 2
+    void (async () => {
+      let failures = 0
+      for (;;) {
+        await new Promise<void>(resolve => { setTimeout(resolve, intervalMs) })
+        if (run !== this.livenessRun || this.connected?.client !== client) return
+        try {
+          await client.rpc('ping', {}, undefined, { timeoutMs })
+          failures = 0
+        } catch (error: unknown) {
+          if (!livenessProbeTimedOut(error)) {
+            // Any answer proves the peer is alive, including a refusal.
+            failures = 0
+            continue
+          }
+          failures += 1
+          this.logger.warn('remote Harness liveness probe timed out', {
+            targetDeviceId: shortId(targetDeviceId),
+            attempt: failures,
+          })
+          if (failures >= toleratedFailures) {
+            this.handleRemoteTransportLost(client, targetDeviceId)
+            return
+          }
+        }
+      }
+    })()
+  }
+
   /**
    * Re-establish a remote session whose transport closed.
    *
@@ -1052,24 +1134,9 @@ export class ClientModeRuntime {
         connectedPreference === undefined ? undefined : [connectedPreference],
       )
       connectedClient.onClose(() => {
-        if (this.connected?.client !== connectedClient) return
-        void this.closePreview()
-        this.connected = undefined
-        this.connectionProgress = undefined
-        this.pendingWorkspaceSelection = undefined
-        void this.closeCodexVirtual()
-        this.proxySwitch?.selectLocal()
-        this.gatewaySwitch.selectLocal()
-        // The UI keeps whatever the remote session rendered and offers no exit
-        // route once the mode reads 'local' again, so remember that the session
-        // dropped. The card uses this to keep a way back to the local shell.
-        this.fellBackToLocal = true
-        void connectedClient.close().catch(() => undefined)
-        this.logger.warn('remote Harness transport closed; reconnecting', {
-          targetDeviceId: shortId(target.deviceId),
-        })
-        void this.reconnectRemoteSession(target.deviceId)
+        this.handleRemoteTransportLost(connectedClient, target.deviceId)
       })
+      this.startRemoteLivenessWatch(connectedClient, target.deviceId)
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => undefined)
       this.logger.info('remote Harness transport ready', {
         targetDeviceId: shortId(target.deviceId),
@@ -1590,4 +1657,17 @@ function transportPreferenceForMode(
 
 function iceServersForAttempt(attempt: TransportAttempt, iceServers: RtcIceServer[]): RtcIceServer[] {
   return attempt === 'direct' ? stunOnlyIceServers(iceServers) : iceServers
+}
+
+/**
+ * Whether a liveness probe proved the peer is gone.
+ *
+ * The probe asks for a reply, not for success: a refusal still means something answered, so
+ * only a timeout marks the connection as lost.
+ * @param error - the error the probe rejected with.
+ * @returns true when the peer stopped answering altogether.
+ */
+export function livenessProbeTimedOut(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error
+    && (error as { code?: unknown }).code === 'RPC_TIMEOUT'
 }
