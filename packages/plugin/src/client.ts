@@ -59,6 +59,7 @@ interface RemoteStatus {
    */
   fellBackToLocal?: boolean
   connectedTargetDeviceId?: string
+  restoringTargetDeviceId?: string
   transport?: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'
   preferredTransports?: RemoteTransportPreference[]
   connectionProgress?: {
@@ -452,6 +453,7 @@ const en = {
   noRemoteWorkspaces: 'No remote workspaces yet. Use + to add one.',
   activeRemote: '{name}',
   exitRemote: 'Exit',
+  restoringRemoteTarget: 'Reconnecting…',
   addRemoteWorkspace: 'Add remote workspace',
   addCodexWorkspace: 'Add CodeX workspace',
   noCodexWorkspaces: 'No CodeX workspaces yet.',
@@ -710,6 +712,7 @@ const zh: Record<keyof typeof en, string> = {
   noRemoteWorkspaces: '这台主机还没有工作区，点击 + 添加。',
   activeRemote: '{name}',
   exitRemote: '退出',
+  restoringRemoteTarget: '正在重连…',
   addRemoteWorkspace: '添加远程工作区',
   addCodexWorkspace: '添加 CodeX 工作区',
   noCodexWorkspaces: '还没有 CodeX 工作区。',
@@ -2367,7 +2370,8 @@ window.__ModuleLoader__.load({
         },
         React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
         React.createElement('path', { d: 'M8 21h8M12 17v4' })), props.wide
-          ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
+          ? React.createElement('span', { className: 'dshRemoteSidebarLabel' },
+              status?.restoringTargetDeviceId === undefined ? remoteLabel : t('restoringRemoteTarget'))
           : null),
         (status?.mode === 'remote' || status?.fellBackToLocal === true) && props.wide ? React.createElement('button', {
           type: 'button',

@@ -11,6 +11,7 @@ import {
   type HostAuthorizationControl,
   type HostConnectionHandle,
 } from '../src/client-runtime.js'
+import { ClientTargetStore } from '../src/client-target-store.js'
 import type { ResolvedConfig } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { IdentityStore } from '../src/identity-store.js'
@@ -86,6 +87,49 @@ describe('ClientModeRuntime Host account control', () => {
       remoteGateway: false,
       codex: false,
     })
+  })
+
+  it('restores the recorded remote target and ignores records it cannot reach', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-target-runtime-'))
+    directories.push(directory)
+    const stateDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-target-state-'))
+    directories.push(stateDirectory)
+    const store = new ClientTargetStore(stateDirectory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+      undefined,
+      undefined,
+      store,
+    )
+    await runtime.start()
+
+    // Nothing recorded: a boot must not invent a target, and the UI stays on the local shell.
+    await expect(runtime.restoreLastTarget()).resolves.toBe(false)
+    expect(runtime.status().restoringTargetDeviceId).toBeUndefined()
+
+    await store.save({ mode: 'local' })
+    await expect(runtime.restoreLastTarget()).resolves.toBe(false)
+
+    // Recorded for another Server: not reachable through the configured one.
+    await store.save({ mode: 'remote', hostDeviceId: 'host-1', serverUrl: 'https://elsewhere.example.com' })
+    await expect(runtime.restoreLastTarget()).resolves.toBe(false)
+
+    await store.save({ mode: 'remote', hostDeviceId: 'host-1', serverUrl: config().serverUrl })
+    await expect(runtime.restoreLastTarget()).resolves.toBe(true)
+    // The window is told which Host is coming back before anything is connected.
+    expect(runtime.status()).toMatchObject({ restoringTargetDeviceId: 'host-1' })
+
+    // Returning to local records that choice and supersedes the retry loop.
+    await runtime.setMode('local')
+    expect(runtime.status().restoringTargetDeviceId).toBeUndefined()
+    await expect(store.load()).resolves.toMatchObject({ mode: 'local' })
+    // Let the superseded loop observe the new run id and exit instead of leaking a timer.
+    await new Promise(resolve => { setTimeout(resolve, 1_100) })
   })
 
   it('forwards only supported QR login providers to the Server API', async () => {

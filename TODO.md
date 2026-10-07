@@ -228,15 +228,24 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 - [ ] **半开连接（本端收不到 close）目前没有检测手段**：服务端心跳 25s、75s 无 pong 会 drop link 并通知 Host，
   因此 Relay 链路下通常由服务端先发现；但若本端 socket 静默失效且 close 事件丢失，插件会一直保持"已连接"状态。
+  2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），被判定为**
+
+## 远程连接：断联检测与列表兜底
+
+- [x] **进程被杀后重建会自动连回远程**（2026-10-07 实现）：插件把"上次的远程目标"写入
+  `<plugin state>/client-target.json`（`mode: local | remote`，remote 时含 Server 与 Host deviceId），
+  启动时 `restoreLastTarget()` 读取它；若为 remote 且 Server 与当前配置一致，就走既有的退避重连循环
+  （1s/2s/4s/8s/15s，之后每 30s），并通过 `status.restoringTargetDeviceId` 与侧栏文案显式显示正在重连。
+  切回本地会写回 `local` 记录并顶掉重试循环；认证类失败（`AUTH_REQUIRED`/`ACCOUNT_AUTH_REQUIRED`/
+  `AUTH_INVALID`/`TOKEN_EXPIRED`/`DEVICE_*`/`MEMBERSHIP_REQUIRED`）**立即停止重试**，因为等待无法修复它。
+  **Android 真机验收待做**（进程被回收后重开，确认自动连回与侧栏状态）。
+- [ ] **半开连接（本端收不到 close）仍然没有检测手段**：服务端心跳 25s、75s 无 pong 会 drop link 并通知 Host，
+  因此 Relay 链路下通常由服务端先发现；但若本端 socket 静默失效且 close 事件丢失，插件会一直保持"已连接"状态。
   2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），被判定为**无效修复**并已整体回退。
   重做之前先确认服务端超时是否已经足够，避免再加一层没有实际收益的机制。
 - [ ] **断连期间会话列表出现"本地+远程"混合**：远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
   于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点（`settings/describe`、
   插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。
-- [ ] **进程被杀后重建不会自动连回远程**：Android 长时间后台可能直接回收进程；重启后插件以本地模式启动，
-  不记得上次的远程目标，界面却可能仍指向远程 CodeX 工作区，于是工作区无会话、点「＋」建出本机会话并混进列表。
-  若要做到"再次上线自动重连"，需持久化上次远程目标（Server 地址 + Host deviceId）并在启动时带退避重试，
-  同时给出显式的连接状态，而不是让界面继续假装在远程工作区里。
 - [ ] **本地环境：`plugin-lifecycle` 11 个用例超时**（每个整齐 5s；2026-10-07 发现）。已用 A/B 验证与重连改动无关
   （把 `client-runtime.ts` 还原到修复前版本，同样 11 个失败）；`pnpm install` 每次都报 `Packages: -135`
   （疑似与运行中的实例/profile 安装互相拉扯），未能靠 install 恢复。需单独定位；**定位前不要把全量测试结果当作回归依据。**

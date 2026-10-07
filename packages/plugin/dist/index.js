@@ -20442,14 +20442,24 @@ var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
   "DEVICE_REVOKED",
   "TOKEN_EXPIRED"
 ]);
+var CREDENTIAL_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "AUTH_REQUIRED",
+  "ACCOUNT_AUTH_REQUIRED",
+  "AUTH_INVALID",
+  "TOKEN_EXPIRED",
+  "DEVICE_NOT_FOUND",
+  "DEVICE_REVOKED",
+  "MEMBERSHIP_REQUIRED"
+]);
 var ClientModeRuntime = class {
-  constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory) {
+  constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
     this.config = config;
     this.identities = identities;
     this.server = server;
     this.logger = logger;
     this.host = host;
     this.rtcFactoryProvider = rtcFactoryProvider;
+    this.targetStore = targetStore;
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
     this.gatewaySwitch.setRemoteAvailability(() => this.connected !== void 0);
@@ -20480,6 +20490,13 @@ var ClientModeRuntime = class {
   codexStreams = /* @__PURE__ */ new Map();
   connectionProgress;
   connectionProgressRun = 0;
+  /**
+   * Host a boot is trying to restore, reported to the UI while the retry loop runs.
+   *
+   * Nothing is connected yet, so without this the window would show the local shell while the
+   * user is still looking at the remote workspace they left.
+   */
+  restoringTargetDeviceId;
   closed = false;
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
@@ -20540,6 +20557,7 @@ var ClientModeRuntime = class {
       ...targetStatus,
       connected: this.connected !== void 0,
       fellBackToLocal: this.fellBackToLocal,
+      ...this.restoringTargetDeviceId === void 0 ? {} : { restoringTargetDeviceId: this.restoringTargetDeviceId },
       transport: this.connected?.client.getStats().mode ?? "Disconnected",
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ["relay"] : ["lan", "p2p", "turn", "relay"],
@@ -20689,7 +20707,9 @@ var ClientModeRuntime = class {
       await this.closeCodexStreams(previous2?.client);
       await previous2?.client.close().catch(() => void 0);
       this.fellBackToLocal = false;
+      this.restoringTargetDeviceId = void 0;
       this.remoteReconnectRun += 1;
+      await this.rememberTarget({ mode: "local" });
       this.logger.info("Harness target switched", { mode: "local" });
       return this.status();
     }
@@ -20712,6 +20732,8 @@ var ClientModeRuntime = class {
     await this.closeCodexVirtual();
     this.selectRemoteTarget(next);
     this.fellBackToLocal = false;
+    this.restoringTargetDeviceId = void 0;
+    await this.rememberTarget({ mode: "remote", hostDeviceId: next.target.deviceId });
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
@@ -20743,16 +20765,70 @@ var ClientModeRuntime = class {
         this.logger.info("remote Harness session reconnected", { targetDeviceId: shortId(targetDeviceId) });
         return;
       } catch (error) {
+        const code = safeErrorCode(error);
+        if (code !== void 0 && CREDENTIAL_FAILURE_CODES.has(code)) {
+          this.logger.warn("remote Harness reconnect stopped: authorization is required", {
+            targetDeviceId: shortId(targetDeviceId),
+            code
+          });
+          this.restoringTargetDeviceId = void 0;
+          return;
+        }
         if (attempt < 3 || attempt % 10 === 0) {
           this.logger.warn("remote Harness reconnect attempt failed", {
             targetDeviceId: shortId(targetDeviceId),
             attempt,
-            code: safeErrorCode(error)
+            code
           });
         }
       }
       attempt += 1;
     }
+  }
+  /**
+   * Persist the target a later boot may have to restore.
+   *
+   * A failure here must not fail a connect: the only cost is that a killed process comes back to
+   * the local shell, which is where it would have been without this record.
+   * @param target - the target to record.
+   */
+  async rememberTarget(target2) {
+    if (this.targetStore === void 0) return;
+    try {
+      await this.targetStore.save({
+        ...target2,
+        ...this.config.serverUrl === void 0 ? {} : { serverUrl: this.config.serverUrl }
+      });
+    } catch (error) {
+      this.logger.warn("could not record the remote target", { code: safeErrorCode(error) });
+    }
+  }
+  /**
+   * Reconnect to the target this device was last using, with the usual backoff.
+   *
+   * A resumed app can miss the transport close entirely - Android may reclaim the process - so
+   * nothing would start the retry loop and the user would face a local shell behind a remote
+   * workspace view. Restoring the recorded target gives that case the same loop a dropped
+   * transport gets. A target recorded for another Server is left alone: it is not reachable
+   * through the configured one.
+   * @returns true when a retry loop was started.
+   */
+  async restoreLastTarget() {
+    if (this.closed || this.connected !== void 0) return false;
+    const record7 = await this.targetStore?.load();
+    if (record7 === void 0 || record7.mode !== "remote" || record7.hostDeviceId === void 0) return false;
+    if (record7.serverUrl !== void 0 && record7.serverUrl !== this.config.serverUrl) {
+      this.logger.info("recorded remote target belongs to another Server; not restoring", {
+        targetDeviceId: shortId(record7.hostDeviceId)
+      });
+      return false;
+    }
+    this.restoringTargetDeviceId = record7.hostDeviceId;
+    this.logger.info("restoring the remote target of the previous run", {
+      targetDeviceId: shortId(record7.hostDeviceId)
+    });
+    void this.reconnectRemoteSession(record7.hostDeviceId);
+    return true;
   }
   async listRemoteDirectory(targetDeviceId, path, signal) {
     const remote = await this.ensureConnected(targetDeviceId, signal);
@@ -21663,6 +21739,65 @@ function iceServersForAttempt(attempt, iceServers) {
   return attempt === "direct" ? stunOnlyIceServers(iceServers) : iceServers;
 }
 
+// src/client-target-store.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join5 } from "node:path";
+var FILE_NAME = "client-target.json";
+var ClientTargetStore = class {
+  constructor(directory) {
+    this.directory = directory;
+  }
+  get file() {
+    return join5(this.directory, FILE_NAME);
+  }
+  /** Read the record. A missing, unreadable or malformed file reads as "no record". */
+  async load() {
+    let raw;
+    try {
+      raw = await readFile3(this.file, "utf8");
+    } catch {
+      return void 0;
+    }
+    try {
+      const value = JSON.parse(raw);
+      if (typeof value !== "object" || value === null) return void 0;
+      const record7 = value;
+      if (record7.schemaVersion !== 1) return void 0;
+      if (record7.mode !== "local" && record7.mode !== "remote") return void 0;
+      if (record7.mode === "remote" && (typeof record7.hostDeviceId !== "string" || record7.hostDeviceId.length === 0)) {
+        return void 0;
+      }
+      return {
+        schemaVersion: 1,
+        mode: record7.mode,
+        ...typeof record7.serverUrl === "string" && record7.serverUrl.length > 0 ? { serverUrl: record7.serverUrl } : {},
+        ...typeof record7.hostDeviceId === "string" && record7.hostDeviceId.length > 0 ? { hostDeviceId: record7.hostDeviceId } : {},
+        savedAt: typeof record7.savedAt === "number" ? record7.savedAt : 0
+      };
+    } catch {
+      return void 0;
+    }
+  }
+  /** Record the current target. Failures reach the caller so a boot can log them. */
+  async save(target2) {
+    const value = {
+      schemaVersion: 1,
+      mode: target2.mode,
+      ...target2.serverUrl === void 0 ? {} : { serverUrl: target2.serverUrl },
+      ...target2.hostDeviceId === void 0 ? {} : { hostDeviceId: target2.hostDeviceId },
+      savedAt: Date.now()
+    };
+    await mkdir2(this.directory, { recursive: true, mode: 448 });
+    await sweepStaleTemporaries(this.directory);
+    const temporary = this.file + "." + String(process.pid) + "." + randomUUID2() + ".tmp";
+    await writeFile2(temporary, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 384, flag: "wx" });
+    await chmod2(temporary, 384);
+    await replaceFile(temporary, this.file);
+    await chmod2(this.file, 384);
+  }
+};
+
 // src/control-runtime.ts
 import { hostname as hostname2 } from "node:os";
 import { existsSync as existsSync3 } from "node:fs";
@@ -21670,9 +21805,9 @@ import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rm as rm3, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod3, mkdir as mkdir3, readFile as readFile4, rm as rm3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname as dirname4, join as join5 } from "node:path";
+import { dirname as dirname4, join as join6 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -21701,14 +21836,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir(), ".dsh");
-    this.directory = options.directory ?? join5(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join6(options.homeDirectory ?? homedir(), ".dsh");
+    this.directory = options.directory ?? join6(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
-    await mkdir2(this.directory, { recursive: true, mode: 448 });
-    await chmod2(this.directory, 448);
-    const devicePath = join5(this.directory, "device.json");
-    const keyPath = join5(this.directory, "device.key");
+    await mkdir3(this.directory, { recursive: true, mode: 448 });
+    await chmod3(this.directory, 448);
+    const devicePath = join6(this.directory, "device.json");
+    const keyPath = join6(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -21722,8 +21857,8 @@ var IdentityStore = class {
     }
     await assertPrivateMode2(keyPath);
     try {
-      let record7 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
-      const privateKey = (await readFile3(keyPath, "utf8")).trim();
+      let record7 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
+      const privateKey = (await readFile4(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
       if (regenerated.publicKey !== record7.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
@@ -21777,11 +21912,11 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join5(this.directory, "trusted-peers.json");
+    const path = join6(this.directory, "trusted-peers.json");
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
-    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(path, "utf8")));
+    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile4(path, "utf8")));
     const peers = /* @__PURE__ */ new Map();
     for (const peer of parsed.peers) {
       if (peer.fingerprint !== fingerprint(peer.publicKey)) {
@@ -21793,7 +21928,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join6(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -21802,7 +21937,7 @@ var IdentityStore = class {
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
   const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join5(root, "servers", scope, role);
+  return join6(root, "servers", scope, role);
 }
 function fingerprint(publicKey) {
   const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -21821,13 +21956,13 @@ async function atomicJsonWrite(path, value, mode) {
 }
 async function atomicTextWrite(path, value, mode) {
   const directory = dirname4(path);
-  await mkdir2(directory, { recursive: true, mode: 448 });
+  await mkdir3(directory, { recursive: true, mode: 448 });
   await sweepStaleTemporaries(directory);
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
-  await writeFile2(temporary, value, { encoding: "utf8", mode, flag: "wx" });
-  await chmod2(temporary, mode);
+  await writeFile3(temporary, value, { encoding: "utf8", mode, flag: "wx" });
+  await chmod3(temporary, mode);
   await replaceFile(temporary, path);
-  await chmod2(path, mode);
+  await chmod3(path, mode);
 }
 async function exists2(path) {
   try {
@@ -21989,11 +22124,11 @@ var ControlStatusStream = class {
 };
 
 // src/codex/domain.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename2, isAbsolute as isAbsolute2, join as join6, relative, resolve } from "node:path";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join7, relative, resolve } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -22952,7 +23087,7 @@ var CodexRemoteDomain = class {
       await appServer.respond(message.id, { decision: "decline" });
       return;
     }
-    const requestHandle = randomUUID2();
+    const requestHandle = randomUUID3();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner.connectionId,
@@ -23334,15 +23469,15 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   if (hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
-    join6(userHome, "Applications", "ChatGPT.app")
+    join7(userHome, "Applications", "ChatGPT.app")
   ].flatMap((chatGptApp) => {
-    const codexCli = join6(chatGptApp, "Contents", "Resources", "codex-cli");
+    const codexCli = join7(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join6(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(join7(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord11(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
-      const candidate = join6(codexCli, manifest.entrypoint);
+      const candidate = join7(codexCli, manifest.entrypoint);
       if (!existsSync2(candidate)) return [];
       accessSync(candidate, constants.X_OK);
       return [candidate];
@@ -23353,14 +23488,14 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   return [.../* @__PURE__ */ new Set([
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    join7(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
 }
 function bundledWindowsCodex(userHome) {
-  const bin = join6(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
+  const bin = join7(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
   try {
-    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
+    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join7(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
     const candidate = newest[0]?.candidate;
     return candidate === void 0 ? [] : [candidate];
   } catch {
@@ -24148,7 +24283,7 @@ var TerminalPolicy = class {
 };
 
 // src/service.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 
 // src/connection-controller.ts
 var ConnectionController = class {
@@ -27022,8 +27157,8 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/codex-workspace-bridge.ts
 import { spawn as spawn4 } from "node:child_process";
-import { realpath as realpath2, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve3 } from "node:path";
+import { realpath as realpath2, lstat, readdir as readdir4, readFile as readFile5, stat as stat6, watch } from "node:fs/promises";
+import { isAbsolute as isAbsolute4, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -27113,7 +27248,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join7(target2, entry.name);
+          const item = join8(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -27129,7 +27264,7 @@ var CodexWorkspaceBridge = class {
       if (!info.isFile()) throw new RpcError("CODEX_WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
       const offset = readOffset(args);
       const limit = readLimit(args);
-      const bytes = await readFile4(target2);
+      const bytes = await readFile5(target2);
       if (bytes.byteLength > MAX_READ_BYTES) throw new RpcError("CODEX_WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       if (endpoint === "workspaceFiles/readBytes") {
         const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
@@ -27818,7 +27953,7 @@ var HostPluginRuntime = class {
     let reportedVersion;
     let errorCode6;
     try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID3(), payload: {} });
+      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID4(), payload: {} });
       if (response === void 0) throw new Error("ApiProxy is unavailable");
       if (!response.result.ok) {
         errorCode6 = response.result.error.code;
@@ -27888,7 +28023,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -27976,7 +28111,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join8(directory, "device.json"))) {
+  if (!await exists3(join9(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -28020,7 +28155,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join8(directory, "device.json"))) {
+  if (!await exists3(join9(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
@@ -28722,7 +28857,10 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       apiProxy,
       nativeTypertGateway,
       logger,
-      hostControl
+      hostControl,
+      // The RTC factory keeps its default; the target store lives beside the plugin state.
+      void 0,
+      new ClientTargetStore(defaultIdentityDirectory)
     );
   }
   const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl, deepseekSession);
@@ -28737,6 +28875,7 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       await runtime.start();
       if (clientRuntime !== void 0) {
         await clientRuntime.start();
+        await clientRuntime.restoreLastTarget();
       } else {
         logger.warn("client remote mode is unavailable", {
           serverConfigured: config.serverUrl !== void 0,

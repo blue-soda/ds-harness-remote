@@ -1933,6 +1933,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteWorkspaces: "No remote workspaces yet. Use + to add one.",
     activeRemote: "{name}",
     exitRemote: "Exit",
+    restoringRemoteTarget: "Reconnecting\u2026",
     addRemoteWorkspace: "Add remote workspace",
     addCodexWorkspace: "Add CodeX workspace",
     noCodexWorkspaces: "No CodeX workspaces yet.",
@@ -2188,6 +2189,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteWorkspaces: "\u8FD9\u53F0\u4E3B\u673A\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A\uFF0C\u70B9\u51FB + \u6DFB\u52A0\u3002",
     activeRemote: "{name}",
     exitRemote: "\u9000\u51FA",
+    restoringRemoteTarget: "\u6B63\u5728\u91CD\u8FDE\u2026",
     addRemoteWorkspace: "\u6DFB\u52A0\u8FDC\u7A0B\u5DE5\u4F5C\u533A",
     addCodexWorkspace: "\u6DFB\u52A0 CodeX \u5DE5\u4F5C\u533A",
     noCodexWorkspaces: "\u8FD8\u6CA1\u6709 CodeX \u5DE5\u4F5C\u533A\u3002",
@@ -3337,7 +3339,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
               },
               React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
               React.createElement("path", { d: "M8 21h8M12 17v4" })
-            ), props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null),
+            ), props.wide ? React.createElement(
+              "span",
+              { className: "dshRemoteSidebarLabel" },
+              status?.restoringTargetDeviceId === void 0 ? remoteLabel : t("restoringRemoteTarget")
+            ) : null),
             (status?.mode === "remote" || status?.fellBackToLocal === !0) && props.wide ? React.createElement("button", {
               type: "button",
               className: "dshRemoteExitLink",

@@ -3,6 +3,7 @@ import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
 import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import { ClientModeRuntime, type HostConnectionHandle } from './client-runtime.js'
+import { ClientTargetStore } from './client-target-store.js'
 import {
   Config,
   DEFAULT_REMOTE_SERVER_URL,
@@ -301,6 +302,9 @@ async function activate(
       nativeTypertGateway,
       logger,
       hostControl,
+      // The RTC factory keeps its default; the target store lives beside the plugin state.
+      undefined,
+      new ClientTargetStore(defaultIdentityDirectory),
     )
   }
 
@@ -319,6 +323,9 @@ async function activate(
       await runtime.start()
       if (clientRuntime !== undefined) {
         await clientRuntime.start()
+        // Android may have reclaimed the process while it was in the background: come back to the
+        // recorded target on our own instead of leaving the user in a local shell.
+        await clientRuntime.restoreLastTarget()
       } else {
         logger.warn('client remote mode is unavailable', {
           serverConfigured: config.serverUrl !== undefined,

@@ -11,6 +11,7 @@ import {
 } from '@dsh-remote/webrtc'
 import { ApiProxySwitch, type HarnessMode } from './api-proxy-switch.js'
 import { ClientSecureTransport } from './client-secure-transport.js'
+import { ClientTargetStore } from './client-target-store.js'
 import type { ResolvedConfig } from './config.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
@@ -185,6 +186,22 @@ export interface HostAuthorizationControl {
   codexCloseStream?(input: unknown): Promise<unknown>
 }
 
+/**
+ * Failures a retry loop cannot resolve on its own.
+ *
+ * The Account authorization has to be redone by the user, so retrying only burns attempts and
+ * would keep a boot restore alive forever on a device that is no longer signed in.
+ */
+const CREDENTIAL_FAILURE_CODES = new Set([
+  'AUTH_REQUIRED',
+  'ACCOUNT_AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'TOKEN_EXPIRED',
+  'DEVICE_NOT_FOUND',
+  'DEVICE_REVOKED',
+  'MEMBERSHIP_REQUIRED',
+])
+
 export class ClientModeRuntime {
   private preview?: LoopbackPreview
   private identity?: HostIdentity
@@ -212,6 +229,13 @@ export class ClientModeRuntime {
   private readonly codexStreams = new Map<string, CodexLoopbackStream>()
   private connectionProgress?: ConnectionProgressState
   private connectionProgressRun = 0
+  /**
+   * Host a boot is trying to restore, reported to the UI while the retry loop runs.
+   *
+   * Nothing is connected yet, so without this the window would show the local shell while the
+   * user is still looking at the remote workspace they left.
+   */
+  private restoringTargetDeviceId?: string
   private closed = false
 
   constructor(
@@ -223,6 +247,7 @@ export class ClientModeRuntime {
     private readonly logger: SafeLogger,
     private readonly host?: HostAuthorizationControl,
     private readonly rtcFactoryProvider: (options?: WeriftFactoryOptions) => Promise<RtcPeerConnectionFactory | undefined> = loadNodeRtcFactory,
+    private readonly targetStore?: ClientTargetStore,
   ) {
     this.proxySwitch = apiProxy === undefined ? undefined : new ApiProxySwitch(apiProxy)
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway)
@@ -309,6 +334,9 @@ export class ClientModeRuntime {
       ...targetStatus,
       connected: this.connected !== undefined,
       fellBackToLocal: this.fellBackToLocal,
+      ...(this.restoringTargetDeviceId === undefined
+        ? {}
+        : { restoringTargetDeviceId: this.restoringTargetDeviceId }),
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -483,7 +511,9 @@ export class ClientModeRuntime {
       // screen after the user has already acted on them. Stop any pending
       // reconnect too — the user asked for local, not for a retry.
       this.fellBackToLocal = false
+      this.restoringTargetDeviceId = undefined
       this.remoteReconnectRun += 1
+      await this.rememberTarget({ mode: 'local' })
       this.logger.info('Harness target switched', { mode: 'local' })
       return this.status()
     }
@@ -507,6 +537,8 @@ export class ClientModeRuntime {
     this.selectRemoteTarget(next)
     // A fresh remote session clears the record of an earlier dropped one.
     this.fellBackToLocal = false
+    this.restoringTargetDeviceId = undefined
+    await this.rememberTarget({ mode: 'remote', hostDeviceId: next.target.deviceId })
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
     this.logger.info('Harness target switched', { mode: 'remote', targetDeviceId: shortId(next.target.deviceId) })
@@ -542,18 +574,76 @@ export class ClientModeRuntime {
         this.logger.info('remote Harness session reconnected', { targetDeviceId: shortId(targetDeviceId) })
         return
       } catch (error) {
+        const code = safeErrorCode(error)
+        // Credentials that are missing or refused cannot be fixed by waiting, and a boot restore
+        // would otherwise retry an unauthorized connection forever. Stop and let the user sign in.
+        if (code !== undefined && CREDENTIAL_FAILURE_CODES.has(code)) {
+          this.logger.warn('remote Harness reconnect stopped: authorization is required', {
+            targetDeviceId: shortId(targetDeviceId),
+            code,
+          })
+          this.restoringTargetDeviceId = undefined
+          return
+        }
         // Report the early attempts, then only occasionally: a Host that stays
         // away would otherwise fill the log every half minute.
         if (attempt < 3 || attempt % 10 === 0) {
           this.logger.warn('remote Harness reconnect attempt failed', {
             targetDeviceId: shortId(targetDeviceId),
             attempt,
-            code: safeErrorCode(error),
+            code,
           })
         }
       }
       attempt += 1
     }
+  }
+
+  /**
+   * Persist the target a later boot may have to restore.
+   *
+   * A failure here must not fail a connect: the only cost is that a killed process comes back to
+   * the local shell, which is where it would have been without this record.
+   * @param target - the target to record.
+   */
+  private async rememberTarget(target: { mode: 'local' | 'remote'; hostDeviceId?: string }): Promise<void> {
+    if (this.targetStore === undefined) return
+    try {
+      await this.targetStore.save({
+        ...target,
+        ...(this.config.serverUrl === undefined ? {} : { serverUrl: this.config.serverUrl }),
+      })
+    } catch (error: unknown) {
+      this.logger.warn('could not record the remote target', { code: safeErrorCode(error) })
+    }
+  }
+
+  /**
+   * Reconnect to the target this device was last using, with the usual backoff.
+   *
+   * A resumed app can miss the transport close entirely - Android may reclaim the process - so
+   * nothing would start the retry loop and the user would face a local shell behind a remote
+   * workspace view. Restoring the recorded target gives that case the same loop a dropped
+   * transport gets. A target recorded for another Server is left alone: it is not reachable
+   * through the configured one.
+   * @returns true when a retry loop was started.
+   */
+  async restoreLastTarget(): Promise<boolean> {
+    if (this.closed || this.connected !== undefined) return false
+    const record = await this.targetStore?.load()
+    if (record === undefined || record.mode !== 'remote' || record.hostDeviceId === undefined) return false
+    if (record.serverUrl !== undefined && record.serverUrl !== this.config.serverUrl) {
+      this.logger.info('recorded remote target belongs to another Server; not restoring', {
+        targetDeviceId: shortId(record.hostDeviceId),
+      })
+      return false
+    }
+    this.restoringTargetDeviceId = record.hostDeviceId
+    this.logger.info('restoring the remote target of the previous run', {
+      targetDeviceId: shortId(record.hostDeviceId),
+    })
+    void this.reconnectRemoteSession(record.hostDeviceId)
+    return true
   }
 
   async listRemoteDirectory(targetDeviceId: string, path?: string, signal?: AbortSignal): Promise<RemoteDirectoryListing> {
