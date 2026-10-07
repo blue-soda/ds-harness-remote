@@ -3289,7 +3289,10 @@ window.__ModuleLoader__.load({
           void open.then(async sessionId => {
             if (disposed) return
             ctx.sessions.open(sessionId)
-            window.sessionStorage.removeItem(pendingWorkspaceSelectionKey)
+            // The stored selection is what lets a reload land back in this Workspace: a recovery that
+            // reloads the page (see the reconnect refresh below) has no status selection to consume,
+            // because the page it replaced already consumed it. The tab therefore keeps remembering the
+            // Workspace it was in, which is also the behaviour a reload should have.
             await control('workspace.selection.consume', pending).catch(() => undefined)
           }).catch(reason => {
             if (!disposed) console.warn('remote workspace selection failed:', reason)
