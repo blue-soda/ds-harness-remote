@@ -309,4 +309,12 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   写错会让构建直接失败并留下坏文件）；`fsutil hardlink list` 的输出不足以判断是否硬链接。**修复**：emit 输出改到
   `dist-types/`（已加入 .gitignore），`dist/index.js` 从此只由打包器写；实测"构建 → 再构建"后 profile 副本稳定
   保持 1072KB。**规则**：刷新 profile 副本前先比对大小（≈1MB），且刷新后不要再构建（或构建后重新刷新）。
+- [x] **Desktop 启动崩溃（welcome 认证失败）复盘归档（2026-10-08）**：桌面重启后连"无插件"都起不来，
+  根因是**陈旧的 Electron 会话状态**（`electron-user-data`）——由 `BrowserAuth.isAuthenticated()` 的判定条件
+  （cookie 必须由**当前激活密钥**签名且绑定 authority；每次启动端口都不同）决定，于是连应用自己打印的 launch URL
+  都被回 401；改名该目录后一次通过（崩溃日志 0 份）。**与插件/profile/账号凭证无关**，磁盘凭证始终完整；
+  用户侧唯一动作是重新登录一次（当时 `client/server-credentials.json` 为 `AUTH_INVALID`，Host 侧正常刷新）。
+  途中另有两个真实但不致命的问题：定制发行版的 `BUNDLED_EXTRA_SPEC = '^0.4.30'` 在版本未发布时会阻塞启动
+  （现已发布 ✓）、以及改过 profile 依赖后必须补跑 `dsh-desktop-full.cmd`。完整时间线与证据见
+  [`docs/incidents/desktop-welcome-auth-2026-10-08.md`](docs/incidents/desktop-welcome-auth-2026-10-08.md)。
 
