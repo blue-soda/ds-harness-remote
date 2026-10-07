@@ -3207,6 +3207,10 @@ window.__ModuleLoader__.load({
       let firstSnapshot = true
       let wasRemoteView = false
       let wasFallenBack = false
+      // A fallback makes the renderer read the local shell's Workspaces, and that store cannot be
+      // re-read from here - so a page that ever saw the fallback has to be reloaded on recovery too,
+      // even if it had shown the remote view earlier.
+      let sawFallback = false
       let wasReconnecting = false
       let lastFallbackReloadAt = 0
       let lastRecoveryReloadAt = 0
@@ -3219,6 +3223,7 @@ window.__ModuleLoader__.load({
           firstSnapshot = false
           wasRemoteView = current.mode === 'remote'
           wasFallenBack = current.fellBackToLocal === true
+          sawFallback = wasFallenBack
           wasReconnecting = current.reconnecting !== undefined
           return
         }
@@ -3226,6 +3231,7 @@ window.__ModuleLoader__.load({
         // mode, and testing the updated flag would make the recovery reload unreachable.
         const sawRemoteViewBefore = wasRemoteView
         if (current.mode === 'remote') wasRemoteView = true
+        if (current.fellBackToLocal === true) sawFallback = true
         if (current.fellBackToLocal === true) {
           if (!wasFallenBack) {
             wasFallenBack = true
@@ -3253,7 +3259,7 @@ window.__ModuleLoader__.load({
         // store cannot be re-read from here, so the remote Workspace it should show after recovery is not
         // in it - which is why the sessions come back ungrouped. Landing on the remote carriers again is
         // the only way to a Workspace store that has them.
-        if (!sawRemoteViewBefore && Date.now() - lastRecoveryReloadAt > 5_000) {
+        if ((!sawRemoteViewBefore || sawFallback) && Date.now() - lastRecoveryReloadAt > 5_000) {
           lastRecoveryReloadAt = Date.now()
           window.location.reload()
         }
