@@ -28479,7 +28479,7 @@ function remoteStatusLines(target2) {
   const diagnostics = runtime.diagnostics();
   const codex = runtime.codexStatus();
   const capabilities = new Set(diagnostics.capabilities);
-  const connection = status2.online ? "online" : status2.reconnecting ? "reconnecting" : status2.accountRequired ? "authorization required" : "offline";
+  const connection = status2.online ? "online" : status2.starting ? "starting" : status2.reconnecting ? "reconnecting" : status2.accountRequired ? "authorization required" : "offline";
   return [
     `Server: ${config.serverUrl ?? "not configured"}`,
     "Host control: enabled",

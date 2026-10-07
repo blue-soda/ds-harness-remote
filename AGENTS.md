@@ -142,10 +142,9 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
   macOS 的 ChatGPT 包路径（Windows 上本就不会被发现），4 个依赖创建 symlink，本机未开启开发者模式而报
   `EPERM: operation not permitted, symlink ...`。`tests/werift-rtc.test.ts` 的 `lan` 候选断言本次未复现
 - 全域耗时 **12.7s**（此前 57s）：`plugin-lifecycle` 的 11 个超时已定位并修复，见 `TODO.md`
-- 本次新增测试：`tests/client-target-store.test.ts`（3）、`client-runtime.test.ts` 的启动恢复用例（1）、
-  `apps/server/tests/log.test.ts`（3）
-- 本次新增测试：`tests/method-policy.test.ts`（6）、`tests/harness-api-history.test.ts`（2）、
-  `tests/atomic-file.test.ts`（4）
+- 新增测试：`tests/client-target-store.test.ts`（3）、`client-runtime.test.ts` 的启动恢复用例（1）、
+  `apps/server/tests/log.test.ts`（3）；此前一轮的 `tests/method-policy.test.ts`（6）、
+  `tests/harness-api-history.test.ts`（2）、`tests/atomic-file.test.ts`（4）保持通过
 - Codex App Server 版本基线 **0.160.0**（`generate-json-schema` 产物用于逐字段对照）；只读端到端自检
   脚本 `scripts/codex-app-server-smoke.mts`
 - 真实设备验证：Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC，以及
