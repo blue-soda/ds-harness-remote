@@ -174,12 +174,18 @@ export class TypertGatewaySwitch {
           throw error
         })
         : !this.routesToRemote(endpoint)
-          ? this.localDispatch!(endpoint, payload, signal)
+          ? Promise.resolve(this.localDispatch!(endpoint, payload, signal))
+            .then(result => (logReadBytesShape('local', endpoint, result), result))
           : this.withLocalFallback(
             endpoint,
             () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
             () => this.localDispatch!(endpoint, payload, signal),
-          ).then(result => normalizeByteResult(endpoint, result) as typeof result)
+          ).then(result => {
+            logReadBytesShape('remote-raw', endpoint, result)
+            const normalized = normalizeByteResult(endpoint, result) as typeof result
+            logReadBytesShape('remote', endpoint, normalized)
+            return normalized
+          })
     }
     if (previousOpen !== undefined) {
       const open = previousOpen
@@ -508,5 +514,25 @@ function normalizeByteResult(endpoint: string, result: unknown): unknown {
   if (bytes === undefined) return result
   return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
 }
-
-
+/**
+ * Shapes only: what a readBytes result looks like on each branch.
+ *
+ * A local session previews images from the sidebar and a remote one fails the client's Uint8Array
+ * schema, so the two values this carrier hands over are the remaining variable. Logs the envelope's
+ * keys, the byte field's shape and its concrete constructor - never the content.
+ */
+function logReadBytesShape(branch: 'local' | 'remote' | 'remote-raw', endpoint: string, result: unknown): void {
+  if (endpoint !== 'workspaceFiles/readBytes') return
+  const envelope = typeof result === 'object' && result !== null ? result as Record<string, unknown> : {}
+  const value = typeof envelope.value === 'object' && envelope.value !== null ? envelope.value as Record<string, unknown> : {}
+  const data = value.data
+  console.warn('[dsh-remote] readBytes shape', {
+    branch,
+    ok: envelope.ok === true,
+    keys: Object.keys(value),
+    dataIsBytes: data instanceof Uint8Array,
+    dataCtor: typeof data === 'object' && data !== null ? (data.constructor?.name ?? 'none') : typeof data,
+    dataTag: Object.prototype.toString.call(data),
+    envelopeKeys: Object.keys(envelope),
+  })
+}

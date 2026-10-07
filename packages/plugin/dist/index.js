@@ -19335,11 +19335,16 @@ var TypertGatewaySwitch = class {
           message: error instanceof Error ? error.message : String(error)
         });
         throw error;
-      }) : !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.withLocalFallback(
+      }) : !this.routesToRemote(endpoint) ? Promise.resolve(this.localDispatch(endpoint, payload, signal)).then((result) => (logReadBytesShape("local", endpoint, result), result)) : this.withLocalFallback(
         endpoint,
         () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
         () => this.localDispatch(endpoint, payload, signal)
-      ).then((result) => normalizeByteResult3(endpoint, result));
+      ).then((result) => {
+        logReadBytesShape("remote-raw", endpoint, result);
+        const normalized = normalizeByteResult3(endpoint, result);
+        logReadBytesShape("remote", endpoint, normalized);
+        return normalized;
+      });
     }
     if (previousOpen !== void 0) {
       const open = previousOpen;
@@ -19575,6 +19580,21 @@ function normalizeByteResult3(endpoint, result) {
   });
   if (bytes === void 0) return result;
   return { ...result, value: { ...value, data: bytes } };
+}
+function logReadBytesShape(branch, endpoint, result) {
+  if (endpoint !== "workspaceFiles/readBytes") return;
+  const envelope = typeof result === "object" && result !== null ? result : {};
+  const value = typeof envelope.value === "object" && envelope.value !== null ? envelope.value : {};
+  const data2 = value.data;
+  console.warn("[dsh-remote] readBytes shape", {
+    branch,
+    ok: envelope.ok === true,
+    keys: Object.keys(value),
+    dataIsBytes: data2 instanceof Uint8Array,
+    dataCtor: typeof data2 === "object" && data2 !== null ? data2.constructor?.name ?? "none" : typeof data2,
+    dataTag: Object.prototype.toString.call(data2),
+    envelopeKeys: Object.keys(envelope)
+  });
 }
 
 // src/werift-rtc.ts
