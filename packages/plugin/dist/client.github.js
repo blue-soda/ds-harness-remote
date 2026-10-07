@@ -4163,7 +4163,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
             console.warn("ds-harness-remote: status event stream unavailable, polling status instead:", reason);
           }
         });
-        ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {
+        ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream");
+        let wasReconnecting = !1, unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
+          let current = statusFeed.getSnapshot();
+          if (current?.reconnecting !== void 0) {
+            wasReconnecting = !0;
+            return;
+          }
+          wasReconnecting && (wasReconnecting = !1, current?.connected === !0 && ctx.sessions.refresh().catch(() => {
+          }));
+        });
+        ctx.effect(
+          () => () => unsubscribeReconnectRefresh(),
+          "ds-harness-remote: refresh the Session list after a reconnect"
+        ), ctx.effect(() => {
           let disposed = !1, unsubscribeWorkspaces, unsubscribeSessions, selection, opening = !1, reconcile = () => {
             if (disposed || opening || selection === void 0) return;
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();

@@ -246,6 +246,8 @@ interface SessionsClientServiceLike {
     subscribe(listener: () => void): () => void
   }
   open(sessionId: string): void
+  /** Refresh the Host-authoritative Session list. */
+  refresh(): Promise<void>
 }
 
 function workspacesReady(snapshot: ReturnType<WorkspacesClientServiceLike['list']['getSnapshot']>): boolean {
@@ -3198,6 +3200,26 @@ window.__ModuleLoader__.load({
         },
       })
       ctx.effect(() => () => statusFeed.close(), 'ds-harness-remote: status stream')
+      // The fallback answers remote data from the local shell, so a reconnect can leave the renderer
+      // holding the local list it read while the peer was away - which is why the remote view stays
+      // broken until the page is reloaded. Re-reading the Host-authoritative list as soon as a
+      // reconnect finishes is the same work that reload does, without the reload.
+      let wasReconnecting = false
+      const unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
+        const current = statusFeed.getSnapshot()
+        if (current?.reconnecting !== undefined) {
+          wasReconnecting = true
+          return
+        }
+        if (!wasReconnecting) return
+        wasReconnecting = false
+        if (current?.connected !== true) return
+        void ctx.sessions.refresh().catch(() => undefined)
+      })
+      ctx.effect(
+        () => () => unsubscribeReconnectRefresh(),
+        'ds-harness-remote: refresh the Session list after a reconnect',
+      )
       ctx.effect(() => {
         let disposed = false
         let unsubscribeWorkspaces: (() => void) | undefined
