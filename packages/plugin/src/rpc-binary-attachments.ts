@@ -141,3 +141,12 @@ function encodeBase64(bytes: Uint8Array): string {
   }
   return btoa(binary)
 }
+
+/** Decode one byte value in any shape a JSON hop can produce, or undefined when it is not bytes. */
+export function decodeByteValue(value: unknown): Uint8Array | undefined {
+  try {
+    return decodeAttachmentBytes(value)
+  } catch {
+    return undefined
+  }
+}

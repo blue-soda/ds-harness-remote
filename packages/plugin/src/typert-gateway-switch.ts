@@ -7,6 +7,7 @@ import type {
   TypertGatewayRequest,
   TypertRpcResult,
 } from './typert-gateway-contract.js'
+import { decodeByteValue } from './rpc-binary-attachments.js'
 
 type RemoteInvoke = (request: TypertGatewayRequest) => Promise<unknown>
 type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TypertRpcResult>
@@ -149,7 +150,7 @@ export class TypertGatewaySwitch {
           endpoint,
           () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
           () => this.localDispatch!(endpoint, payload, signal),
-        )
+        ).then(result => normalizeByteResult(endpoint, result) as typeof result)
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen
@@ -245,11 +246,13 @@ export class TypertGatewaySwitch {
       // failed", the locale plugin failed with it, and 48 entries never activated.
       // Serve locally when the peer does not implement the endpoint, or when it went
       // away mid-call; a business error still propagates.
-      return this.remoteTarget.invoke(request).catch(error => {
-        if (!localFallbackAllowed(endpointOf(request), error)) throw error
-        console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error)
-        return this.localInvoke(request)
-      })
+      return this.remoteTarget.invoke(request)
+        .then(result => normalizeByteResult(endpointOf(request), result))
+        .catch(error => {
+          if (!localFallbackAllowed(endpointOf(request), error)) throw error
+          console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error)
+          return this.localInvoke(request)
+        })
     }
     if (request.namespace !== 'commands' || !isRemoteCommandMethod(request.method) || this.remoteInvoke === undefined) {
       return this.localInvoke(request)
@@ -427,4 +430,28 @@ const UNANSWERED_BY_PEER_CODES = new Set([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Endpoints whose canonical result carries bytes, which the CodeX projection answers with base64.
+ *
+ * The native UI validates \`workspaceFiles/readBytes\` against a generated schema that requires a real
+ * \`Uint8Array\`, while the CodeX workspace projection returns base64 for its own consumers - reaching that
+ * schema as \`expected "Uint8Array", path: ["data"]\`, the image-preview failure. Normalising at the local
+ * carrier's exit keeps the projection's own wire unchanged and only fixes what the local shell receives.
+ *
+ * @param endpoint - endpoint the result belongs to.
+ * @param result - the peer's result.
+ * @returns the result with byte-valued fields restored to \`Uint8Array\`.
+ */
+function normalizeByteResult(endpoint: string, result: unknown): unknown {
+  if (endpoint !== 'workspaceFiles/readBytes') return result
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return result
+  const value = (result as { value?: unknown }).value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return result
+  const data = (value as { data?: unknown }).data
+  if (data instanceof Uint8Array) return result
+  const bytes = decodeByteValue(data)
+  if (bytes === undefined) return result
+  return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
 }

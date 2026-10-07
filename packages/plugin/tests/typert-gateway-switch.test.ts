@@ -256,3 +256,36 @@ function command(): Parameters<TypertGatewayLike['invoke']>[0] {
 function commandList(): Parameters<TypertGatewayLike['invoke']>[0] {
   return { namespace: 'commands', method: 'list', args: { agentId: 's1' } }
 }
+
+describe('TypertGatewaySwitch byte results', () => {
+  it('restores bytes the CodeX projection answers as base64', async () => {
+    const localDispatch = vi.fn(async () => ({ ok: true as const, value: 'local' }))
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localDispatch } as unknown as TypertGatewayLike
+    const dispatch = (endpoint: string): Promise<unknown> => (
+      gateway as unknown as { dispatchRpc(endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> }
+    ).dispatchRpc(endpoint, {}, new AbortController().signal)
+    const target = new TypertGatewaySwitch(gateway)
+    target.install()
+    const remoteDispatch = vi.fn(async (): Promise<unknown> => ({
+      ok: true as const,
+      value: { absolutePath: 'C:/tmp/a.png', version: '1:2', bytes: 3, offset: 0, data: 'AAEC', eof: true },
+    }))
+    target.selectRemote({ invoke: vi.fn(), dispatch: remoteDispatch, open: vi.fn() } as never)
+
+    // The native schema requires a real Uint8Array; base64 from the CodeX projection reaches it as
+    // `expected "Uint8Array", path: ["data"]` and the image never renders.
+    const result = await dispatch('workspaceFiles/readBytes') as { value: { data: unknown; absolutePath: string } }
+    expect(result.value.data).toBeInstanceOf(Uint8Array)
+    expect(Array.from(result.value.data as Uint8Array)).toEqual([0, 1, 2])
+    expect(result.value.absolutePath).toBe('C:/tmp/a.png')
+
+    // Already-binary and unrelated results are left exactly as they were.
+    const binary = new Uint8Array([9])
+    remoteDispatch.mockResolvedValueOnce({ ok: true as const, value: { data: binary } })
+    const same = await dispatch('workspaceFiles/readBytes') as { value: { data: unknown } }
+    expect(same.value.data).toBe(binary)
+    remoteDispatch.mockResolvedValueOnce({ ok: true as const, value: { data: 'AAEC' } })
+    const other = await dispatch('workspaceFiles/list') as { value: { data: unknown } }
+    expect(other.value.data).toBe('AAEC')
+  })
+})

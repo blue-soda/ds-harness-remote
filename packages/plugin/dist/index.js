@@ -14898,6 +14898,13 @@ function encodeBase64(bytes) {
   }
   return btoa(binary);
 }
+function decodeByteValue(value) {
+  try {
+    return decodeAttachmentBytes(value);
+  } catch {
+    return void 0;
+  }
+}
 
 // src/remote-api-proxy.ts
 var DIRECT_API_CALL_BYTES = 2 * 1024 * 1024;
@@ -19277,7 +19284,7 @@ var TypertGatewaySwitch = class {
         endpoint,
         () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
         () => this.localDispatch(endpoint, payload, signal)
-      );
+      ).then((result) => normalizeByteResult(endpoint, result));
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -19354,7 +19361,7 @@ var TypertGatewaySwitch = class {
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
     if (this.remoteTarget !== void 0 && this.remoteAvailability()) {
-      return this.remoteTarget.invoke(request).catch((error) => {
+      return this.remoteTarget.invoke(request).then((result) => normalizeByteResult(endpointOf(request), result)).catch((error) => {
         if (!localFallbackAllowed(endpointOf(request), error)) throw error;
         console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error);
         return this.localInvoke(request);
@@ -19483,6 +19490,17 @@ var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
 ]);
 function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function normalizeByteResult(endpoint, result) {
+  if (endpoint !== "workspaceFiles/readBytes") return result;
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
+  const value = result.value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
+  const data2 = value.data;
+  if (data2 instanceof Uint8Array) return result;
+  const bytes = decodeByteValue(data2);
+  if (bytes === void 0) return result;
+  return { ...result, value: { ...value, data: bytes } };
 }
 
 // src/werift-rtc.ts
