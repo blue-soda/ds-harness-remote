@@ -513,8 +513,12 @@ export class ClientModeRuntime {
     return this.status()
   }
 
-  /** Identifies the live liveness watch. */
-  private livenessRun = 0
+  /** When the last liveness probe started, so status polling cannot flood the peer. */
+  private lastLivenessProbeAt = 0
+  /** Whether a liveness probe is still waiting for its answer. */
+  private livenessProbeInFlight = false
+  /** Consecutive unanswered probes; any answer clears it. */
+  private livenessFailures = 0
 
   /**
    * Treat a remote transport as lost: clear the target and start the reconnect loop.
@@ -539,7 +543,8 @@ export class ClientModeRuntime {
     // route once the mode reads 'local' again, so remember that the session
     // dropped. The card uses this to keep a way back to the local shell.
     this.fellBackToLocal = true
-    this.livenessRun += 1
+    this.livenessFailures = 0
+    this.livenessProbeInFlight = false
     void client.close().catch(() => undefined)
     this.logger.warn('remote Harness transport lost; reconnecting', {
       targetDeviceId: shortId(targetDeviceId),
@@ -548,51 +553,55 @@ export class ClientModeRuntime {
   }
 
   /**
-   * Probe a live remote session, because no close event reports a half-open link.
+   * Probe a remote session when the UI asks for its status, because no close event reports a
+   * half-open link.
    *
    * A client that spends a long time in the background comes back to a connection the peer
    * already dropped: nothing closed the socket here, so the session still looks connected,
    * every call fails, and the UI keeps rendering a remote workspace it can no longer read.
-   * A short `ping` separates the two states - any reply, including a refusal, proves the
-   * peer is there, and only a timeout means it is gone. Detection then reuses the close path,
-   * so recovery is the same reconnect loop a user would otherwise trigger by exiting.
+   * The UI polls status on its own cadence - and immediately after the app returns from the
+   * background - so this needs no timer of its own: one cheap `ping` per status read, at
+   * most one in flight, and only once the previous probe is older than the interval.
    *
-   * Timers do not run while the client is suspended, so a pending wait lands on resume,
-   * which is exactly when the probe is needed.
-   * @param client - the connection to probe.
-   * @param targetDeviceId - the Host it is bound to.
+   * The probe asks for a reply rather than for success: any answer, including a refusal,
+   * proves the peer is there, and only a timeout means it is gone. Two consecutive timeouts
+   * reuse the close path, so recovery is the same reconnect loop a user would otherwise
+   * trigger by exiting and reconnecting.
    */
-  private startRemoteLivenessWatch(client: RemoteClientCore, targetDeviceId: string): void {
-    const run = ++this.livenessRun
-    const intervalMs = 10_000
-    const timeoutMs = 5_000
-    const toleratedFailures = 2
-    void (async () => {
-      let failures = 0
-      for (;;) {
-        await new Promise<void>(resolve => { setTimeout(resolve, intervalMs) })
-        if (run !== this.livenessRun || this.connected?.client !== client) return
-        try {
-          await client.rpc('ping', {}, undefined, { timeoutMs })
-          failures = 0
-        } catch (error: unknown) {
-          if (!livenessProbeTimedOut(error)) {
-            // Any answer proves the peer is alive, including a refusal.
-            failures = 0
-            continue
-          }
-          failures += 1
-          this.logger.warn('remote Harness liveness probe timed out', {
-            targetDeviceId: shortId(targetDeviceId),
-            attempt: failures,
-          })
-          if (failures >= toleratedFailures) {
-            this.handleRemoteTransportLost(client, targetDeviceId)
-            return
-          }
+  private maybeProbeRemoteLiveness(): void {
+    const connected = this.connected
+    if (connected === undefined || this.livenessProbeInFlight) return
+    const now = Date.now()
+    if (now - this.lastLivenessProbeAt < LIVENESS_PROBE_INTERVAL_MS) return
+    this.lastLivenessProbeAt = now
+    this.livenessProbeInFlight = true
+    // A probe must never break the status read that triggered it: a client without a usable
+    // rpc, or one that throws synchronously, simply leaves the connection as it was.
+    let probe: Promise<unknown>
+    try {
+      probe = connected.client.rpc('ping', {}, undefined, { timeoutMs: LIVENESS_PROBE_TIMEOUT_MS })
+    } catch {
+      this.livenessProbeInFlight = false
+      return
+    }
+    void probe
+      .then(() => { this.livenessFailures = 0 })
+      .catch((error: unknown) => {
+        if (!livenessProbeTimedOut(error)) {
+          // Any answer proves the peer is alive, including a refusal.
+          this.livenessFailures = 0
+          return
         }
-      }
-    })()
+        this.livenessFailures += 1
+        this.logger.warn('remote Harness liveness probe timed out', {
+          targetDeviceId: shortId(connected.target.deviceId),
+          attempt: this.livenessFailures,
+        })
+        if (this.livenessFailures >= LIVENESS_PROBE_TOLERATED_FAILURES) {
+          this.handleRemoteTransportLost(connected.client, connected.target.deviceId)
+        }
+      })
+      .finally(() => { this.livenessProbeInFlight = false })
   }
 
   /**
@@ -1136,7 +1145,6 @@ export class ClientModeRuntime {
       connectedClient.onClose(() => {
         this.handleRemoteTransportLost(connectedClient, target.deviceId)
       })
-      this.startRemoteLivenessWatch(connectedClient, target.deviceId)
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => undefined)
       this.logger.info('remote Harness transport ready', {
         targetDeviceId: shortId(target.deviceId),
@@ -1218,7 +1226,13 @@ export class ClientModeRuntime {
 
   async handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
     try {
-      if (endpoint === 'status') return ok(await this.detailedStatus())
+      if (endpoint === 'status') {
+        // Status polling is the only clock this needs: the UI asks on its own cadence and
+        // straight after the app returns from the background, which is when a half-open
+        // transport has to be noticed.
+        this.maybeProbeRemoteLiveness()
+        return ok(await this.detailedStatus())
+      }
       if (endpoint === 'devices') return ok(await this.devices())
       if (endpoint === 'client.account.login') {
         const value = record(payload)
@@ -1671,3 +1685,10 @@ export function livenessProbeTimedOut(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error
     && (error as { code?: unknown }).code === 'RPC_TIMEOUT'
 }
+
+/** How long a liveness probe stays fresh before status polling may probe again. */
+const LIVENESS_PROBE_INTERVAL_MS = 10_000
+/** How long a probe waits for a reply before the peer counts as silent. */
+const LIVENESS_PROBE_TIMEOUT_MS = 5_000
+/** Consecutive unanswered probes that mark the transport lost. */
+const LIVENESS_PROBE_TOLERATED_FAILURES = 2

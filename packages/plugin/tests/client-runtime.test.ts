@@ -896,59 +896,61 @@ describe('remote liveness watch', () => {
   const internals = (runtime: ClientModeRuntime) => runtime as unknown as {
     connected: { client: unknown } | undefined
     fellBackToLocal: boolean
-    startRemoteLivenessWatch: (client: unknown, targetDeviceId: string) => void
+    maybeProbeRemoteLiveness: () => void
+  }
+
+  const armed = (rpc: unknown) => {
+    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
+    return { client, target: { deviceId: 'device-a' } }
   }
 
   it('treats two unanswered probes as a lost connection and falls back for reconnecting', async () => {
-    vi.useFakeTimers()
-    try {
-      const runtime = await buildRuntime()
-      const rpc = vi.fn(async () => {
-        throw Object.assign(new Error('RPC ping timed out after 5000ms'), { code: 'RPC_TIMEOUT' })
+    const runtime = await buildRuntime()
+    const rpc = vi.fn(async () => {
+      throw Object.assign(new Error('RPC ping timed out after 5000ms'), { code: 'RPC_TIMEOUT' })
+    })
+    const state = internals(runtime)
+    const settled = async (calls: number) => {
+      // Only one probe is ever in flight, and the next is gated by the staleness window
+      // rather than by a timer, so wait for the call and for the gate to reopen.
+      await vi.waitFor(() => {
+        expect(rpc.mock.calls.length).toBeGreaterThanOrEqual(calls)
+        expect((runtime as unknown as { livenessProbeInFlight: boolean }).livenessProbeInFlight).toBe(false)
       })
-      const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
-      const state = internals(runtime)
-      state.connected = { client }
-      state.fellBackToLocal = false
-      state.startRemoteLivenessWatch(client, 'device-a')
-
-      // The first interval probes once and tolerates the silence.
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(rpc).toHaveBeenCalledTimes(1)
-      expect(state.connected).toBeDefined()
-
-      // The second consecutive silence marks the transport lost, exactly as a close would.
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(rpc).toHaveBeenCalledTimes(2)
-      expect(state.connected).toBeUndefined()
-      expect(state.fellBackToLocal).toBe(true)
-      vi.clearAllTimers()
-    } finally {
-      vi.useRealTimers()
     }
+    state.connected = armed(rpc) as never
+    state.fellBackToLocal = false
+
+    state.maybeProbeRemoteLiveness()
+    await settled(1)
+    expect(state.connected).toBeDefined()
+
+    // The staleness window is what keeps status polling from flooding the peer; step past it.
+    ;(runtime as unknown as { lastLivenessProbeAt: number }).lastLivenessProbeAt = 0
+    state.maybeProbeRemoteLiveness()
+    await vi.waitFor(() => { expect(state.connected).toBeUndefined() })
+    expect(state.fellBackToLocal).toBe(true)
   })
 
   it('keeps a connection whose probe is answered with a refusal', async () => {
-    vi.useFakeTimers()
-    try {
-      const runtime = await buildRuntime()
-      const rpc = vi.fn(async () => {
-        throw Object.assign(new Error('METHOD_NOT_ALLOWED'), { code: 'METHOD_NOT_ALLOWED' })
-      })
-      const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
-      const state = internals(runtime)
-      state.connected = { client }
-      state.fellBackToLocal = false
-      state.startRemoteLivenessWatch(client, 'device-a')
+    const runtime = await buildRuntime()
+    const rpc = vi.fn(async () => {
+      throw Object.assign(new Error('METHOD_NOT_ALLOWED'), { code: 'METHOD_NOT_ALLOWED' })
+    })
+    const state = internals(runtime)
+    state.connected = armed(rpc) as never
+    state.fellBackToLocal = false
 
-      await vi.advanceTimersByTimeAsync(10_000 * 3)
-      expect(rpc.mock.calls.length).toBeGreaterThanOrEqual(3)
-      expect(state.connected).toBeDefined()
-      expect(state.fellBackToLocal).toBe(false)
-      vi.clearAllTimers()
-    } finally {
-      vi.useRealTimers()
+    for (let round = 0; round < 3; round++) {
+      ;(runtime as unknown as { lastLivenessProbeAt: number }).lastLivenessProbeAt = 0
+      state.maybeProbeRemoteLiveness()
+      await vi.waitFor(() => {
+        expect(rpc.mock.calls.length).toBe(round + 1)
+        expect((runtime as unknown as { livenessProbeInFlight: boolean }).livenessProbeInFlight).toBe(false)
+      })
     }
+    expect(state.connected).toBeDefined()
+    expect(state.fellBackToLocal).toBe(false)
   })
 
   it('only treats a timeout as proof the peer is gone', () => {
