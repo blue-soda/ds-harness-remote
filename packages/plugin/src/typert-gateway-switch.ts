@@ -155,7 +155,16 @@ export class TypertGatewaySwitch {
     }
     if (previousDispatch !== undefined) {
       this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint)
-        ? previousDispatch(endpoint, payload, signal)
+        ? Promise.resolve(previousDispatch(endpoint, payload, signal)).catch(error => {
+          // Without a remote target the shell has to work locally, and a failing local call is otherwise
+          // invisible: the fallback exists precisely so the user can keep working.
+          console.warn('[dsh-remote] local call failed with no remote target selected', {
+            endpoint,
+            code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
+            message: error instanceof Error ? error.message : String(error),
+          })
+          throw error
+        })
         : !this.routesToRemote(endpoint)
           ? this.localDispatch!(endpoint, payload, signal)
           : this.withLocalFallback(

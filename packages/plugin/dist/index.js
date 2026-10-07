@@ -19328,7 +19328,14 @@ var TypertGatewaySwitch = class {
       );
     }
     if (previousDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint) ? previousDispatch(endpoint, payload, signal) : !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.withLocalFallback(
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint) ? Promise.resolve(previousDispatch(endpoint, payload, signal)).catch((error) => {
+        console.warn("[dsh-remote] local call failed with no remote target selected", {
+          endpoint,
+          code: typeof error === "object" && error !== null && "code" in error ? String(error.code) : void 0,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }) : !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.withLocalFallback(
         endpoint,
         () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
         () => this.localDispatch(endpoint, payload, signal)
