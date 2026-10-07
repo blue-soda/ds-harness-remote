@@ -22647,6 +22647,7 @@ function concatChunks(chunks, totalBytes) {
 // src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
+var CODEX_START_BUDGET_MS = 5e3;
 var CODEX_PAGE_LIMIT2 = 100;
 var MAX_CODEX_PAGES2 = 32;
 var CODEX_HISTORY_PAGE_LIMIT = 25;
@@ -22679,7 +22680,7 @@ var CodexRemoteDomain = class {
     if (!this.config.enabled) return;
     try {
       this.state = "starting";
-      await this.launchAppServer();
+      await this.launchWithinBudget();
     } catch (error) {
       this.available = false;
       this.state = "unavailable";
@@ -22909,6 +22910,32 @@ var CodexRemoteDomain = class {
     this.unsubscribeUnavailable = void 0;
     await this.appServer?.close();
     this.appServer = void 0;
+  }
+  /**
+   * Launch the App Server within {@link CODEX_START_BUDGET_MS}.
+   *
+   * The losing side of the race keeps running until the disposal in start()'s catch stops it, so
+   * it needs its own handler: an unhandled rejection here would surface as a process-level error
+   * for what is only an optional feature being unavailable.
+   * @returns nothing once a candidate is ready.
+   */
+  async launchWithinBudget() {
+    let timer;
+    const attempt = this.launchAppServer();
+    attempt.catch(() => void 0);
+    try {
+      await Promise.race([
+        attempt,
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new RpcError("CODEX_START_TIMEOUT", `Codex App Server did not start within ${CODEX_START_BUDGET_MS}ms.`));
+          }, CODEX_START_BUDGET_MS);
+          timer.unref?.();
+        })
+      ]);
+    } finally {
+      if (timer !== void 0) clearTimeout(timer);
+    }
   }
   async launchAppServer() {
     let lastError;
@@ -27696,6 +27723,14 @@ var HostPluginRuntime = class {
    * device identity, unlike clearing the authorization.
    */
   paused;
+  /**
+   * Whether start() has finished wiring the Server connection.
+   *
+   * The Codex domain is optional business that waits on an external binary, so it runs in the
+   * background; without this flag a Host that is merely still starting would report itself as
+   * offline and look broken to the user and to other clients.
+   */
+  starting = true;
   harnessVersion;
   closed = false;
   codex;
@@ -27723,7 +27758,6 @@ var HostPluginRuntime = class {
       fingerprint: this.identity.fingerprint,
       server: this.config.serverUrl ?? "not configured"
     });
-    await this.codex.start();
     if (this.serverApi !== void 0) {
       this.harnessVersion = await this.readHarnessVersion();
       this.serverApi.setHarnessVersion(this.harnessVersion);
@@ -27731,6 +27765,9 @@ var HostPluginRuntime = class {
       this.serverConnection = this.createServerConnection(this.identity);
       if (!this.paused) this.serverConnection.start();
     }
+    this.starting = false;
+    void this.codex.start().catch(() => {
+    });
   }
   currentIdentity() {
     if (this.identity === void 0) throw new Error("remote runtime has not started");
@@ -27748,6 +27785,7 @@ var HostPluginRuntime = class {
       configured: this.serverApi !== void 0,
       online: this.serverConnection?.isOnline() ?? false,
       reconnecting: this.serverConnection?.isReconnecting() ?? false,
+      starting: this.starting,
       ...this.serverConnection?.lastActivity() === void 0 ? {} : { lastActiveAt: this.serverConnection.lastActivity() },
       ...error === void 0 ? {} : { error },
       ...authorization?.account === void 0 ? {} : { account: authorization.account },

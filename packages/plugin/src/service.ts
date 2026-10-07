@@ -49,6 +49,8 @@ export interface HostRemoteStatus {
   configured: boolean
   online: boolean
   reconnecting: boolean
+  /** True until start() has wired the Server connection, so the UI can tell it from offline. */
+  starting: boolean
   lastActiveAt?: number
   error?: string
   account?: string
@@ -76,6 +78,14 @@ export class HostPluginRuntime {
    * device identity, unlike clearing the authorization.
    */
   private paused: boolean
+  /**
+   * Whether start() has finished wiring the Server connection.
+   *
+   * The Codex domain is optional business that waits on an external binary, so it runs in the
+   * background; without this flag a Host that is merely still starting would report itself as
+   * offline and look broken to the user and to other clients.
+   */
+  private starting = true
   private harnessVersion?: string
   private closed = false
   private readonly codex: CodexRemoteDomain
@@ -177,7 +187,6 @@ export class HostPluginRuntime {
       fingerprint: this.identity.fingerprint,
       server: this.config.serverUrl ?? 'not configured',
     })
-    await this.codex.start()
     if (this.serverApi !== undefined) {
       this.harnessVersion = await this.readHarnessVersion()
       this.serverApi.setHarnessVersion(this.harnessVersion)
@@ -187,6 +196,14 @@ export class HostPluginRuntime {
       // must not turn a paused machine reachable again.
       if (!this.paused) this.serverConnection.start()
     }
+    this.starting = false
+    // Awaiting the Codex domain here used to delay the Server connection - and with it every
+    // remote client - by the whole Codex start budget on a machine whose Codex install is missing
+    // or broken. It is optional business, so it starts in the background and reports through
+    // codex.status(); its failure never prevents this Host from being reachable.
+    void this.codex.start().catch(() => {
+      // start() already records its own failure in the domain status.
+    })
   }
 
   currentIdentity(): HostIdentity {
@@ -207,6 +224,7 @@ export class HostPluginRuntime {
       configured: this.serverApi !== undefined,
       online: this.serverConnection?.isOnline() ?? false,
       reconnecting: this.serverConnection?.isReconnecting() ?? false,
+      starting: this.starting,
       ...(this.serverConnection?.lastActivity() === undefined
         ? {}
         : { lastActiveAt: this.serverConnection.lastActivity() }),

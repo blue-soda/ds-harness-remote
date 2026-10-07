@@ -246,6 +246,14 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] **断连期间会话列表出现"本地+远程"混合**：远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
   于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点（`settings/describe`、
   插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。
-- [ ] **本地环境：`plugin-lifecycle` 11 个用例超时**（每个整齐 5s；2026-10-07 发现）。已用 A/B 验证与重连改动无关
-  （把 `client-runtime.ts` 还原到修复前版本，同样 11 个失败）；`pnpm install` 每次都报 `Packages: -135`
-  （疑似与运行中的实例/profile 安装互相拉扯），未能靠 install 恢复。需单独定位；**定位前不要把全量测试结果当作回归依据。**
+- [x] **`plugin-lifecycle` 11 个用例超时（已定位并修复，2026-10-07）**：根因是 Codex 域**默认开启**，
+  而 `HostPluginRuntime.start()` 会 `await codex.start()`，**Server 控制连接排在其后**；设备上没有 `codex`
+  二进制时，`launchAppServer()` 会逐个尝试 binary 候选、每个候选各消耗一次请求超时，实测 `codex.start()`
+  单独耗时 **15250ms**，于是每次启动都超过 vitest 默认的 5s 超时。影响不止测试：Host 在每次启动后
+  **15 秒内对 Server 不可达**，客户端启动与启动恢复也顺延。修法：Codex 域改为**后台启动**、不再排在
+  Server 连接之前；`hostStatus().starting` 区分"启动中"与"离线"；整个启动加 **5 秒硬预算**
+  （`CODEX_START_BUDGET_MS`，超时记 `CODEX_START_TIMEOUT`）；lifecycle 测试的 settings fixture 默认
+  `codex.enabled = false`。结果：11 个用例全部通过，全量耗时 57s → 12.7s。
+- [ ] **`codex-domain` 5 个既有失败属于本机环境**：1 个断言 macOS 的 ChatGPT 包路径（Windows 上不会被发现），
+  4 个依赖创建 symlink，本机未开启开发者模式而报 `EPERM ... symlink`。与产品逻辑无关；若要全绿，需让
+  这些用例在 symlink 不可用时跳过，并把 macOS 期望按平台收敛。

@@ -75,7 +75,7 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 | Relay Transport | Protocol v1 control/relay 已实现 | 心跳、限制协商、断线状态传播 |
 | WebRTC | signaling、ICE、TURN、LAN/P2P/Relay 自适应路径基础已实现，Android 真机与 Host werift 互操作已验证 | 网络切换恢复和长期稳定性 |
 | Client Core | ApiProxy tunnel RPC/Event 关联基础已实现 | reconnect、pending call/stream 恢复 |
-| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
+| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证。**Codex 域启动有 5 秒硬预算且不阻塞 Host 就绪**：它需要外部二进制，因此后台启动（失败只写状态），缺二进制时约 5 秒内变为 `unavailable`（`CODEX_START_TIMEOUT`） | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
 | Mock Host | 旧 Android Remote RPC 联调工具，当前冻结 | 若恢复 Android 再迁移或替换 |
 | Desktop | Host 设置、Remote 工作区模态框、远程 Header、连接链路与加密状态已接入 Harness Web UI，Host status 由 loopback SSE 推送（无固定间隔的 status 轮询），原生窗口跨机 E2E 已验证 | 多窗口、休眠/唤醒和代理网络回归 |
 | 开源自部署 Server | `apps/server` 已实现多账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；账号间设备与令牌完全隔离，注册默认关闭（需显式配置注册码）；QR OAuth 端点已实现（`auto`/`github`/`wechat`/`mock`/`off`，账户密钥只存服务端）；**DeepSeek 账号登录已实现**（`DSH_SERVER_DEEPSEEK_LOGIN=on`，服务端自行向平台核对 grant 后即弃、不落盘，绑定键为平台稳定账号 ID，故同一 DeepSeek 用户必落同一账号；平台 WAF 强制要求浏览器 UA）；`DSH_SERVER_PASSWORD_LOGIN=off` 可关闭密码登录；建号默认关闭；provider 请求带硬超时且失败会将会话标记过期；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN。大陆部署需解决 `github.com` 出网：GeoDNS 给大陆返回的亚洲节点不可达，文档给出的 `/etc/hosts` 钉定实测**间歇可用**（同一 IP 曾 20/20 成功、随后 0/12 全败），可靠方案是境外部署或出站代理 | 出站代理或境外部署下的 GitHub 扫码验收、真实微信凭据与备案域名验收、账号自助注册与扫码登录的 Web 页面、Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
@@ -135,11 +135,15 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 
 ## Validation Baseline
 
-截至 2026-10-06（当前基线）：
+截至 2026-10-07（当前基线）：
 
 - workspace check 与 DSH bundle 校验通过；`git diff --check` 通过
-- Plugin 测试 **326 个**：**320 通过**、**6 个既有失败**（`tests/codex-domain.test.ts` 5 个 Windows
-  路径分隔符/目录顺序平台假设；`tests/werift-rtc.test.ts` 1 个 `lan` 候选断言受本机虚拟网卡影响）
+- Plugin 测试 **330 个**：**325 通过**、**5 个既有失败**，全部在 `tests/codex-domain.test.ts`：1 个断言
+  macOS 的 ChatGPT 包路径（Windows 上本就不会被发现），4 个依赖创建 symlink，本机未开启开发者模式而报
+  `EPERM: operation not permitted, symlink ...`。`tests/werift-rtc.test.ts` 的 `lan` 候选断言本次未复现
+- 全域耗时 **12.7s**（此前 57s）：`plugin-lifecycle` 的 11 个超时已定位并修复，见 `TODO.md`
+- 本次新增测试：`tests/client-target-store.test.ts`（3）、`client-runtime.test.ts` 的启动恢复用例（1）、
+  `apps/server/tests/log.test.ts`（3）
 - 本次新增测试：`tests/method-policy.test.ts`（6）、`tests/harness-api-history.test.ts`（2）、
   `tests/atomic-file.test.ts`（4）
 - Codex App Server 版本基线 **0.160.0**（`generate-json-schema` 产物用于逐字段对照）；只读端到端自检

@@ -27,6 +27,16 @@ import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual
 
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
+/**
+ * How long the whole App Server launch may take.
+ *
+ * `launchAppServer` tries several binary candidates and each attempt can spend a full request
+ * timeout waiting for a binary that will never answer, so a missing or broken install used to
+ * cost that timeout several times over. One budget for all candidates keeps the domain's own
+ * status honest ('unavailable' in seconds, not tens of seconds) while the existing restart
+ * backoff keeps trying in the background.
+ */
+const CODEX_START_BUDGET_MS = 5_000
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
 const CODEX_HISTORY_PAGE_LIMIT = 25
@@ -102,7 +112,7 @@ export class CodexRemoteDomain {
     if (!this.config.enabled) return
     try {
       this.state = 'starting'
-      await this.launchAppServer()
+      await this.launchWithinBudget()
     } catch (error) {
       this.available = false
       this.state = 'unavailable'
@@ -370,6 +380,33 @@ export class CodexRemoteDomain {
     this.unsubscribeUnavailable = undefined
     await this.appServer?.close()
     this.appServer = undefined
+  }
+
+  /**
+   * Launch the App Server within {@link CODEX_START_BUDGET_MS}.
+   *
+   * The losing side of the race keeps running until the disposal in start()'s catch stops it, so
+   * it needs its own handler: an unhandled rejection here would surface as a process-level error
+   * for what is only an optional feature being unavailable.
+   * @returns nothing once a candidate is ready.
+   */
+  private async launchWithinBudget(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const attempt = this.launchAppServer()
+    attempt.catch(() => undefined)
+    try {
+      await Promise.race([
+        attempt,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new RpcError('CODEX_START_TIMEOUT', `Codex App Server did not start within ${CODEX_START_BUDGET_MS}ms.`))
+          }, CODEX_START_BUDGET_MS)
+          timer.unref?.()
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }
 
   private async launchAppServer(): Promise<void> {

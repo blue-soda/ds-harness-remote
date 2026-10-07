@@ -473,7 +473,10 @@ describe('Cordis plugin lifecycle', () => {
 function settings(value: Record<string, unknown>) {
   return {
     configure: () => () => undefined,
-    describe: () => [{ ns: 'ds-harness-remote', value }],
+    // These tests cover the Host and Client lifecycle, not Codex. Codex is optional business that
+    // needs an external binary, so it is off by default here: no test then depends on what the
+    // machine happens to have installed, and a caller can still enable it through `value`.
+    describe: () => [{ ns: 'ds-harness-remote', value: { codex: { enabled: false }, ...value } }],
     replace: vi.fn(async () => undefined),
   } as never
 }
