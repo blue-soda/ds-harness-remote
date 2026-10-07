@@ -274,6 +274,15 @@ export class ClientModeRuntime {
    */
   private supersededClient?: RemoteClientCore
   /**
+   * True while a fast reconnect is rebuilding the link.
+   *
+   * The probe must not judge the link in the middle of its own replacement: the Server closes the
+   * older connection for the device, so a check that ran then would read our replacement's side effect
+   * as a second miss and escalate the level that is busy recovering. The rebuild's own outcome decides
+   * first; only once it has settled does the cadence resume judging.
+   */
+  private fastRebuildInFlight = false
+  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -628,7 +637,7 @@ export class ClientModeRuntime {
    */
   private async verifyRemoteLiveness(): Promise<void> {
     const connected = this.connected
-    if (connected === undefined || this.livenessInFlight) return
+    if (connected === undefined || this.livenessInFlight || this.fastRebuildInFlight) return
     this.livenessInFlight = true
     try {
       await connected.client.rpc('harness.transport.describe', {}, undefined, { timeoutMs: LIVENESS_TIMEOUT_MS })
@@ -685,8 +694,10 @@ export class ClientModeRuntime {
    */
   private async reestablish(targetDeviceId: string): Promise<boolean> {
     const previous = this.connected
-    // From here until the new session is in place, a close of the old transport is our own doing.
+    // From here until the new session is in place, a close of the old transport is our own doing and
+    // the liveness cadence stops judging the link.
     this.supersededClient = previous?.client
+    this.fastRebuildInFlight = true
     try {
       const next = await this.connect(targetDeviceId)
       if (previous === undefined) {
@@ -711,6 +722,8 @@ export class ClientModeRuntime {
         code: safeErrorCode(error),
       })
       return false
+    } finally {
+      this.fastRebuildInFlight = false
     }
   }
 

@@ -20595,6 +20595,15 @@ var ClientModeRuntime = class {
    */
   supersededClient;
   /**
+   * True while a fast reconnect is rebuilding the link.
+   *
+   * The probe must not judge the link in the middle of its own replacement: the Server closes the
+   * older connection for the device, so a check that ran then would read our replacement's side effect
+   * as a second miss and escalate the level that is busy recovering. The rebuild's own outcome decides
+   * first; only once it has settled does the cadence resume judging.
+   */
+  fastRebuildInFlight = false;
+  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -20883,7 +20892,7 @@ var ClientModeRuntime = class {
    */
   async verifyRemoteLiveness() {
     const connected = this.connected;
-    if (connected === void 0 || this.livenessInFlight) return;
+    if (connected === void 0 || this.livenessInFlight || this.fastRebuildInFlight) return;
     this.livenessInFlight = true;
     try {
       await connected.client.rpc("harness.transport.describe", {}, void 0, { timeoutMs: LIVENESS_TIMEOUT_MS });
@@ -20937,6 +20946,7 @@ var ClientModeRuntime = class {
   async reestablish(targetDeviceId) {
     const previous = this.connected;
     this.supersededClient = previous?.client;
+    this.fastRebuildInFlight = true;
     try {
       const next = await this.connect(targetDeviceId);
       if (previous === void 0) {
@@ -20960,6 +20970,8 @@ var ClientModeRuntime = class {
         code: safeErrorCode(error)
       });
       return false;
+    } finally {
+      this.fastRebuildInFlight = false;
     }
   }
   rememberWorkspaceSelection(selection) {
