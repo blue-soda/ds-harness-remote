@@ -20784,12 +20784,12 @@ var ClientModeRuntime = class {
     void probe.then(() => {
       this.livenessFailures = 0;
     }).catch((error) => {
-      if (!livenessProbeTimedOut(error)) {
+      if (!livenessProbeLost(error)) {
         this.livenessFailures = 0;
         return;
       }
       this.livenessFailures += 1;
-      this.logger.warn("remote Harness liveness probe timed out", {
+      this.logger.warn("remote Harness liveness probe found no answer", {
         targetDeviceId: shortId(connected.target.deviceId),
         attempt: this.livenessFailures
       });
@@ -21735,8 +21735,11 @@ function transportPreferenceForMode(mode) {
 function iceServersForAttempt(attempt, iceServers) {
   return attempt === "direct" ? stunOnlyIceServers(iceServers) : iceServers;
 }
-function livenessProbeTimedOut(error) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "RPC_TIMEOUT";
+var NO_ANSWER_CODES = /* @__PURE__ */ new Set(["RPC_TIMEOUT", "CLIENT_CLOSED", "TRANSPORT_CLOSED", "RPC_ABORTED"]);
+function livenessProbeLost(error) {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : void 0;
+  if (typeof code !== "string") return true;
+  return NO_ANSWER_CODES.has(code);
 }
 var LIVENESS_PROBE_INTERVAL_MS = 1e4;
 var LIVENESS_PROBE_TIMEOUT_MS = 5e3;

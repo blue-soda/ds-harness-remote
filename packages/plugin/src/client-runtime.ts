@@ -587,13 +587,13 @@ export class ClientModeRuntime {
     void probe
       .then(() => { this.livenessFailures = 0 })
       .catch((error: unknown) => {
-        if (!livenessProbeTimedOut(error)) {
+        if (!livenessProbeLost(error)) {
           // Any answer proves the peer is alive, including a refusal.
           this.livenessFailures = 0
           return
         }
         this.livenessFailures += 1
-        this.logger.warn('remote Harness liveness probe timed out', {
+        this.logger.warn('remote Harness liveness probe found no answer', {
           targetDeviceId: shortId(connected.target.deviceId),
           attempt: this.livenessFailures,
         })
@@ -1673,17 +1673,27 @@ function iceServersForAttempt(attempt: TransportAttempt, iceServers: RtcIceServe
   return attempt === 'direct' ? stunOnlyIceServers(iceServers) : iceServers
 }
 
+/** Codes the client core raises locally when an RPC never reached an answer. */
+const NO_ANSWER_CODES = new Set(['RPC_TIMEOUT', 'CLIENT_CLOSED', 'TRANSPORT_CLOSED', 'RPC_ABORTED'])
+
 /**
- * Whether a liveness probe proved the peer is gone.
+ * Whether a liveness probe failed to reach the peer.
  *
- * The probe asks for a reply, not for success: a refusal still means something answered, so
- * only a timeout marks the connection as lost.
+ * The probe asks for a reply, not for success, so the two outcomes must be told apart by where
+ * the error came from. An answer from the peer arrives as an error carrying the peer's own code
+ * (METHOD_NOT_FOUND, FEATURE_NOT_SUPPORTED, ...). A local failure is either one of the core's
+ * own codes above or a raw transport error with no code at all - a send that failed on a socket
+ * the process has not noticed is closed. Counting that second kind as liveness would make the
+ * probe useless exactly when it matters.
  * @param error - the error the probe rejected with.
- * @returns true when the peer stopped answering altogether.
+ * @returns true when no answer arrived, so the transport must be treated as lost.
  */
-export function livenessProbeTimedOut(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error
-    && (error as { code?: unknown }).code === 'RPC_TIMEOUT'
+export function livenessProbeLost(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? (error as { code?: unknown }).code
+    : undefined
+  if (typeof code !== 'string') return true
+  return NO_ANSWER_CODES.has(code)
 }
 
 /** How long a liveness probe stays fresh before status polling may probe again. */

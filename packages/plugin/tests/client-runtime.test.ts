@@ -6,7 +6,7 @@ import { generateKeyPair } from '@dsh-remote/crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
-  livenessProbeTimedOut,
+  livenessProbeLost,
   probeRemoteHostFeatures,
   remoteHostFeatures,
   type HostAuthorizationControl,
@@ -953,11 +953,16 @@ describe('remote liveness watch', () => {
     expect(state.fellBackToLocal).toBe(false)
   })
 
-  it('only treats a timeout as proof the peer is gone', () => {
-    expect(livenessProbeTimedOut({ code: 'RPC_TIMEOUT' })).toBe(true)
-    expect(livenessProbeTimedOut({ code: 'METHOD_NOT_ALLOWED' })).toBe(false)
-    expect(livenessProbeTimedOut({ code: 'method-not-found' })).toBe(false)
-    expect(livenessProbeTimedOut(new Error('socket closed'))).toBe(false)
-    expect(livenessProbeTimedOut(undefined)).toBe(false)
+  it('treats only a missing answer as loss, never a refusal', () => {
+    // No answer: the core's own timeout/close codes, and raw transport errors with no code.
+    expect(livenessProbeLost({ code: 'RPC_TIMEOUT' })).toBe(true)
+    expect(livenessProbeLost({ code: 'CLIENT_CLOSED' })).toBe(true)
+    expect(livenessProbeLost({ code: 'TRANSPORT_CLOSED' })).toBe(true)
+    expect(livenessProbeLost(new Error('relay control socket is not open'))).toBe(true)
+    expect(livenessProbeLost('not an error')).toBe(true)
+    // An answer from the peer, however unwelcome, proves it is there.
+    expect(livenessProbeLost({ code: 'METHOD_NOT_ALLOWED' })).toBe(false)
+    expect(livenessProbeLost({ code: 'FEATURE_NOT_SUPPORTED' })).toBe(false)
+    expect(livenessProbeLost({ code: 'SESSION_NOT_FOUND' })).toBe(false)
   })
 })
