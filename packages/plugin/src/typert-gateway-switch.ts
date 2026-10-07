@@ -141,7 +141,12 @@ export class TypertGatewaySwitch {
     const previousStream = this.runtime.stream
     const previousDispatch = this.runtime.dispatchRpc
     const previousOpen = this.runtime.openWireStream
-    const forwards = (endpoint: string): boolean => this.remoteTarget === undefined && !isLocalOnlyEndpoint(endpoint)
+    // Forwarding is for a window whose data plane belongs to another carrier while the peer is up. With
+    // no reachable peer the shell must work locally - forwarding there reached a carrier that cannot
+    // serve it and every local call failed with a missing invokeRpc on an undefined carrier.
+    const forwards = (endpoint: string): boolean => (
+      this.remoteTarget === undefined && this.remoteAvailability() && !isLocalOnlyEndpoint(endpoint)
+    )
     if (previousStream !== undefined) {
       this.runtime.stream = request => forwards(endpointOf(request))
         ? previousStream(request)

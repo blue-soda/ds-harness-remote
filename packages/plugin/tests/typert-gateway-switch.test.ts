@@ -277,6 +277,13 @@ describe('TypertGatewaySwitch carrier chain', () => {
     await expect(dispatch('workspaceFiles/readBytes')).resolves.toMatchObject({ value: 'api-proxy' })
     expect(previousCarrier).toHaveBeenCalledOnce()
     expect(localShell).not.toHaveBeenCalled()
+
+    // With the peer gone - or not connected yet - the shell has to work locally again: the carrier behind
+    // cannot serve it, and forwarding there made every local call fail.
+    target.setRemoteAvailability(() => false)
+    await expect(dispatch('session/create')).resolves.toMatchObject({ value: 'local-shell' })
+    await expect(dispatch('session/list')).resolves.toMatchObject({ value: 'local-shell' })
+    expect(previousCarrier).toHaveBeenCalledOnce()
   })
 })
 

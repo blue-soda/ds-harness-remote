@@ -19319,7 +19319,7 @@ var TypertGatewaySwitch = class {
     const previousStream = this.runtime.stream;
     const previousDispatch = this.runtime.dispatchRpc;
     const previousOpen = this.runtime.openWireStream;
-    const forwards = (endpoint) => this.remoteTarget === void 0 && !isLocalOnlyEndpoint(endpoint);
+    const forwards = (endpoint) => this.remoteTarget === void 0 && this.remoteAvailability() && !isLocalOnlyEndpoint(endpoint);
     if (previousStream !== void 0) {
       this.runtime.stream = (request) => forwards(endpointOf(request)) ? previousStream(request) : !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.withLocalFallback(
         endpointOf(request),
