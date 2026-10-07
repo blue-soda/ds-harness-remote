@@ -250,6 +250,15 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 "会话列表一直不可用"。重连完成后会重新发布上次的工作区选择，逼 UI 重读基线。判定调用是否经过我们时**必须看返回信封的
 `result.ok`**：`Web RPC failed` 表示 **RPC 执行了但回答失败**（传输失败才是 `Web request failed`）。
 历史页大小由 `CODEX_HISTORY_MAX_MESSAGES` 统一钳制，虚拟载体与 `harness-api-history.ts` **共用同一常量**。
+两级重连的两个实测约束（2026-10-07，挂起 Host 进程制造静默验证）：
+
+- **自我替换的关闭不是"对端断了"**：快速重连的重建会新建控制连接，Server 会关闭同一设备的旧连接；旧传输的
+  `onClose` 若被当作灾难回退，快速重连就会**永远自我升级**（实测表现：只看到灾难回退）。正在被替换的传输的
+  关闭必须忽略，升级判定权只归存活探测；升级日志带 `reason`（`transport-closed` / `unanswered-twice`）。
+- **回退/恢复必须重建渲染器视图**：DSH 的工作区 store 无公开刷新入口（`IWorkspaces` 只读 list + 命令），
+  所以进灾难回退时客户端半重载一次页面（显示本地列表）、重连成功后再重载一次（回到远程工作区）；标签页记住
+  工作区选择以便重载落回原处。任何"只刷新会话列表"的做法都不足以切换视图（实测：会话可打开但仍全部落在未分组）。
+
 完整排查记录（含被证伪的假设、复现探针与修复细节）见
 [`docs/incidents/dsh-0.2.1-desktop-remote-boot.md`](docs/incidents/dsh-0.2.1-desktop-remote-boot.md)；
 真实协议自检用 `scripts/codex-app-server-smoke.mts`。

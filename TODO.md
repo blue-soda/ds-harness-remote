@@ -247,11 +247,21 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
     之后任何一次探测有应答（或重建成功）即回到稳态（`finishReconnect()`）。
   - **第二次无应答 → 灾难回退**：走与 socket 关闭完全相同的 `handleRemoteTransportLost()`（回退本地 +
     `fellBackToLocal` + 既有退避重连），`phase = 'fallback'`。
-  - **可见与可中断**：侧栏条目与目标对话框头部在重连期间显示"正在重连"，退出入口变为「停止重连」
-    （调用 `setMode('local')`，会顶掉重连循环）；启动恢复是第三阶段 `phase = 'restore'`。
+  - **可见与可中断**：只有**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`，会顶掉重连循环）；
+    侧栏条目与目标对话框**不再重复**该状态（用户 2026-10-07 要求把语义交给顶部栏）。启动恢复是第三阶段
+    `phase = 'restore'`。
   - 定时器 `unref()`、随会话启停（切回本地/丢链/关闭时清除），不持有事件循环，也不拖住测试。
   - **回前台立即触发**：浏览器半在 `visibilitychange`（仅 visible）与 `focus` 时调用控制端点
     `client.connection.verify`，不等下一个周期。
+  - **2026-10-07 实测（挂起 Host 进程制造静默）**：第一次无应答 → 快速重连 ✓（原地重建成功，
+    日志 `link stopped answering; reconnecting in place` → `remote Harness reconnect finished {reason: link re-established}`，
+    全程**没有** `transport lost`，界面不刷新）；第二次无应答 → 灾难回退 ✓。
+  - **自我替换陷阱（已修）**：快速重连的重建会**新建**控制连接，而 Server 会关闭同一设备的旧连接 —— 旧传输的
+    `onClose` 曾被当成灾难回退，于是快速重连**永远把自己升级掉**（表现为"只看到灾难回退"）。现在正在被替换的
+    传输的关闭会被忽略，升级判定权只归探测；两条升级路径都带 `reason`（`transport-closed` / `unanswered-twice`）。
+  - **回退/恢复的界面重建（实测驱动）**：DSH 的工作区 store 无法从插件侧刷新（`IWorkspaces` 没有 refresh），
+    所以进灾难回退时客户端半**重载一次页面**（落到本地列表）、重连成功后再**重载一次**（落回远程工作区）；标签页
+    记住工作区选择，重载后能回到原处。首次快照即基准 + 双向限流，保证不循环重载。
   - 真机验收仍待做（Android 后台久置后回前台：应看到"正在重连"，并区分"链路恢复"与"回退本地后重连"）。
 - [x] **本地兜底收窄 + 恢复后重取基线（2026-10-07 实现，实测驱动）**：实测日志（warn 走 stderr，
   见 `instance.err.log`）证明传输消失期间插件把 `session/list`、`session/follow`、`settings/describe`、
