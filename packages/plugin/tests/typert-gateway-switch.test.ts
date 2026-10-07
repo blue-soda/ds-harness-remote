@@ -38,6 +38,41 @@ describe('TypertGatewaySwitch', () => {
     expect(localInvoke).not.toHaveBeenCalled()
   })
 
+  it('stops serving remote data locally once the peer is gone', async () => {
+    const localDispatch = vi.fn(async () => ({ ok: true as const, value: 'local' }))
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localDispatch } as unknown as TypertGatewayLike
+    const dispatch = (endpoint: string): Promise<unknown> => (
+      gateway as unknown as { dispatchRpc(endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> }
+    ).dispatchRpc(endpoint, {}, new AbortController().signal)
+    const target = new TypertGatewaySwitch(gateway)
+    target.install()
+    const gone = Object.assign(new Error('The authenticated Noise channel is not connected.'), { code: 'TRANSPORT_CLOSED' })
+    const goneTarget = {
+      invoke: vi.fn(async () => { throw gone }),
+      dispatch: vi.fn(async () => { throw gone }),
+      open: vi.fn(async () => { throw gone }),
+    }
+
+    // A peer that is gone must not be papered over with local data: the native UI would cache a local
+    // answer as if the remote workspace had produced it, which is how a session list stays wrong.
+    target.selectRemote(goneTarget as never)
+    await expect(dispatch('session/list')).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+    expect(localDispatch).not.toHaveBeenCalled()
+
+    // A refusal is a capability mismatch instead, so the local shell still answers it.
+    const refused = Object.assign(new Error('not allowed'), { code: 'METHOD_NOT_ALLOWED' })
+    target.selectRemote({
+      invoke: vi.fn(async () => { throw refused }),
+      dispatch: vi.fn(async () => { throw refused }),
+      open: vi.fn(async () => { throw refused }),
+    } as never)
+    await expect(dispatch('session/list')).resolves.toMatchObject({ value: 'local' })
+
+    // The bootstrap a window cannot start without keeps answering even while the peer is gone.
+    target.selectRemote(goneTarget as never)
+    await expect(dispatch('settings/describe')).resolves.toMatchObject({ value: 'local' })
+  })
+
   it('restores the original gateway method', () => {
     const invoke = vi.fn(async () => undefined)
     const gateway: TypertGatewayLike = { invoke }

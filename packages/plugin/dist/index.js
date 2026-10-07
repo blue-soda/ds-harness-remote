@@ -14579,7 +14579,7 @@ var ClientSecureTransport = class {
   }
   requireNoise() {
     if (this.noise === void 0 || !this.noise.complete || this.closed) {
-      throw new Error("The authenticated Noise channel is not connected.");
+      throw Object.assign(new Error("The authenticated Noise channel is not connected."), { code: "TRANSPORT_CLOSED" });
     }
     return this.noise;
   }
@@ -19167,6 +19167,17 @@ function requireRecord(value, name2) {
 // src/typert-gateway-switch.ts
 var REMOTE_COMMAND_METHODS = ["execute", "list"];
 var LOCAL_ONLY_NAMESPACES = /* @__PURE__ */ new Set(["dynamicCordisRunner"]);
+var LOCAL_FALLBACK_NAMESPACES = /* @__PURE__ */ new Set(["$events", "settings", "credentials", "dynamicCordisRunner"]);
+var PEER_GONE_CODES = /* @__PURE__ */ new Set([
+  "TRANSPORT_CLOSED",
+  "CLIENT_CLOSED",
+  "RPC_TIMEOUT",
+  "CONNECTION_FAILED",
+  "CONNECTION_REPLACED",
+  "NOT_CONNECTED",
+  "UNAVAILABLE",
+  "internal"
+]);
 var ALL_REMOTE_COMMANDS = { execute: true, list: true };
 var TypertGatewaySwitch = class {
   runtime;
@@ -19318,7 +19329,7 @@ var TypertGatewaySwitch = class {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
     if (this.remoteTarget !== void 0 && this.remoteAvailability()) {
       return this.remoteTarget.invoke(request).catch((error) => {
-        if (!isUnansweredByPeer(error)) throw error;
+        if (!localFallbackAllowed(endpointOf(request), error)) throw error;
         console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error);
         return this.localInvoke(request);
       });
@@ -19345,7 +19356,7 @@ var TypertGatewaySwitch = class {
    */
   withLocalFallback(endpoint, remote, local) {
     return remote().catch((error) => {
-      if (!isUnansweredByPeer(error)) throw error;
+      if (!localFallbackAllowed(endpoint, error)) throw error;
       console.warn(`[dsh-remote] serving ${endpoint} locally: the peer did not answer it`, error);
       return local();
     });
@@ -19403,9 +19414,21 @@ function requestFromCarrier(endpoint, payload, signal) {
 function endpointOf(request) {
   return `${request.namespace}/${request.method}`;
 }
-function isLocalOnlyEndpoint(endpoint) {
+function namespaceOf(endpoint) {
   const separator = endpoint.indexOf("/");
-  return separator > 0 && LOCAL_ONLY_NAMESPACES.has(endpoint.slice(0, separator));
+  return separator > 0 ? endpoint.slice(0, separator) : void 0;
+}
+function isLocalOnlyEndpoint(endpoint) {
+  const namespace = namespaceOf(endpoint);
+  return namespace !== void 0 && LOCAL_ONLY_NAMESPACES.has(namespace);
+}
+function localFallbackAllowed(endpoint, error) {
+  if (!isUnansweredByPeer(error)) return false;
+  if (!isRecord8(error)) return true;
+  const code = typeof error.code === "string" ? error.code : "";
+  if (!PEER_GONE_CODES.has(code)) return true;
+  const namespace = namespaceOf(endpoint);
+  return namespace !== void 0 && LOCAL_FALLBACK_NAMESPACES.has(namespace);
 }
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
@@ -19424,6 +19447,12 @@ var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
   "CONNECTION_REPLACED",
   "NOT_CONNECTED",
   "UNAVAILABLE",
+  // The client's own transport codes: the peer cannot answer a call it never received, so these are
+  // "unanswered" rather than a refusal - and PEER_GONE_CODES above is what decides whether the local
+  // shell may answer for it.
+  "TRANSPORT_CLOSED",
+  "CLIENT_CLOSED",
+  "RPC_TIMEOUT",
   "internal"
 ]);
 function isRecord8(value) {
@@ -20557,6 +20586,14 @@ var ClientModeRuntime = class {
    */
   remoteReconnectRun = 0;
   pendingWorkspaceSelection;
+  /**
+   * The last workspace the user opened for a Host.
+   *
+   * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
+   * re-read its session list, and without it a list poisoned by the outage stays wrong even after
+   * the link is back.
+   */
+  lastWorkspaceSelection;
   codexVirtual;
   proxySwitch;
   gatewaySwitch;
@@ -20789,6 +20826,7 @@ var ClientModeRuntime = class {
       this.connected = void 0;
       this.connectionProgress = void 0;
       this.pendingWorkspaceSelection = void 0;
+      this.lastWorkspaceSelection = void 0;
       await this.closeCodexStreams(previous2?.client);
       await previous2?.client.close().catch(() => void 0);
       this.fellBackToLocal = false;
@@ -20912,12 +20950,29 @@ var ClientModeRuntime = class {
       return false;
     }
   }
+  rememberWorkspaceSelection(selection) {
+    this.pendingWorkspaceSelection = selection;
+    this.lastWorkspaceSelection = { ...selection };
+  }
+  /**
+   * Republish the workspace selection so the native UI re-reads its remote session list.
+   *
+   * The client half consumes status.workspaceSelection and reconnects that workspace; that refresh is
+   * what replaces a list the outage had filled with local answers.
+   * @param targetDeviceId - the Host the reconnect finished against.
+   */
+  restoreWorkspaceSelection(targetDeviceId) {
+    const selection = this.lastWorkspaceSelection;
+    if (selection === void 0 || selection.targetDeviceId !== targetDeviceId) return;
+    this.pendingWorkspaceSelection = { ...selection };
+  }
   finishReconnect(reason) {
     const target2 = this.reconnecting?.targetDeviceId;
     if (target2 === void 0) return;
     this.reconnecting = void 0;
     this.livenessFailures = 0;
     this.armLivenessWatch(LIVENESS_INTERVAL_MS);
+    this.restoreWorkspaceSelection(target2);
     this.logger.info("remote Harness reconnect finished", { targetDeviceId: shortId(target2), reason });
   }
   /**
@@ -20996,6 +21051,7 @@ var ClientModeRuntime = class {
       if (this.connected !== void 0) return;
       try {
         await this.setMode("remote", targetDeviceId);
+        this.restoreWorkspaceSelection(targetDeviceId);
         this.logger.info("remote Harness session reconnected", { targetDeviceId: shortId(targetDeviceId) });
         return;
       } catch (error) {
@@ -21118,7 +21174,7 @@ var ClientModeRuntime = class {
     await this.closeCodexVirtual();
     this.selectRemoteTarget(remote, transport);
     const workspaceId = workspaceRecordId(workspace.workspace);
-    this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
+    this.rememberWorkspaceSelection({ targetDeviceId: remote.target.deviceId, workspaceId });
     this.logger.info("Remote workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }
@@ -21152,12 +21208,12 @@ var ClientModeRuntime = class {
     this.codexVirtual = virtual;
     this.selectCodexTarget(virtual, remote);
     const preferredSessionId = await virtual.preferredSessionId(signal);
-    this.pendingWorkspaceSelection = {
+    this.rememberWorkspaceSelection({
       targetDeviceId: remote.target.deviceId,
       workspaceId,
       backend: "codex",
       ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
-    };
+    });
     this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }

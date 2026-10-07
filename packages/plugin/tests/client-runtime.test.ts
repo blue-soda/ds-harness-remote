@@ -205,6 +205,45 @@ describe('ClientModeRuntime Host account control', () => {
     await new Promise(resolve => { setTimeout(resolve, 1_100) })
   })
 
+  it('republishes the workspace selection once a reconnect finishes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-reselect-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+
+    const rpc = vi.fn()
+    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    const selection = { targetDeviceId: 'host-1', workspaceId: 'ws-1' }
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client,
+      target: { deviceId: 'host-1', name: 'Host' },
+      features: remoteHostFeatures(),
+    }
+    ;(runtime as unknown as { lastWorkspaceSelection: unknown }).lastWorkspaceSelection = selection
+
+    // The first unanswered check rebuilds in place ...
+    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().reconnecting).toMatchObject({ phase: 'fast' })
+
+    // ... and a link that answers again republishes the selection, which is what makes the client half
+    // re-open the workspace and the native UI re-read its session list.
+    rpc.mockResolvedValueOnce({ capabilities: [] })
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().reconnecting).toBeUndefined()
+    expect(runtime.status().workspaceSelection).toEqual(selection)
+
+    await runtime.setMode('local')
+    await new Promise(resolve => { setTimeout(resolve, 1_100) })
+  })
+
   it('forwards only supported QR login providers to the Server API', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-qr-provider-'))
     directories.push(directory)

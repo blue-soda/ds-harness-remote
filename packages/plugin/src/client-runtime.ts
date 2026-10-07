@@ -265,6 +265,14 @@ export class ClientModeRuntime {
    */
   private remoteReconnectRun = 0
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
+  /**
+   * The last workspace the user opened for a Host.
+   *
+   * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
+   * re-read its session list, and without it a list poisoned by the outage stays wrong even after
+   * the link is back.
+   */
+  private lastWorkspaceSelection?: RemoteWorkspaceSelection
   private codexVirtual?: CodexVirtualHarness
   private readonly proxySwitch?: ApiProxySwitch
   private readonly gatewaySwitch: TypertGatewaySwitch
@@ -556,6 +564,8 @@ export class ClientModeRuntime {
       this.connected = undefined
       this.connectionProgress = undefined
       this.pendingWorkspaceSelection = undefined
+      // The user asked for local, so the next remote session starts from a fresh workspace choice.
+      this.lastWorkspaceSelection = undefined
       await this.closeCodexStreams(previous?.client)
       await previous?.client.close().catch(() => undefined)
       // Returning to local is the answer to a dropped session, so the record of
@@ -691,12 +701,31 @@ export class ClientModeRuntime {
     }
   }
 
+  private rememberWorkspaceSelection(selection: RemoteWorkspaceSelection): void {
+    this.pendingWorkspaceSelection = selection
+    this.lastWorkspaceSelection = { ...selection }
+  }
+
+  /**
+   * Republish the workspace selection so the native UI re-reads its remote session list.
+   *
+   * The client half consumes status.workspaceSelection and reconnects that workspace; that refresh is
+   * what replaces a list the outage had filled with local answers.
+   * @param targetDeviceId - the Host the reconnect finished against.
+   */
+  private restoreWorkspaceSelection(targetDeviceId: string): void {
+    const selection = this.lastWorkspaceSelection
+    if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return
+    this.pendingWorkspaceSelection = { ...selection }
+  }
+
   private finishReconnect(reason: string): void {
     const target = this.reconnecting?.targetDeviceId
     if (target === undefined) return
     this.reconnecting = undefined
     this.livenessFailures = 0
     this.armLivenessWatch(LIVENESS_INTERVAL_MS)
+    this.restoreWorkspaceSelection(target)
     this.logger.info('remote Harness reconnect finished', { targetDeviceId: shortId(target), reason })
   }
 
@@ -786,6 +815,7 @@ export class ClientModeRuntime {
       if (this.connected !== undefined) return
       try {
         await this.setMode('remote', targetDeviceId)
+        this.restoreWorkspaceSelection(targetDeviceId)
         this.logger.info('remote Harness session reconnected', { targetDeviceId: shortId(targetDeviceId) })
         return
       } catch (error) {
@@ -917,7 +947,7 @@ export class ClientModeRuntime {
     await this.closeCodexVirtual()
     this.selectRemoteTarget(remote, transport)
     const workspaceId = workspaceRecordId(workspace.workspace)
-    this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId }
+    this.rememberWorkspaceSelection({ targetDeviceId: remote.target.deviceId, workspaceId })
     this.logger.info('Remote workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
   }
@@ -957,12 +987,12 @@ export class ClientModeRuntime {
     this.codexVirtual = virtual
     this.selectCodexTarget(virtual, remote)
     const preferredSessionId = await virtual.preferredSessionId(signal)
-    this.pendingWorkspaceSelection = {
+    this.rememberWorkspaceSelection({
       targetDeviceId: remote.target.deviceId,
       workspaceId,
       backend: 'codex',
       ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
-    }
+    })
     this.logger.info('CodeX virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
   }
