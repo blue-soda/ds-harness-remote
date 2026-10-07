@@ -1933,7 +1933,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteWorkspaces: "No remote workspaces yet. Use + to add one.",
     activeRemote: "{name}",
     exitRemote: "Exit",
-    restoringRemoteTarget: "Reconnecting\u2026",
+    stopReconnecting: "Stop reconnecting",
     addRemoteWorkspace: "Add remote workspace",
     addCodexWorkspace: "Add CodeX workspace",
     noCodexWorkspaces: "No CodeX workspaces yet.",
@@ -2189,7 +2189,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteWorkspaces: "\u8FD9\u53F0\u4E3B\u673A\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A\uFF0C\u70B9\u51FB + \u6DFB\u52A0\u3002",
     activeRemote: "{name}",
     exitRemote: "\u9000\u51FA",
-    restoringRemoteTarget: "\u6B63\u5728\u91CD\u8FDE\u2026",
+    stopReconnecting: "\u505C\u6B62\u91CD\u8FDE",
     addRemoteWorkspace: "\u6DFB\u52A0\u8FDC\u7A0B\u5DE5\u4F5C\u533A",
     addCodexWorkspace: "\u6DFB\u52A0 CodeX \u5DE5\u4F5C\u533A",
     noCodexWorkspaces: "\u8FD8\u6CA1\u6709 CodeX \u5DE5\u4F5C\u533A\u3002",
@@ -3350,14 +3350,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ), props.wide ? React.createElement(
               "span",
               { className: "dshRemoteSidebarLabel" },
-              status?.restoringTargetDeviceId === void 0 ? remoteLabel : t("restoringRemoteTarget")
+              status?.reconnecting === void 0 ? remoteLabel : t("reconnecting")
             ) : null),
-            (status?.mode === "remote" || status?.fellBackToLocal === !0) && props.wide ? React.createElement("button", {
+            (status?.mode === "remote" || status?.fellBackToLocal === !0 || status?.reconnecting !== void 0) && props.wide ? React.createElement("button", {
               type: "button",
               className: "dshRemoteExitLink",
               disabled: busy,
               onClick: () => void openLocalWorkspaces()
-            }, t("exitRemote")) : null
+            }, t(status?.reconnecting === void 0 ? "exitRemote" : "stopReconnecting")) : null
           ),
           open ? React.createElement("div", {
             className: "dshRemoteBackdrop",
@@ -3410,12 +3410,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement(
               "main",
               { className: "dshRemotePageBody" },
-              status?.mode === "remote" || status?.fellBackToLocal === !0 ? React.createElement("button", {
+              status?.mode === "remote" || status?.fellBackToLocal === !0 || status?.reconnecting !== void 0 ? React.createElement("button", {
                 type: "button",
                 className: "dshRemoteLocalLink",
                 disabled: busy,
                 onClick: () => void openLocalWorkspaces()
-              }, t("openLocalWorkspaces")) : null,
+              }, t(status?.reconnecting === void 0 ? "openLocalWorkspaces" : "stopReconnecting")) : null,
               React.createElement(
                 React.Fragment,
                 null,
@@ -3813,7 +3813,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
               React.createElement(
                 "div",
                 { className: "dshRemoteHeader" },
-                React.createElement("strong", null, t("harnessTarget")),
+                React.createElement(
+                  "strong",
+                  null,
+                  status?.reconnecting === void 0 ? t("harnessTarget") : `${t("harnessTarget")} \xB7 ${t("reconnecting")}`
+                ),
                 React.createElement("button", { type: "button", onClick: () => setOpen(!1), "aria-label": t("close") }, "\xD7")
               ),
               React.createElement("button", {

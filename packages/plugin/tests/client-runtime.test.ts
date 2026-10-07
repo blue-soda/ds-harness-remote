@@ -111,7 +111,7 @@ describe('ClientModeRuntime Host account control', () => {
 
     // Nothing recorded: a boot must not invent a target, and the UI stays on the local shell.
     await expect(runtime.restoreLastTarget()).resolves.toBe(false)
-    expect(runtime.status().restoringTargetDeviceId).toBeUndefined()
+    expect(runtime.status().reconnecting).toBeUndefined()
 
     await store.save({ mode: 'local' })
     await expect(runtime.restoreLastTarget()).resolves.toBe(false)
@@ -123,11 +123,11 @@ describe('ClientModeRuntime Host account control', () => {
     await store.save({ mode: 'remote', hostDeviceId: 'host-1', serverUrl: config().serverUrl })
     await expect(runtime.restoreLastTarget()).resolves.toBe(true)
     // The window is told which Host is coming back before anything is connected.
-    expect(runtime.status()).toMatchObject({ restoringTargetDeviceId: 'host-1' })
+    expect(runtime.status()).toMatchObject({ reconnecting: { targetDeviceId: 'host-1', phase: 'restore' } })
 
     // Returning to local records that choice and supersedes the retry loop.
     await runtime.setMode('local')
-    expect(runtime.status().restoringTargetDeviceId).toBeUndefined()
+    expect(runtime.status().reconnecting).toBeUndefined()
     await expect(store.load()).resolves.toMatchObject({ mode: 'local' })
     // Let the superseded loop observe the new run id and exit instead of leaking a timer.
     await new Promise(resolve => { setTimeout(resolve, 1_100) })
@@ -171,14 +171,33 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.verifyRemoteConnection()
     expect(runtime.status().connected).toBe(true)
 
-    // One unanswered check is tolerated: a single slow round trip is not a dead link.
+    // The first unanswered check rebuilds the link in place: the session stays on screen.
     rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
     await runtime.verifyRemoteConnection()
-    expect(runtime.status().connected).toBe(true)
+    expect(runtime.status()).toMatchObject({
+      connected: true,
+      reconnecting: { targetDeviceId: 'host-1', phase: 'fast' },
+    })
 
-    // The second one ends the session and hands it to the reconnect loop.
+    // A link that answers again returns to the steady state instead of escalating.
+    rpc.mockResolvedValueOnce({ capabilities: [] })
     await runtime.verifyRemoteConnection()
-    expect(runtime.status()).toMatchObject({ connected: false, fellBackToLocal: true })
+    expect(runtime.status().connected).toBe(true)
+    expect(runtime.status().reconnecting).toBeUndefined()
+
+    // The second unanswered check gives up and returns the user to the local shell.
+    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status()).toMatchObject({
+      connected: true,
+      reconnecting: { targetDeviceId: 'host-1', phase: 'fast' },
+    })
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status()).toMatchObject({
+      connected: false,
+      fellBackToLocal: true,
+      reconnecting: { targetDeviceId: 'host-1', phase: 'fallback' },
+    })
     expect(client.close).toHaveBeenCalled()
 
     // Supersede the retry loop this started instead of leaking its timer.

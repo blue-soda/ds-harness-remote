@@ -239,15 +239,21 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   切回本地会写回 `local` 记录并顶掉重试循环；认证类失败（`AUTH_REQUIRED`/`ACCOUNT_AUTH_REQUIRED`/
   `AUTH_INVALID`/`TOKEN_EXPIRED`/`DEVICE_*`/`MEMBERSHIP_REQUIRED`）**立即停止重试**，因为等待无法修复它。
   **Android 真机验收待做**（进程被回收后重开，确认自动连回与侧栏状态）。
-- [x] **半开连接已由客户端周期存活检查覆盖**（2026-10-07，按用户决定重做）：`ClientModeRuntime` 在会话
-  建立后每 **30 秒**发一次 `harness.transport.describe`（`client.rpc` 的逐调用超时 10 秒），**只有"没有应答"才算断**
-  ——对端返回自己的错误码（如 `METHOD_NOT_FOUND`）同样证明它在线；连续 **2 次**无应答即走与 socket 关闭完全相同的
-  收尾（`handleRemoteTransportLost`：回退本地 + 进入既有退避重连）。定时器 `unref()`、只在连接建立后创建、
-  切回本地/丢链/关闭时清除，因此不持有事件循环，也不会拖住测试。**回前台立即触发**：浏览器半在
-  `visibilitychange`（仅 visible）与 `focus` 时调用控制端点 `client.connection.verify`，不等下一个周期。
-  与 2026-10-07 早先被回退那版的区别：不藏在 `status` 读取里（独立端点）、判定区分"对端拒绝"与"没有应答"、
-  定时器不持有事件循环。
-- [ ] **断连期间会话列表出现"本地+远程"混合**：远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
+- [x] **半开连接：两级重连（2026-10-07，按用户决定实现）**：`ClientModeRuntime` 在会话建立后每 **30 秒**
+  发一次只读的 `harness.transport.describe`，`client.rpc` 逐调用预算 **4 秒**（原先 10 秒，用户判为过久）。
+  **只有"没有应答"才算断**：对端返回自己的错误码（`METHOD_NOT_FOUND` 等）证明它在线，因此不会误判。
+  - **第一次无应答 → 快速重连**：不回退本地，界面停留在远程会话，`status.reconnecting.phase = 'fast'`；立刻用
+    `reestablish()`（`connect()` + 重新绑定 carrier + 关旧 client）重建传输，并把探测节奏切到 **5 秒**；
+    之后任何一次探测有应答（或重建成功）即回到稳态（`finishReconnect()`）。
+  - **第二次无应答 → 灾难回退**：走与 socket 关闭完全相同的 `handleRemoteTransportLost()`（回退本地 +
+    `fellBackToLocal` + 既有退避重连），`phase = 'fallback'`。
+  - **可见与可中断**：侧栏条目与目标对话框头部在重连期间显示"正在重连"，退出入口变为「停止重连」
+    （调用 `setMode('local')`，会顶掉重连循环）；启动恢复是第三阶段 `phase = 'restore'`。
+  - 定时器 `unref()`、随会话启停（切回本地/丢链/关闭时清除），不持有事件循环，也不拖住测试。
+  - **回前台立即触发**：浏览器半在 `visibilitychange`（仅 visible）与 `focus` 时调用控制端点
+    `client.connection.verify`，不等下一个周期。
+  - 真机验收仍待做（Android 后台久置后回前台：应看到"正在重连"，并区分"链路恢复"与"回退本地后重连"）。
+- [ ] **本地兜底收窄（用户决定暂不做，2026-10-07）**：断连期间会话列表出现"本地+远程"混合——远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
   于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点（`settings/describe`、
   插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。
 - [x] **`plugin-lifecycle` 11 个用例超时（已定位并修复，2026-10-07）**：根因是 Codex 域**默认开启**，
