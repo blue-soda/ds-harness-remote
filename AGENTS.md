@@ -229,6 +229,24 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 `DELETE /api/v1/devices/self` 予以保留但登出不再调用；要彻底移除设备须由运维在服务停止后改
 `state.json`（运行期间编辑会被内存状态覆盖）。详见 `docs/plugin-integration.md` §6.1。
 
+### 清理设备行：client 行可能从不刷新 lastSeenAt（2026-10-08 实测）
+
+按 `lastSeenAt` 判定"在线"会**误删正在使用的设备** ✗：Android 的 **host 行会正常刷新** ✓，但同一台手机的
+**client 行时间戳长期为 0** ✗（实测：host 行 8 秒前 ✓、client 行为 0 ✓，两者同属一次注册 ✓）。删行会同时作废
+该设备令牌 ✓ → 用户端立刻 `AUTH_INVALID` ✓（本次就是这么发生的，已从备份把该行与其令牌原样恢复 ✓）。
+
+正确规则：
+
+1. **按设备族判定**：只要同一注册批次（同一 `deviceId` 前缀/时间戳邻近 ✓）有**任意一行在线** ✓，该设备的
+   **所有行**（host + client ✓）都必须保留 ✓ —— 无论其自身时间戳是否为 0 ✓。
+2. 清理正在运行的设备毫无意义 ✗：它下一次心跳就会**重新注册** ✓，反而消耗一个新名额 ✓（每账号 256 上限 ✓，
+   且只在**新 `deviceId`** 注册时判定 ✓）。所以先**停掉**要清理的实例 ✓，再删它的行 ✓。
+3. 规程固定为：`systemctl stop ds-harness-remote` → **备份** `/var/lib/ds-harness-remote/state.json` →
+   写入（只删白名单外的**设备行与其令牌** ✓，令牌结构是 `{kind, deviceId, expires, used}` ✓）→
+   `systemctl start` → 复核行数与 `lastSeenAt` 是否继续更新 ✓（若被内存状态覆盖说明顺序错了 ✓）。
+4. 线上状态文件位于 `/var/lib/ds-harness-remote/state.json` ✓，服务单元 `ds-harness-remote.service` ✓，
+   工作目录 `/root/Workspace/ds-harness-remote/apps/server` ✓。
+
 ## Native sidebar and development preview (2026-09-20)
 
 开发依赖升级到 Harness `0.2.0-rc.1`（同时兼容 `0.1.7-rc.1`），运行时按能力检测同时支持 ≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径（`typeof settings.register === 'function'` 分流）。终端与 loopback 设置只能在 Host 本地修改，`settings/update|replace|mutate` 禁止远程修改 `ds-harness-remote` 和 `dsh-remote`。终端默认开启；loopback 默认无端口。「远程终端」开关切换即保存并立即更新运行时拦截，「保存访问设置」按钮只提交 Loopback 端口（位于端口输入框右侧）；两者都无需重启 Host。预览入口位于 Remote Header「预览服务」，第一版限 Desktop / 连接本机 Harness 的浏览器；不把本机预览 URL 作为远程 Web 或 Android 可用地址。跨机、Windows 和真实网络热更新回归仍需另行验证。
