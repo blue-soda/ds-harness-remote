@@ -15,6 +15,8 @@ export interface ClientTargetRecord {
   /** Server the target belongs to, so a target from another deployment is never restored blindly. */
   serverUrl?: string
   hostDeviceId?: string
+  /** Display name of the Host, so a restore can name it before any connection exists. */
+  hostName?: string
   savedAt: number
 }
 
@@ -61,6 +63,7 @@ export class ClientTargetStore {
         ...(typeof record.hostDeviceId === 'string' && record.hostDeviceId.length > 0
           ? { hostDeviceId: record.hostDeviceId }
           : {}),
+        ...(typeof record.hostName === 'string' && record.hostName.length > 0 ? { hostName: record.hostName } : {}),
         savedAt: typeof record.savedAt === 'number' ? record.savedAt : 0,
       }
     } catch {
@@ -69,12 +72,13 @@ export class ClientTargetStore {
   }
 
   /** Record the current target. Failures reach the caller so a boot can log them. */
-  async save(target: { mode: 'local' | 'remote'; serverUrl?: string; hostDeviceId?: string }): Promise<void> {
+  async save(target: { mode: 'local' | 'remote'; serverUrl?: string; hostDeviceId?: string; hostName?: string }): Promise<void> {
     const value: ClientTargetRecord = {
       schemaVersion: 1,
       mode: target.mode,
       ...(target.serverUrl === undefined ? {} : { serverUrl: target.serverUrl }),
       ...(target.hostDeviceId === undefined ? {} : { hostDeviceId: target.hostDeviceId }),
+      ...(target.hostName === undefined ? {} : { hostName: target.hostName }),
       savedAt: Date.now(),
     }
     await mkdir(this.directory, { recursive: true, mode: 0o700 })

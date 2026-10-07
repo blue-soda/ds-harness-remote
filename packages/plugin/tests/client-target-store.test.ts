@@ -26,11 +26,17 @@ describe('ClientTargetStore', () => {
     const store = new ClientTargetStore(await makeDirectory())
 
     await expect(store.load()).resolves.toBeUndefined()
-    await store.save({ mode: 'remote', hostDeviceId: 'host-1', serverUrl: 'https://remote.example.com' })
+    await store.save({
+      mode: 'remote',
+      hostDeviceId: 'host-1',
+      hostName: 'DESKTOP-TEST',
+      serverUrl: 'https://remote.example.com',
+    })
     await expect(store.load()).resolves.toMatchObject({
       schemaVersion: 1,
       mode: 'remote',
       hostDeviceId: 'host-1',
+      hostName: 'DESKTOP-TEST',
       serverUrl: 'https://remote.example.com',
     })
     const saved = await store.load()

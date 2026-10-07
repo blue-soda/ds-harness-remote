@@ -2929,10 +2929,11 @@ window.__ModuleLoader__.load({
         }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement('path', { d: 'M8 21h8M12 17v4' })),
         React.createElement('span', { className: 'dshRemoteModePrefix' }, t('remoteModePrefix')),
         React.createElement('span', { className: 'dshRemoteSessionTarget' },
-          status.reconnecting?.targetName
-            ?? status.target?.name
-            ?? (status.reconnecting === undefined ? undefined : shortDeviceId(status.reconnecting.targetDeviceId))
-            ?? t('host')),
+          // While reconnecting the carriers may already describe the local shell, so its name must not
+          // stand in for the target: name the Host the reconnect is about, or its short id.
+          status.reconnecting === undefined
+            ? status.target?.name ?? t('host')
+            : status.reconnecting.targetName ?? shortDeviceId(status.reconnecting.targetDeviceId)),
         React.createElement('button', {
           type: 'button',
           className: `dshRemoteNetwork${reconnecting ? ' isReconnecting' : networkOnline ? ' isOnline' : ' isOffline'}`,

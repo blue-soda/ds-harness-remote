@@ -601,7 +601,7 @@ export class ClientModeRuntime {
     // A fresh remote session clears the record of an earlier dropped one.
     this.fellBackToLocal = false
     this.reconnecting = undefined
-    await this.rememberTarget({ mode: 'remote', hostDeviceId: next.target.deviceId })
+    await this.rememberTarget({ mode: 'remote', hostDeviceId: next.target.deviceId, hostName: next.target.name })
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
     this.logger.info('Harness target switched', { mode: 'remote', targetDeviceId: shortId(next.target.deviceId) })
@@ -855,7 +855,7 @@ export class ClientModeRuntime {
    * the local shell, which is where it would have been without this record.
    * @param target - the target to record.
    */
-  private async rememberTarget(target: { mode: 'local' | 'remote'; hostDeviceId?: string }): Promise<void> {
+  private async rememberTarget(target: { mode: 'local' | 'remote'; hostDeviceId?: string; hostName?: string }): Promise<void> {
     if (this.targetStore === undefined) return
     try {
       await this.targetStore.save({
@@ -887,7 +887,11 @@ export class ClientModeRuntime {
       })
       return false
     }
-    this.reconnecting = { targetDeviceId: record.hostDeviceId, phase: 'restore' }
+    this.reconnecting = {
+      targetDeviceId: record.hostDeviceId,
+      ...(record.hostName === undefined ? {} : { targetName: record.hostName }),
+      phase: 'restore',
+    }
     this.logger.info('restoring the remote target of the previous run', {
       targetDeviceId: shortId(record.hostDeviceId),
     })

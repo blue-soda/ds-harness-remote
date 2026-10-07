@@ -3920,7 +3920,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
           React.createElement(
             "span",
             { className: "dshRemoteSessionTarget" },
-            status.reconnecting?.targetName ?? status.target?.name ?? (status.reconnecting === void 0 ? void 0 : shortDeviceId(status.reconnecting.targetDeviceId)) ?? t("host")
+            // While reconnecting the carriers may already describe the local shell, so its name must not
+            // stand in for the target: name the Host the reconnect is about, or its short id.
+            status.reconnecting === void 0 ? status.target?.name ?? t("host") : status.reconnecting.targetName ?? shortDeviceId(status.reconnecting.targetDeviceId)
           ),
           React.createElement("button", {
             type: "button",

@@ -20857,7 +20857,7 @@ var ClientModeRuntime = class {
     this.selectRemoteTarget(next);
     this.fellBackToLocal = false;
     this.reconnecting = void 0;
-    await this.rememberTarget({ mode: "remote", hostDeviceId: next.target.deviceId });
+    await this.rememberTarget({ mode: "remote", hostDeviceId: next.target.deviceId, hostName: next.target.name });
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
@@ -21117,7 +21117,11 @@ var ClientModeRuntime = class {
       });
       return false;
     }
-    this.reconnecting = { targetDeviceId: record7.hostDeviceId, phase: "restore" };
+    this.reconnecting = {
+      targetDeviceId: record7.hostDeviceId,
+      ...record7.hostName === void 0 ? {} : { targetName: record7.hostName },
+      phase: "restore"
+    };
     this.logger.info("restoring the remote target of the previous run", {
       targetDeviceId: shortId(record7.hostDeviceId)
     });
@@ -22058,6 +22062,7 @@ var ClientTargetStore = class {
         mode: record7.mode,
         ...typeof record7.serverUrl === "string" && record7.serverUrl.length > 0 ? { serverUrl: record7.serverUrl } : {},
         ...typeof record7.hostDeviceId === "string" && record7.hostDeviceId.length > 0 ? { hostDeviceId: record7.hostDeviceId } : {},
+        ...typeof record7.hostName === "string" && record7.hostName.length > 0 ? { hostName: record7.hostName } : {},
         savedAt: typeof record7.savedAt === "number" ? record7.savedAt : 0
       };
     } catch {
@@ -22071,6 +22076,7 @@ var ClientTargetStore = class {
       mode: target2.mode,
       ...target2.serverUrl === void 0 ? {} : { serverUrl: target2.serverUrl },
       ...target2.hostDeviceId === void 0 ? {} : { hostDeviceId: target2.hostDeviceId },
+      ...target2.hostName === void 0 ? {} : { hostName: target2.hostName },
       savedAt: Date.now()
     };
     await mkdir2(this.directory, { recursive: true, mode: 448 });
