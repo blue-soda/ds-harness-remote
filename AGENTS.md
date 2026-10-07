@@ -258,6 +258,12 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 - **自我替换的关闭不是"对端断了"**：快速重连的重建会新建控制连接，Server 会关闭同一设备的旧连接；旧传输的
   `onClose` 若被当作灾难回退，快速重连就会**永远自我升级**（实测表现：只看到灾难回退）。正在被替换的传输的
   关闭必须忽略，升级判定权只归存活探测；升级日志带 `reason`（`transport-closed` / `unanswered-twice`）。
+- **含字节的结果必须按"本地的信封形式"交出**（2026-10-08 实测定位，A/B 对照：同一张 present 图片，本地会话能预览、
+  远程会话报 `expected "Uint8Array", path: ["data"]`）：本地 shell 对 `workspaceFiles/readBytes` 交出的是
+  `{ value: { data: null, … }, attachments: [{ path: ['data'], bytes }] }`，由客户端连接层（`client/rpc.ts`）
+  在生成的 schema 校验**之前**把字节回填；远程分支若交出**裸 `Uint8Array`**，JSON 一跳就变成数值键对象、客户端也
+  不会走回填分支，于是校验失败。三处载体（Typert switch、rc.2 ApiProxy、CodeX virtual harness）都必须交出这个
+  信封；已是该形式或无法解码时原样返回。这是"不改 DSH 代码"就能修好的关键。
 - **载体切换必须留给本地一条活路**：`TypertGatewaySwitch` 是唯一写 `runtime.dispatchRpc/invoke/stream` 的组件，
   所以它"往下传"的目标其实就是**本地 dispatcher**。两条实测教训（2026-10-08，都是我改出来的）：把本地 dispatcher
   当自由函数调用会让它失去接收者（`this` 丢失 → DSH 内部读 `invokeRpc` 报 undefined → **本地全线 500**，

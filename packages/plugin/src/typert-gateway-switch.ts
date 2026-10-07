@@ -174,18 +174,12 @@ export class TypertGatewaySwitch {
           throw error
         })
         : !this.routesToRemote(endpoint)
-          ? Promise.resolve(this.localDispatch!(endpoint, payload, signal))
-            .then(result => (logReadBytesShape('local', endpoint, result), result))
+          ? this.localDispatch!(endpoint, payload, signal)
           : this.withLocalFallback(
             endpoint,
             () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
             () => this.localDispatch!(endpoint, payload, signal),
-          ).then(result => {
-            logReadBytesShape('remote-raw', endpoint, result)
-            const normalized = normalizeByteResult(endpoint, result) as typeof result
-            logReadBytesShape('remote', endpoint, normalized)
-            return normalized
-          })
+          ).then(result => normalizeByteResult(endpoint, result) as typeof result)
     }
     if (previousOpen !== undefined) {
       const open = previousOpen
@@ -484,15 +478,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param result - the peer's result.
  * @returns the result with byte-valued fields restored to \`Uint8Array\`.
  */
-/** Shapes only: what a byte field looks like where it crosses a seam (never the content). */
-function describeBytes(data: unknown): Record<string, unknown> {
-  return {
-    dataIsBytes: data instanceof Uint8Array,
-    dataType: typeof data,
-    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    preview: typeof data === 'string' ? data.slice(0, 12) : undefined,
-  }
-}
 
 function normalizeByteResult(endpoint: string, result: unknown): unknown {
   if (endpoint !== 'workspaceFiles/readBytes') return result
@@ -512,26 +497,4 @@ function normalizeByteResult(endpoint: string, result: unknown): unknown {
     value: { ...(value as Record<string, unknown>), data: null },
     attachments: [{ path: ['data'], bytes: data }],
   }
-}
-/**
- * Shapes only: what a readBytes result looks like on each branch.
- *
- * A local session previews images from the sidebar and a remote one fails the client's Uint8Array
- * schema, so the two values this carrier hands over are the remaining variable. Logs the envelope's
- * keys, the byte field's shape and its concrete constructor - never the content.
- */
-function logReadBytesShape(branch: 'local' | 'remote' | 'remote-raw', endpoint: string, result: unknown): void {
-  if (endpoint !== 'workspaceFiles/readBytes') return
-  const envelope = typeof result === 'object' && result !== null ? result as Record<string, unknown> : {}
-  const value = typeof envelope.value === 'object' && envelope.value !== null ? envelope.value as Record<string, unknown> : {}
-  const data = value.data
-  console.warn('[dsh-remote] readBytes shape', {
-    branch,
-    ok: envelope.ok === true,
-    keys: Object.keys(value),
-    dataIsBytes: data instanceof Uint8Array,
-    dataCtor: typeof data === 'object' && data !== null ? (data.constructor?.name ?? 'none') : typeof data,
-    dataTag: Object.prototype.toString.call(data),
-    envelopeKeys: Object.keys(envelope),
-  })
 }
