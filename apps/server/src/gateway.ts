@@ -3,6 +3,7 @@ import type { Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import { createControlFrame, decodeControlFrame, MAX_CONTROL_FRAME_BYTES, MAX_RELAY_FRAME_BYTES, type ControlFrame, type HelloPayload, type ConnectRequestPayload, type SecureHandshakePayload, type RelayPayload, type TransportSelectedPayload } from '@dsh-remote/protocol'
 import { ApiError, Store } from './store.js'
+import type { ServerLog } from './log.js'
 
 type Peer = { ws: WebSocket; id: string; account: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string }
 type Link = { id: string; account: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number> }
@@ -25,7 +26,7 @@ export class Gateway {
   private links = new Map<string, Link>()
   private wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false })
   private heartbeat: ReturnType<typeof setInterval>
-  constructor(server: Server, private store: Store, origin: string) {
+  constructor(server: Server, private store: Store, origin: string, private readonly log?: ServerLog) {
     store.onInvalidate = (id, account) => this.disconnect(peerKey(account, id), 'AUTH_INVALID')
     server.on('upgrade', (req, socket, head) => {
       if (req.url !== '/ws/v1/connect' || (req.headers.origin && req.headers.origin !== origin) || this.wss.clients.size >= 256) {
@@ -35,7 +36,12 @@ export class Gateway {
     })
     this.heartbeat = setInterval(() => {
       for (const peer of this.peers.values()) {
-        if (Date.now() - peer.lastPong > 75_000) { this.disconnect(peerKey(peer.account, peer.id), 'CONNECTION_FAILED'); continue }
+        if (Date.now() - peer.lastPong > 75_000) {
+          // The Server is the only party that can see a client stop answering, so the reason is
+          // recorded here rather than left implicit in the close code.
+          this.disconnect(peerKey(peer.account, peer.id), 'CONNECTION_FAILED', 'heartbeat-timeout')
+          continue
+        }
         peer.nonce = randomUUID()
         this.send(peer, createControlFrame('ping', { nonce: peer.nonce }))
       }
@@ -45,11 +51,17 @@ export class Gateway {
   }
   private send(peer: Peer, frame: ControlFrame): void {
     if (peer.ws.readyState !== WebSocket.OPEN) return
-    if (peer.ws.bufferedAmount > 4 * MAX_RELAY_FRAME_BYTES) { this.disconnect(peerKey(peer.account, peer.id), 'SLOW_CONSUMER'); return }
+    if (peer.ws.bufferedAmount > 4 * MAX_RELAY_FRAME_BYTES) {
+      this.disconnect(peerKey(peer.account, peer.id), 'SLOW_CONSUMER', 'slow-consumer')
+      return
+    }
     peer.ws.send(JSON.stringify(frame))
   }
   private drop(link: Link, code: string): void {
     this.links.delete(link.id)
+    this.log?.info('link.dropped', {
+      connectionId: link.id, hostDeviceId: link.host, clientDeviceId: link.client, code, stage: link.stage,
+    })
     for (const id of [link.host, link.client]) {
       const p = this.peers.get(peerKey(link.account, id))
       if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, retryable: true }))
@@ -61,13 +73,21 @@ export class Gateway {
   }
 
   /** `id` is a {@link peerKey}: account-scoped, so one account's teardown never touches another's peer. */
-  disconnect(id: string, code: string): void {
+  disconnect(id: string, code: string, reason = 'socket-closed'): void {
     const peer = this.peers.get(id)
     this.peers.delete(id)
+    let dropped = 0
     if (peer) for (const link of this.links.values()) {
-      if (link.account === peer.account && (link.host === peer.id || link.client === peer.id)) this.drop(link, code)
+      if (link.account === peer.account && (link.host === peer.id || link.client === peer.id)) {
+        dropped += 1
+        this.drop(link, code)
+      }
     }
-    if (peer) { peer.ws.close(code === 'CONNECTION_REPLACED' ? 4003 : 4001, code); setTimeout(() => peer.ws.terminate(), 1000).unref() }
+    if (peer) {
+      this.log?.info('peer.offline', { deviceId: peer.id, role: peer.role, code, reason, linksDropped: dropped })
+      peer.ws.close(code === 'CONNECTION_REPLACED' ? 4003 : 4001, code)
+      setTimeout(() => peer.ws.terminate(), 1000).unref()
+    }
   }
   private accept(ws: WebSocket): void {
     let peer: Peer | undefined
@@ -99,6 +119,9 @@ export class Gateway {
           this.disconnect(peerKey(authenticated.account, device.deviceId), 'CONNECTION_REPLACED')
           peer = { ws, id: device.deviceId, account: authenticated.account, role: device.role, capabilities: p.capabilities, version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() }
           this.peers.set(peerKey(peer.account, peer.id), peer)
+          this.log?.info('peer.online', {
+            deviceId: peer.id, role: peer.role, version: peer.version, capabilities: peer.capabilities.length,
+          })
           clearTimeout(deadline)
           this.store.touch(peer.id, p.clientVersion, p.harnessVersion)
           this.send(peer, createControlFrame('hello.ack', { protocol: 1, serverVersion: 'self-hosted/0.1.0', connectionSessionId: randomUUID(), heartbeatIntervalMs: 25000, maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES, maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES, capabilities: p.capabilities.includes('transport.relay') ? ['transport.relay'] : [], webrtcEnabled: false, webrtcFallbackTimeoutMs: 1 }))
@@ -110,6 +133,11 @@ export class Gateway {
         const code = error instanceof ApiError ? error.code : 'INVALID_MESSAGE'
         // Valid connection-scoped failures must not close the Host's other clients.
         const connectionId = (frame?.payload as { connectionId?: unknown } | undefined)?.connectionId
+        this.log?.info(peer === undefined ? 'hello.rejected' : 'frame.rejected', {
+          code,
+          ...(peer === undefined ? {} : { deviceId: peer.id, role: peer.role }),
+          ...(typeof connectionId === 'string' ? { connectionId } : {}),
+        })
         if (peer && typeof connectionId === 'string' && code !== 'RATE_LIMITED') {
           const link = this.links.get(connectionId)
           if (link && (link.host === peer.id || link.client === peer.id)) this.drop(link, code)
@@ -141,6 +169,7 @@ export class Gateway {
       if (this.links.size >= 256) throw new ApiError('RATE_LIMITED')
       const link: Link = { id: randomUUID(), account: peer.account, host: host.id, client: peer.id, stage: 'pending', created: Date.now(), counters: new Map() }
       this.links.set(link.id, link)
+      this.log?.info('link.created', { connectionId: link.id, hostDeviceId: host.id, clientDeviceId: peer.id })
       this.send(host, createControlFrame('connect.incoming', { connectionId: link.id, clientDeviceId: peer.id, clientIdentityKey: self.identityKey, authorization: 'account', preferredTransports: ['relay'] }))
       return
     }
@@ -154,6 +183,9 @@ export class Gateway {
       if (peer.id !== link.host || link.stage !== 'pending') throw new ApiError('INVALID_MESSAGE')
       if (frame.type === 'connect.rejected') this.links.delete(link.id)
       else link.stage = 'accepted'
+      this.log?.info(frame.type === 'connect.rejected' ? 'link.rejected' : 'link.accepted', {
+        connectionId: link.id, hostDeviceId: link.host, clientDeviceId: link.client,
+      })
       this.send(other, frame)
       return
     }
@@ -167,7 +199,10 @@ export class Gateway {
     if (frame.type === 'secure.handshake') {
       const step = (frame.payload as SecureHandshakePayload).step
       if (step === 1 && peer.id === link.client && link.stage === 'accepted') link.stage = 'handshake'
-      else if (step === 2 && peer.id === link.host && link.stage === 'handshake') link.stage = 'ready'
+      else if (step === 2 && peer.id === link.host && link.stage === 'handshake') {
+        link.stage = 'ready'
+        this.log?.info('link.ready', { connectionId: link.id, hostDeviceId: link.host, clientDeviceId: link.client })
+      }
       else throw new ApiError('INVALID_MESSAGE')
     } else if (frame.type === 'relay') {
       const counter = (frame.payload as RelayPayload).counter

@@ -59,6 +59,9 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_HOST` | 监听/端口映射地址，默认 `127.0.0.1`；局域网设为 `0.0.0.0` |
 | `DSH_SERVER_PORT` | 默认 `8080` |
 | `DSH_SERVER_DATA_FILE` | 默认 `data/state.json`，相对启动目录 |
+| `DSH_SERVER_LOG_FILE` | 可选，生命周期日志文件；默认为 state.json 同目录下的 `logs/server.log` |
+| `DSH_SERVER_LOG_MAX_BYTES` | 可选，单个文件上限，默认 1 MiB；写入会超限时先轮转 |
+| `DSH_SERVER_LOG_FILES` | 可选，保留文件数（含当前文件），默认 3，最多 10 |
 
 **多账号与隔离**：设备与令牌按账号命名空间隔离——不同账号即使设备 `deviceId` 相同也互不影响，设备发现与连接配对都限定在同一账号内，跨账号查询返回 404。`DSH_SERVER_ACCOUNT` 只是启动种子账号，其余账号在重启后保留。注册默认关闭：未设置 `DSH_SERVER_REGISTRATION_CODE` 时无法建号。
 
@@ -200,3 +203,19 @@ NODE_ENV=production pnpm -r build
 node scripts/verify-dsh-plugin.mjs
 pnpm --dir packages/plugin pack --pack-destination /tmp/dsh-release-assets
 ```
+
+## 生命周期日志
+
+Server 是唯一能证明"一条远程连接为什么结束"的一方：它掌管控制心跳与 link 注册表，所以客户端停止应答、
+link 因协议错误被丢弃、Host 掉线都在这里最先出现。日志一行一个 JSON 对象，写入 `DSH_SERVER_LOG_FILE`，
+并按 `DSH_SERVER_LOG_MAX_BYTES` 轮转为 `.1`、`.2` …，最多保留 `DSH_SERVER_LOG_FILES` 个文件，
+因此长期运行也不会把磁盘写满。**只记录标识符与结果码**，不写 token、私钥、握手字节或 relay 密文。
+
+记录的事件：`server.started`、`server.stopped`、`peer.online`（设备、角色、版本、能力数）、
+`peer.offline`（设备、角色、code、原因如 `heartbeat-timeout` / `slow-consumer` / `socket-closed`，
+以及被牵连的 link 数）、`link.created` / `link.accepted` / `link.rejected` / `link.ready`、
+`link.dropped`（connectionId、双方设备、code、当时阶段）、`hello.rejected` / `frame.rejected`。
+
+排查"客户端后台久了断联"时，`peer.offline` 的 `reason: heartbeat-timeout` 与 `link.dropped` 的
+`code` 就是证据链的开端；把它与客户端插件日志里的 `remote Harness transport lost; reconnecting`
+对齐时间，即可判断断联来自网络、Server 判定还是客户端自身。

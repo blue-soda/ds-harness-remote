@@ -60,6 +60,9 @@ Open <http://localhost:8080>. Set the same Server URL on your Host and Client, t
 | `DSH_SERVER_HOST` | Listen / port-binding address; default `127.0.0.1`, use `0.0.0.0` for LAN access |
 | `DSH_SERVER_PORT` | Default `8080` |
 | `DSH_SERVER_DATA_FILE` | Default `data/state.json`, relative to the working directory |
+| `DSH_SERVER_LOG_FILE` | Optional lifecycle log; defaults to `logs/server.log` beside `state.json` |
+| `DSH_SERVER_LOG_MAX_BYTES` | Optional cap for the active file, 1 MiB by default; rotation runs before a write would exceed it |
+| `DSH_SERVER_LOG_FILES` | Optional number of files kept including the active one, 3 by default, at most 10 |
 
 **Accounts and isolation**: devices and tokens are namespaced per account, so the same `deviceId` may exist on several accounts and one account's password change only rotates its own tokens. Device discovery, pairing and presence are all scoped to a single account; a cross-account lookup returns 404. `DSH_SERVER_ACCOUNT` is only the bootstrap account — other accounts survive restarts. Registration is closed unless `DSH_SERVER_REGISTRATION_CODE` is set.
 
@@ -173,3 +176,19 @@ NODE_ENV=production pnpm -r build
 node scripts/verify-dsh-plugin.mjs
 pnpm --dir packages/plugin pack --pack-destination /tmp/dsh-release-assets
 ```
+
+## Lifecycle log
+
+The Server is the only party that can prove why a remote connection ended: it owns the control
+heartbeat and the link registry, so a client that stops answering pings, a link dropped by a
+protocol error and a Host that went away all surface here first. One JSON object per line goes to
+`DSH_SERVER_LOG_FILE` and rotates into `.1`, `.2` … once a write would exceed
+`DSH_SERVER_LOG_MAX_BYTES`, keeping at most `DSH_SERVER_LOG_FILES` files, so a long-running
+service cannot fill the disk. Only identifiers and result codes are written - never tokens, private
+keys, handshake bytes or relay ciphertext.
+
+Events: `server.started`, `server.stopped`, `peer.online` (device, role, version, capability
+count), `peer.offline` (device, role, code, reason such as `heartbeat-timeout` /
+`slow-consumer` / `socket-closed`, and how many links it took down), `link.created` /
+`link.accepted` / `link.rejected` / `link.ready`, `link.dropped` (connectionId, both devices,
+code, stage), and `hello.rejected` / `frame.rejected` (code and scope).

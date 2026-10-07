@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
+import { ServerLog, type ServerLogOptions } from './log.js'
 import { resolveOAuthProvider, type OAuthProvider, type OAuthProviderConfig } from './oauth.js'
 import { createDeepSeekVerifier, type DeepSeekLoginOptions } from './deepseek.js'
 
@@ -42,6 +43,11 @@ export interface Config {
    * the grant a client presents is verified against the platform and discarded.
    */
   deepseek?: DeepSeekLoginOptions
+  /**
+   * Lifecycle log. Absent (the default) writes nothing to disk. The file is capped by
+   * rotation, so a long-running service cannot fill the disk with diagnostics.
+   */
+  log?: ServerLogOptions
 }
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
 /** A platform account grant, treated as an opaque bearer value. */
@@ -139,7 +145,8 @@ export function createRemoteServer(config: Config) {
       json(res, e.status, { error: { code: e.code, message: e.code, requestId: randomUUID(), retryable: e.status === 429 || e.status >= 500 } })
     })
   })
-  const gateway = new Gateway(server, store, url.origin)
+  const log = config.log === undefined ? undefined : new ServerLog(config.log)
+  const gateway = new Gateway(server, store, url.origin, log)
   function descriptor(d: ReturnType<Store['get']>) {
     return {
       ...d.descriptor,
@@ -370,7 +377,8 @@ export function createRemoteServer(config: Config) {
     }
     throw new ApiError('METHOD_NOT_FOUND', 404)
   }
-  return { server, store, gateway, close: async () => { gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
+  log?.info('server.started', { publicUrl: url.origin, logFiles: log.paths(), dataFile: config.dataFile })
+  return { server, store, gateway, close: async () => { log?.info('server.stopped', {}); gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value))
