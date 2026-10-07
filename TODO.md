@@ -253,9 +253,21 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   - **回前台立即触发**：浏览器半在 `visibilitychange`（仅 visible）与 `focus` 时调用控制端点
     `client.connection.verify`，不等下一个周期。
   - 真机验收仍待做（Android 后台久置后回前台：应看到"正在重连"，并区分"链路恢复"与"回退本地后重连"）。
-- [ ] **本地兜底收窄（用户决定暂不做，2026-10-07）**：断连期间会话列表出现"本地+远程"混合——远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
-  于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点（`settings/describe`、
-  插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。
+- [x] **本地兜底收窄 + 恢复后重取基线（2026-10-07 实现，实测驱动）**：实测日志（warn 走 stderr，
+  见 `instance.err.log`）证明传输消失期间插件把 `session/list`、`session/follow`、`settings/describe`、
+  `llm/*` 等统统交给本地 shell 回答（`serving <endpoint> locally: the peer did not answer it … The
+  authenticated Noise channel is not connected.`），原生 UI 因此把本地/空数据当成远程工作区缓存，链路恢复后
+  不会重新取，表现为"会话列表一直不可用"。
+  - **A 收窄**：兜底判定区分"对端拒绝"与"对端已消失"。拒绝（能力不匹配，如 `METHOD_NOT_ALLOWED`）仍可本地
+    兜底；已消失（见 AGENTS 的码表）时只允许引导类命名空间（`$events`、`settings`、`credentials`、
+    `dynamicCordisRunner`）本地回答，**数据端点显式失败**。`client-secure-transport` 的
+    "Noise channel is not connected" 现在带 `TRANSPORT_CLOSED` code —— 该码原先甚至不在"对端无法应答"表里，
+    所以最初的收窄是失效的，已修。
+  - **B 重取基线**：记住上次打开的工作区（`lastWorkspaceSelection`），重连完成（快速重连成功或退避重连成功）
+    后重新发布为 `pendingWorkspaceSelection`；客户端半的 `reconcile()` 会 `connectWorkspace()`，从而逼
+    原生 UI 重读会话列表。切回本地会清掉这个记忆。
+  - 测试：switch 侧（数据端点不再本地兜底 / 能力拒绝仍兜底 / 引导命名空间在断连时仍兜底）、runtime 侧
+    （重连完成重新发布选择）。全量 **345 通过**。
 - [x] **`plugin-lifecycle` 11 个用例超时（已定位并修复，2026-10-07）**：根因是 Codex 域**默认开启**，
   而 `HostPluginRuntime.start()` 会 `await codex.start()`，**Server 控制连接排在其后**；设备上没有 `codex`
   二进制时，`launchAppServer()` 会逐个尝试 binary 候选、每个候选各消耗一次请求超时，实测 `codex.start()`

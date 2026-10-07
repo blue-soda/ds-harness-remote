@@ -242,7 +242,12 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 
 **约束**：打开远程 CodeX 工作区时，虚拟载体只回答 CodeX 领域；远端工作区的 `workspaceFiles/*` 与
 `terminal/*` 由远端 Host 回答；**其余端点一律交回拥有窗口的本地 shell**（设置引导、插件注册表事件流、
-账号读取）—— 载体"拒掉不认识的端点"会让原生窗口整个起不来。判定调用是否经过我们时**必须看返回信封的
+账号读取）—— 载体"拒掉不认识的端点"会让原生窗口整个起不来。**但对端"已消失"时不再无条件兜底**（2026-10-07）：
+对端**拒绝**（能力不匹配，如 `METHOD_NOT_ALLOWED`）仍可本地兜底；对端**已消失**（`TRANSPORT_CLOSED`/
+`CLIENT_CLOSED`/`RPC_TIMEOUT`/`CONNECTION_FAILED`/`CONNECTION_REPLACED`/`NOT_CONNECTED`/`UNAVAILABLE`/
+`internal`）时只允许引导类命名空间（`$events`、`settings`、`credentials`、`dynamicCordisRunner`）本地
+回答，**数据端点必须显式失败**——否则原生 UI 会把本地答案当成远程数据缓存，链路恢复后也不重新取，表现为
+"会话列表一直不可用"。重连完成后会重新发布上次的工作区选择，逼 UI 重读基线。判定调用是否经过我们时**必须看返回信封的
 `result.ok`**：`Web RPC failed` 表示 **RPC 执行了但回答失败**（传输失败才是 `Web request failed`）。
 历史页大小由 `CODEX_HISTORY_MAX_MESSAGES` 统一钳制，虚拟载体与 `harness-api-history.ts` **共用同一常量**。
 完整排查记录（含被证伪的假设、复现探针与修复细节）见
