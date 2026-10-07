@@ -3205,8 +3205,20 @@ window.__ModuleLoader__.load({
       // broken until the page is reloaded. Re-reading the Host-authoritative list as soon as a
       // reconnect finishes is the same work that reload does, without the reload.
       let wasReconnecting = false
+      let wasFallenBack = false
       const unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
         const current = statusFeed.getSnapshot()
+        // The fallback hands the window back to the local shell, so the list has to be re-read then as
+        // well: without it the remote workspace stays on screen with nothing openable in it, which
+        // looks exactly like a broken remote session instead of a local one.
+        if (current?.fellBackToLocal === true) {
+          if (!wasFallenBack) {
+            wasFallenBack = true
+            void ctx.sessions.refresh().catch(() => undefined)
+          }
+        } else {
+          wasFallenBack = false
+        }
         if (current?.reconnecting !== undefined) {
           wasReconnecting = true
           return
