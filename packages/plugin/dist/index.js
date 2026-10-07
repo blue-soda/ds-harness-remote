@@ -15256,33 +15256,23 @@ function base64ToBytes2(value) {
   }
   return bytes;
 }
-function describeBytes(data2) {
-  return {
-    dataIsBytes: data2 instanceof Uint8Array,
-    dataType: typeof data2,
-    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
-    preview: typeof data2 === "string" ? data2.slice(0, 12) : void 0
-  };
-}
 function normalizeByteResult(method, response) {
   if (method !== "workspaceFiles.readBytes") return response;
   const result = response.result;
   if (result === void 0 || result.ok !== true) return response;
   const value = result.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return response;
-  const data2 = value.data;
-  console.warn("[dsh-remote] workspaceFiles/readBytes at the ApiProxy exit", describeBytes(data2));
-  if (data2 instanceof Uint8Array) return response;
-  const bytes = decodeByteValue(data2);
-  console.warn("[dsh-remote] workspace probe", {
-    where: "apiproxy.exit",
-    endpoint: method,
-    dataType: typeof data2,
-    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
-    decoded: bytes !== void 0
-  });
-  if (bytes === void 0) return response;
-  return { ...response, result: { ...result, value: { ...value, data: bytes } } };
+  const raw = value.data;
+  const data2 = raw instanceof Uint8Array ? raw : decodeByteValue(raw);
+  if (data2 === void 0) return response;
+  return {
+    ...response,
+    result: {
+      ...result,
+      value: { ...value, data: null },
+      attachments: [{ path: ["data"], bytes: data2 }]
+    }
+  };
 }
 
 // src/session-format-compat.ts
@@ -18477,17 +18467,14 @@ function normalizeByteResult2(endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes" || !result.ok) return result;
   const value = result.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
-  const data2 = value.data;
-  if (data2 instanceof Uint8Array) return result;
-  const bytes = decodeByteValue(data2);
-  if (bytes !== void 0) {
-    return { ...result, value: { ...value, data: bytes } };
-  }
-  console.warn("[dsh-remote] workspaceFiles/readBytes arrived without usable bytes", {
-    dataType: typeof data2,
-    dataKeys: typeof data2 === "object" && data2 !== null && !Array.isArray(data2) ? Object.keys(data2).length : 0
-  });
-  return result;
+  const raw = value.data;
+  const data2 = raw instanceof Uint8Array ? raw : decodeByteValue(raw);
+  if (data2 === void 0) return result;
+  return {
+    ...result,
+    value: { ...value, data: null },
+    attachments: [{ path: ["data"], bytes: data2 }]
+  };
 }
 
 // src/server-api.ts
@@ -19554,32 +19541,20 @@ var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
 function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function describeBytes2(data2) {
-  return {
-    dataIsBytes: data2 instanceof Uint8Array,
-    dataType: typeof data2,
-    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
-    preview: typeof data2 === "string" ? data2.slice(0, 12) : void 0
-  };
-}
 function normalizeByteResult3(endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes") return result;
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
-  const value = result.value;
+  const envelope = result;
+  const value = envelope.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
-  const data2 = value.data;
-  console.warn("[dsh-remote] workspaceFiles/readBytes at the switch exit", describeBytes2(data2));
-  if (data2 instanceof Uint8Array) return result;
-  const bytes = decodeByteValue(data2);
-  console.warn("[dsh-remote] workspace probe", {
-    where: "switch.exit",
-    endpoint,
-    dataType: typeof data2,
-    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
-    decoded: bytes !== void 0
-  });
-  if (bytes === void 0) return result;
-  return { ...result, value: { ...value, data: bytes } };
+  const raw = value.data;
+  const data2 = raw instanceof Uint8Array ? raw : decodeByteValue(raw);
+  if (data2 === void 0) return result;
+  return {
+    ...envelope,
+    value: { ...value, data: null },
+    attachments: [{ path: ["data"], bytes: data2 }]
+  };
 }
 function logReadBytesShape(branch, endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes") return;

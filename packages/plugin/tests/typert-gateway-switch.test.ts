@@ -328,16 +328,27 @@ describe('TypertGatewaySwitch byte results', () => {
 
     // The native schema requires a real Uint8Array; base64 from the CodeX projection reaches it as
     // `expected "Uint8Array", path: ["data"]` and the image never renders.
-    const result = await dispatch('workspaceFiles/readBytes') as { value: { data: unknown; absolutePath: string } }
-    expect(result.value.data).toBeInstanceOf(Uint8Array)
-    expect(Array.from(result.value.data as Uint8Array)).toEqual([0, 1, 2])
+    // The local shell answers this endpoint with `data: null` plus an `attachments` list, and the client
+    // rehydrates the bytes from it. A bare Uint8Array was JSON-encoded into a numeric-key object and failed
+    // the generated schema, so the carrier must hand over exactly this form.
+    const result = await dispatch('workspaceFiles/readBytes') as {
+      value: { data: unknown; absolutePath: string }
+      attachments?: Array<{ path: Array<string | number>; bytes: Uint8Array }>
+    }
+    expect(result.value.data).toBeNull()
+    expect(result.attachments?.[0]?.path).toEqual(['data'])
+    expect(Array.from(result.attachments![0]!.bytes)).toEqual([0, 1, 2])
     expect(result.value.absolutePath).toBe('C:/tmp/a.png')
 
-    // Already-binary and unrelated results are left exactly as they were.
+    // A value that is already binary is tagged the same way, and an unrelated endpoint is untouched.
     const binary = new Uint8Array([9])
     remoteDispatch.mockResolvedValueOnce({ ok: true as const, value: { data: binary } })
-    const same = await dispatch('workspaceFiles/readBytes') as { value: { data: unknown } }
-    expect(same.value.data).toBe(binary)
+    const same = await dispatch('workspaceFiles/readBytes') as {
+      value: { data: unknown }
+      attachments?: Array<{ bytes: Uint8Array }>
+    }
+    expect(same.value.data).toBeNull()
+    expect(Array.from(same.attachments![0]!.bytes)).toEqual([9])
     remoteDispatch.mockResolvedValueOnce({ ok: true as const, value: { data: 'AAEC' } })
     const other = await dispatch('workspaceFiles/list') as { value: { data: unknown } }
     expect(other.value.data).toBe('AAEC')

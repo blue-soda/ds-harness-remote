@@ -2952,16 +2952,16 @@ function normalizeByteResult(endpoint: string, result: TypertRpcResult): TypertR
   if (endpoint !== 'workspaceFiles/readBytes' || !result.ok) return result
   const value = result.value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return result
-  const data = (value as { data?: unknown }).data
-  if (data instanceof Uint8Array) return result
-  const bytes = decodeByteValue(data)
-  if (bytes !== undefined) {
-    return { ...result, value: { ...(value as Record<string, unknown>), data: bytes } }
-  }
-  // Shapes only; never the content itself.
-  console.warn('[dsh-remote] workspaceFiles/readBytes arrived without usable bytes', {
-    dataType: typeof data,
-    dataKeys: typeof data === 'object' && data !== null && !Array.isArray(data) ? Object.keys(data).length : 0,
-  })
-  return result
+  const raw = (value as { data?: unknown }).data
+  const data = raw instanceof Uint8Array ? raw : decodeByteValue(raw)
+  if (data === undefined) return result
+  // The local shell answers this endpoint with the byte extraction already applied - `data: null` plus an
+  // `attachments` list - and the client's connection layer copies the bytes back before the generated
+  // schema validates them (measured A/B: local previews work, a bare Uint8Array fails with
+  // `expected "Uint8Array", path: ["data"]`). Hand over exactly the local form; nothing in DSH changes.
+  return {
+    ...result,
+    value: { ...(value as Record<string, unknown>), data: null },
+    attachments: [{ path: ['data'], bytes: data }],
+  } as unknown as TypertRpcResult
 }

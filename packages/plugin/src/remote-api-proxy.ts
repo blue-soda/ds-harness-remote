@@ -455,18 +455,19 @@ function normalizeByteResult(method: string, response: NativeResponse): NativeRe
   if (result === undefined || result.ok !== true) return response
   const value = result.value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return response
-  const data = (value as { data?: unknown }).data
-  console.warn('[dsh-remote] workspaceFiles/readBytes at the ApiProxy exit', describeBytes(data))
-  if (data instanceof Uint8Array) return response
-  const bytes = decodeByteValue(data)
-  // Shapes only; never the content itself. This is the seam that faces the local shell.
-  console.warn('[dsh-remote] workspace probe', {
-    where: 'apiproxy.exit',
-    endpoint: method,
-    dataType: typeof data,
-    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    decoded: bytes !== undefined,
-  })
-  if (bytes === undefined) return response
-  return { ...response, result: { ...result, value: { ...(value as Record<string, unknown>), data: bytes } } }
+  const raw = (value as { data?: unknown }).data
+  const data = raw instanceof Uint8Array ? raw : decodeByteValue(raw)
+  if (data === undefined) return response
+  // The local shell answers this endpoint with the byte extraction already applied - `data: null` plus an
+  // `attachments` list - and the client's connection layer copies the bytes back before the generated
+  // schema validates them (measured A/B: local previews work, a bare Uint8Array fails with
+  // `expected "Uint8Array", path: ["data"]`). Hand over exactly the local form; nothing in DSH changes.
+  return {
+    ...response,
+    result: {
+      ...result,
+      value: { ...(value as Record<string, unknown>), data: null },
+      attachments: [{ path: ['data'], bytes: data }],
+    } as unknown as typeof result,
+  }
 }

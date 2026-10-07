@@ -497,22 +497,21 @@ function describeBytes(data: unknown): Record<string, unknown> {
 function normalizeByteResult(endpoint: string, result: unknown): unknown {
   if (endpoint !== 'workspaceFiles/readBytes') return result
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return result
-  const value = (result as { value?: unknown }).value
+  const envelope = result as Record<string, unknown>
+  const value = envelope.value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return result
-  const data = (value as { data?: unknown }).data
-  console.warn('[dsh-remote] workspaceFiles/readBytes at the switch exit', describeBytes(data))
-  if (data instanceof Uint8Array) return result
-  const bytes = decodeByteValue(data)
-  // Shapes only; never the content itself. This is the seam that faces the local shell.
-  console.warn('[dsh-remote] workspace probe', {
-    where: 'switch.exit',
-    endpoint,
-    dataType: typeof data,
-    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    decoded: bytes !== undefined,
-  })
-  if (bytes === undefined) return result
-  return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
+  const raw = (value as { data?: unknown }).data
+  const data = raw instanceof Uint8Array ? raw : decodeByteValue(raw)
+  if (data === undefined) return result
+  // The local shell answers this endpoint with the byte extraction already applied - `data: null` plus an
+  // `attachments` list - and the client's connection layer copies the bytes back before the generated
+  // schema validates them (measured A/B: local previews work, a bare Uint8Array fails with
+  // `expected "Uint8Array", path: ["data"]`). Hand over exactly the local form; nothing in DSH changes.
+  return {
+    ...envelope,
+    value: { ...(value as Record<string, unknown>), data: null },
+    attachments: [{ path: ['data'], bytes: data }],
+  }
 }
 /**
  * Shapes only: what a readBytes result looks like on each branch.
