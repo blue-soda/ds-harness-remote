@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { deriveCodexCwdWorkspaces } from '@dsh-remote/client-core'
 import type { CodexAppFrameData, CodexAppStreamClosedData, CodexPermissionPreset } from '@dsh-remote/protocol'
 import type { ResolvedCodexConfig } from '../config.js'
@@ -1048,17 +1048,20 @@ export function codexBinaryCandidates(
   if (hostPlatform === 'win32') return [...bundledWindowsCodex(userHome), configured]
   if (hostPlatform !== 'darwin') return [configured]
 
+  // The platform is a parameter, not necessarily this host: joining with the host flavour would
+  // return Windows separators for a macOS home and make the darwin branch unreachable from a test
+  // or tool running elsewhere.
   const bundledCandidates = [
     '/Applications/ChatGPT.app',
-    join(userHome, 'Applications', 'ChatGPT.app'),
+    posix.join(userHome, 'Applications', 'ChatGPT.app'),
   ].flatMap(chatGptApp => {
-    const codexCli = join(chatGptApp, 'Contents', 'Resources', 'codex-cli')
+    const codexCli = posix.join(chatGptApp, 'Contents', 'Resources', 'codex-cli')
     try {
-      const manifest = JSON.parse(readFileSync(join(codexCli, 'codex-package.json'), 'utf8')) as unknown
+      const manifest = JSON.parse(readFileSync(posix.join(codexCli, 'codex-package.json'), 'utf8')) as unknown
       if (!isRecord(manifest) || typeof manifest.entrypoint !== 'string' || manifest.entrypoint.length === 0) {
         return []
       }
-      const candidate = join(codexCli, manifest.entrypoint)
+      const candidate = posix.join(codexCli, manifest.entrypoint)
       if (!existsSync(candidate)) return []
       accessSync(candidate, constants.X_OK)
       return [candidate]
@@ -1070,7 +1073,7 @@ export function codexBinaryCandidates(
   return [...new Set([
     ...bundledCandidates,
     '/Applications/ChatGPT.app/Contents/Resources/codex',
-    join(userHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
+    posix.join(userHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
     configured,
   ])]
 }

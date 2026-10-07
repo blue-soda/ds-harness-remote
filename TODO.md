@@ -254,6 +254,11 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   Server 连接之前；`hostStatus().starting` 区分"启动中"与"离线"；整个启动加 **5 秒硬预算**
   （`CODEX_START_BUDGET_MS`，超时记 `CODEX_START_TIMEOUT`）；lifecycle 测试的 settings fixture 默认
   `codex.enabled = false`。结果：11 个用例全部通过，全量耗时 57s → 12.7s。
-- [ ] **`codex-domain` 5 个既有失败属于本机环境**：1 个断言 macOS 的 ChatGPT 包路径（Windows 上不会被发现），
-  4 个依赖创建 symlink，本机未开启开发者模式而报 `EPERM ... symlink`。与产品逻辑无关；若要全绿，需让
-  这些用例在 symlink 不可用时跳过，并把 macOS 期望按平台收敛。
+- [x] **`codex-domain` 5 个平台失败（已修复，2026-10-07）**：成因三个，都不是产品缺陷：
+  (a) `codexBinaryCandidates` 的 darwin 分支用宿主 `join` 拼 macOS 路径，在 Windows 上得到反斜杠 →
+  改为按**参数平台**用 `posix.join`（生产行为不变，因为它总是传入本机平台）；
+  (b) 4 个用例直接 `symlink(..., 'dir')`，Windows 未开启开发者模式会 `EPERM` → 新增 `linkDirectory()`，
+  失败时回退到**目录 junction**（无需特权，`realpath` 同样解析），两者都不可用时只跳过依赖链接的断言，
+  而不是整个用例；
+  (c) 隐藏目录断言假设"点号前缀即隐藏"，而实现在 Windows 上按平台返回 `hidden: false` → 期望按平台收敛。
+  (c) 是链接修好后**首次**在 Windows 上真正执行到的断言。至此全量测试 330/330 通过。

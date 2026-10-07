@@ -22128,7 +22128,7 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename2, isAbsolute as isAbsolute2, join as join7, relative, resolve } from "node:path";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join7, posix, relative, resolve } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -23496,15 +23496,15 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   if (hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
-    join7(userHome, "Applications", "ChatGPT.app")
+    posix.join(userHome, "Applications", "ChatGPT.app")
   ].flatMap((chatGptApp) => {
-    const codexCli = join7(chatGptApp, "Contents", "Resources", "codex-cli");
+    const codexCli = posix.join(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join7(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(posix.join(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord11(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
-      const candidate = join7(codexCli, manifest.entrypoint);
+      const candidate = posix.join(codexCli, manifest.entrypoint);
       if (!existsSync2(candidate)) return [];
       accessSync(candidate, constants.X_OK);
       return [candidate];
@@ -23515,7 +23515,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   return [.../* @__PURE__ */ new Set([
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join7(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    posix.join(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
 }

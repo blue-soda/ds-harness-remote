@@ -138,10 +138,10 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 截至 2026-10-07（当前基线）：
 
 - workspace check 与 DSH bundle 校验通过；`git diff --check` 通过
-- Plugin 测试 **330 个**：**325 通过**、**5 个既有失败**，全部在 `tests/codex-domain.test.ts`：1 个断言
-  macOS 的 ChatGPT 包路径（Windows 上本就不会被发现），4 个依赖创建 symlink，本机未开启开发者模式而报
-  `EPERM: operation not permitted, symlink ...`。`tests/werift-rtc.test.ts` 的 `lan` 候选断言本次未复现
-- 全域耗时 **12.7s**（此前 57s）：`plugin-lifecycle` 的 11 个超时已定位并修复，见 `TODO.md`
+- Plugin 测试 **330 个全部通过**（37 个文件，7.2s；此前为 57s 且有 16 个失败）
+- Server 测试 **43 个全部通过**（5 个文件，3.2s）；`pnpm -r check` 通过
+- 平台的收敛必须继续：测试不得假设 POSIX 分隔符、点号即隐藏、或可无特权创建 symlink（`linkDirectory()`
+  会回退到 junction）；`codexBinaryCandidates` 按**参数平台**拼接路径，而不是宿主
 - 新增测试：`tests/client-target-store.test.ts`（3）、`client-runtime.test.ts` 的启动恢复用例（1）、
   `apps/server/tests/log.test.ts`（3）；此前一轮的 `tests/method-policy.test.ts`（6）、
   `tests/harness-api-history.test.ts`（2）、`tests/atomic-file.test.ts`（4）保持通过

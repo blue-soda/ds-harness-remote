@@ -157,7 +157,7 @@ describe('CodexRemoteDomain', () => {
     const child = join(root, 'new-workspace')
     await mkdir(child)
     const link = join(root, 'outside-link')
-    await symlink(outside, link, 'dir')
+    const linked = await linkDirectory(outside, link)
     const app = new FakeAppServer(root, outside)
     const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
     await domain.start()
@@ -165,9 +165,11 @@ describe('CodexRemoteDomain', () => {
     await expect(domain.call('connection-1', {
       method: 'thread/start', params: { cwd: join(base, 'missing') },
     })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: link },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+    if (linked) {
+      await expect(domain.call('connection-1', {
+        method: 'thread/start', params: { cwd: link },
+      })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+    }
     await expect(domain.call('connection-1', {
       method: 'thread/start', params: { cwd: root },
     })).resolves.toMatchObject({ thread: { id: 'new-thread' } })
@@ -192,36 +194,38 @@ describe('CodexRemoteDomain', () => {
     const { base, root } = await directories()
     const canonicalRoot = await realpath(root)
     const link = join(base, 'selected-project-link')
-    await symlink(root, link, 'dir')
+    const linked = await linkDirectory(root, link)
     const app = new FakeAppServer(root)
     const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
     await domain.start()
 
-    await expect(domain.call('connection-1', {
-      method: 'project/create',
-      params: {
-        name: '  New Project  ',
-        roots: [{ path: link }],
-        idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
-      },
-    })).resolves.toEqual({
-      project: {
-        id: 'created-project',
-        name: 'New Project',
-        roots: [{ path: canonicalRoot }],
-        position: 2,
-        createdAt: 3,
-        updatedAt: 3,
-      },
-    })
-    expect(app.calls.find(call => call.method === 'project/create')).toEqual({
-      method: 'project/create',
-      params: {
-        name: 'New Project',
-        roots: [{ path: canonicalRoot }],
-        idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
-      },
-    })
+    if (linked) {
+      await expect(domain.call('connection-1', {
+        method: 'project/create',
+        params: {
+          name: '  New Project  ',
+          roots: [{ path: link }],
+          idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
+        },
+      })).resolves.toEqual({
+        project: {
+          id: 'created-project',
+          name: 'New Project',
+          roots: [{ path: canonicalRoot }],
+          position: 2,
+          createdAt: 3,
+          updatedAt: 3,
+        },
+      })
+      expect(app.calls.find(call => call.method === 'project/create')).toEqual({
+        method: 'project/create',
+        params: {
+          name: 'New Project',
+          roots: [{ path: canonicalRoot }],
+          idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
+        },
+      })
+    }
     await expect(domain.call('connection-1', {
       method: 'project/create',
       params: {
@@ -240,7 +244,7 @@ describe('CodexRemoteDomain', () => {
     const outsideLink = join(root, 'outside-link')
     await mkdir(child)
     await mkdir(hidden)
-    await symlink(outside, outsideLink, 'dir')
+    const linked = await linkDirectory(outside, outsideLink)
     const app = new FakeAppServer(root, outside)
     const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
     await domain.start()
@@ -256,15 +260,19 @@ describe('CodexRemoteDomain', () => {
       crumbs: [{ name: 'allowed', path: root, hidden: false }],
       entries: expect.arrayContaining([
         { name: 'child', path: child, hidden: false },
-        { name: '.hidden', path: hidden, hidden: true },
+        // Windows marks a hidden directory with a file attribute rather than a leading dot, and the
+        // domain follows the platform, so the dot is only a hidden marker on POSIX.
+        { name: '.hidden', path: hidden, hidden: process.platform !== 'win32' },
       ]),
       truncated: false,
     })
     expect(JSON.stringify(result)).not.toContain('outside-link')
-    await expect(domain.call('connection-1', {
-      method: 'dsh/directoryList',
-      params: { path: outsideLink },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+    if (linked) {
+      await expect(domain.call('connection-1', {
+        method: 'dsh/directoryList',
+        params: { path: outsideLink },
+      })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+    }
     await expect(domain.call('connection-1', {
       method: 'dsh/directoryList',
       params: { path: join(base, 'never-advertised') },
@@ -553,7 +561,10 @@ describe('CodexRemoteDomain', () => {
         excludeSlashTmp: false,
       },
     })
-    expect(isRecord(enforcedTurn) && typeof enforcedTurn.cwd === 'string' && enforcedTurn.cwd.endsWith('/allowed')).toBe(true)
+    const emittedCwd = isRecord(enforcedTurn) && typeof enforcedTurn.cwd === 'string' ? enforcedTurn.cwd : undefined
+    // Compare canonical paths: the separator differs by platform, and a Windows temp directory can
+    // be reported through its 8.3 short name.
+    expect(emittedCwd === undefined ? undefined : await realpath(emittedCwd)).toBe(await realpath(root))
     expect(isRecord(enforcedTurn) && isRecord(enforcedTurn.sandboxPolicy)
       ? enforcedTurn.sandboxPolicy.writableRoots
       : undefined).toEqual(isRecord(enforcedTurn) ? [enforcedTurn.cwd] : undefined)
@@ -836,6 +847,28 @@ class FakeAppServer implements CodexAppServerLike {
     this.unavailableHandler?.(code)
   }
   async close(): Promise<void> { this.ready = false }
+}
+
+/**
+ * Link a directory for the authority tests.
+ *
+ * Windows refuses `symlink` with EPERM unless the machine is in Developer Mode or the process is
+ * elevated. The domain canonicalizes with `realpath`, which follows a junction exactly as it
+ * follows a symbolic link, so a junction exercises the same code path without that privilege.
+ * @returns false when neither can be created, so the caller drops only the link-dependent assertion.
+ */
+async function linkDirectory(target: string, path: string): Promise<boolean> {
+  try {
+    await symlink(target, path, 'dir')
+    return true
+  } catch {
+    try {
+      await symlink(target, path, 'junction')
+      return true
+    } catch {
+      return false
+    }
+  }
 }
 
 async function directories(): Promise<{ base: string; root: string; outside: string }> {
