@@ -226,7 +226,9 @@ describe('ClientModeRuntime Host account control', () => {
       target: { deviceId: 'host-1', name: 'Host' },
       features: remoteHostFeatures(),
     }
-    ;(runtime as unknown as { lastWorkspaceSelection: unknown }).lastWorkspaceSelection = selection
+    // The client half reports the workspace it actually opened; a reconnect republishes that one, and
+    // it can arrive from the browser's stored selection rather than from a control call.
+    await runtime.handleControl('workspace.selection.consume', selection, new AbortController().signal)
 
     // The first unanswered check rebuilds in place ...
     rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))

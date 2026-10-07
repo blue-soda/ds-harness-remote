@@ -20965,6 +20965,10 @@ var ClientModeRuntime = class {
     const selection = this.lastWorkspaceSelection;
     if (selection === void 0 || selection.targetDeviceId !== targetDeviceId) return;
     this.pendingWorkspaceSelection = { ...selection };
+    this.logger.info("republishing the workspace selection to re-read the remote session list", {
+      targetDeviceId: shortId(targetDeviceId),
+      workspaceId: selection.workspaceId
+    });
   }
   finishReconnect(reason) {
     const target2 = this.reconnecting?.targetDeviceId;
@@ -21238,6 +21242,7 @@ var ClientModeRuntime = class {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal);
   }
   consumeWorkspaceSelection(selection) {
+    this.lastWorkspaceSelection = { ...selection };
     const pending = this.pendingWorkspaceSelection;
     if (pending?.targetDeviceId === selection.targetDeviceId && pending.workspaceId === selection.workspaceId && (pending.backend ?? "harness") === (selection.backend ?? "harness")) {
       this.pendingWorkspaceSelection = void 0;

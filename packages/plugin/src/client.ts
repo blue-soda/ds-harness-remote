@@ -2391,15 +2391,14 @@ window.__ModuleLoader__.load({
         React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
         React.createElement('path', { d: 'M8 21h8M12 17v4' })), props.wide
           ? React.createElement('span', { className: 'dshRemoteSidebarLabel' },
-              status?.reconnecting === undefined ? remoteLabel : t('reconnecting'))
+              remoteLabel)
           : null),
-        (status?.mode === 'remote' || status?.fellBackToLocal === true || status?.reconnecting !== undefined) && props.wide
-          ? React.createElement('button', {
-            type: 'button',
-            className: 'dshRemoteExitLink',
-            disabled: busy,
-            onClick: () => void openLocalWorkspaces(),
-          }, t(status?.reconnecting === undefined ? 'exitRemote' : 'stopReconnecting')) : null),
+        (status?.mode === 'remote' || status?.fellBackToLocal === true) && props.wide ? React.createElement('button', {
+          type: 'button',
+          className: 'dshRemoteExitLink',
+          disabled: busy,
+          onClick: () => void openLocalWorkspaces(),
+        }, t('exitRemote')) : null),
         !open ? null : React.createElement('div', {
           className: 'dshRemoteBackdrop',
           role: 'presentation',
@@ -2433,13 +2432,12 @@ window.__ModuleLoader__.load({
               }, t('refreshRemoteShort')),
               React.createElement('button', { type: 'button', className: 'dshRemotePageClose', onClick: () => setOpen(false), 'aria-label': t('close') }, '×'))),
           React.createElement('main', { className: 'dshRemotePageBody' },
-            status?.mode === 'remote' || status?.fellBackToLocal === true || status?.reconnecting !== undefined
-              ? React.createElement('button', {
-                type: 'button',
-                className: 'dshRemoteLocalLink',
-                disabled: busy,
-                onClick: () => void openLocalWorkspaces(),
-              }, t(status?.reconnecting === undefined ? 'openLocalWorkspaces' : 'stopReconnecting')) : null,
+            status?.mode === 'remote' || status?.fellBackToLocal === true ? React.createElement('button', {
+              type: 'button',
+              className: 'dshRemoteLocalLink',
+              disabled: busy,
+              onClick: () => void openLocalWorkspaces(),
+            }, t('openLocalWorkspaces')) : null,
             React.createElement(React.Fragment, null,
                 authorizationResolved && needsAuthorization ? React.createElement('section', { className: 'dshRemoteEnable' },
                   React.createElement('div', { className: 'dshRemoteClientLogin' },
@@ -2768,8 +2766,7 @@ window.__ModuleLoader__.load({
             'aria-label': t('harnessTarget'),
           },
           React.createElement('div', { className: 'dshRemoteHeader' },
-            React.createElement('strong', null,
-              status?.reconnecting === undefined ? t('harnessTarget') : `${t('harnessTarget')} · ${t('reconnecting')}`),
+            React.createElement('strong', null, t('harnessTarget')),
             React.createElement('button', { type: 'button', onClick: () => setOpen(false), 'aria-label': t('close') }, '×')),
           React.createElement('button', {
             type: 'button',

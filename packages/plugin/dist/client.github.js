@@ -3350,14 +3350,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ), props.wide ? React.createElement(
               "span",
               { className: "dshRemoteSidebarLabel" },
-              status?.reconnecting === void 0 ? remoteLabel : t("reconnecting")
+              remoteLabel
             ) : null),
-            (status?.mode === "remote" || status?.fellBackToLocal === !0 || status?.reconnecting !== void 0) && props.wide ? React.createElement("button", {
+            (status?.mode === "remote" || status?.fellBackToLocal === !0) && props.wide ? React.createElement("button", {
               type: "button",
               className: "dshRemoteExitLink",
               disabled: busy,
               onClick: () => void openLocalWorkspaces()
-            }, t(status?.reconnecting === void 0 ? "exitRemote" : "stopReconnecting")) : null
+            }, t("exitRemote")) : null
           ),
           open ? React.createElement("div", {
             className: "dshRemoteBackdrop",
@@ -3410,12 +3410,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement(
               "main",
               { className: "dshRemotePageBody" },
-              status?.mode === "remote" || status?.fellBackToLocal === !0 || status?.reconnecting !== void 0 ? React.createElement("button", {
+              status?.mode === "remote" || status?.fellBackToLocal === !0 ? React.createElement("button", {
                 type: "button",
                 className: "dshRemoteLocalLink",
                 disabled: busy,
                 onClick: () => void openLocalWorkspaces()
-              }, t(status?.reconnecting === void 0 ? "openLocalWorkspaces" : "stopReconnecting")) : null,
+              }, t("openLocalWorkspaces")) : null,
               React.createElement(
                 React.Fragment,
                 null,
@@ -3813,11 +3813,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               React.createElement(
                 "div",
                 { className: "dshRemoteHeader" },
-                React.createElement(
-                  "strong",
-                  null,
-                  status?.reconnecting === void 0 ? t("harnessTarget") : `${t("harnessTarget")} \xB7 ${t("reconnecting")}`
-                ),
+                React.createElement("strong", null, t("harnessTarget")),
                 React.createElement("button", { type: "button", onClick: () => setOpen(!1), "aria-label": t("close") }, "\xD7")
               ),
               React.createElement("button", {

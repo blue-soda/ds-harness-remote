@@ -717,6 +717,10 @@ export class ClientModeRuntime {
     const selection = this.lastWorkspaceSelection
     if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return
     this.pendingWorkspaceSelection = { ...selection }
+    this.logger.info('republishing the workspace selection to re-read the remote session list', {
+      targetDeviceId: shortId(targetDeviceId),
+      workspaceId: selection.workspaceId,
+    })
   }
 
   private finishReconnect(reason: string): void {
@@ -1023,6 +1027,10 @@ export class ClientModeRuntime {
   }
 
   private consumeWorkspaceSelection(selection: RemoteWorkspaceSelection): Record<string, unknown> {
+    // The client half opened this selection, so it is the workspace a later reconnect has to republish.
+    // It can arrive from the browser's own stored selection rather than from workspaces.open, which is
+    // why remembering it here - and not only where we publish it - is what makes the re-baseline work.
+    this.lastWorkspaceSelection = { ...selection }
     const pending = this.pendingWorkspaceSelection
     if (pending?.targetDeviceId === selection.targetDeviceId
       && pending.workspaceId === selection.workspaceId
