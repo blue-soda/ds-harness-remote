@@ -3204,28 +3204,46 @@ window.__ModuleLoader__.load({
       // holding the local list it read while the peer was away - which is why the remote view stays
       // broken until the page is reloaded. Re-reading the Host-authoritative list as soon as a
       // reconnect finishes is the same work that reload does, without the reload.
-      let wasReconnecting = false
+      let firstSnapshot = true
+      let wasRemoteView = false
       let wasFallenBack = false
+      let wasReconnecting = false
+      let lastFallbackReloadAt = 0
       const unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
         const current = statusFeed.getSnapshot()
-        // The fallback hands the window back to the local shell, so the list has to be re-read then as
-        // well: without it the remote workspace stays on screen with nothing openable in it, which
-        // looks exactly like a broken remote session instead of a local one.
-        if (current?.fellBackToLocal === true) {
+        if (current === undefined) return
+        // Whatever this page loaded into is its starting point: a fallback already in progress must not
+        // be mistaken for a fresh transition, or a renderer that reloads would reload forever.
+        if (firstSnapshot) {
+          firstSnapshot = false
+          wasRemoteView = current.mode === 'remote'
+          wasFallenBack = current.fellBackToLocal === true
+          wasReconnecting = current.reconnecting !== undefined
+          return
+        }
+        if (current.mode === 'remote') wasRemoteView = true
+        if (current.fellBackToLocal === true) {
           if (!wasFallenBack) {
             wasFallenBack = true
-            void ctx.sessions.refresh().catch(() => undefined)
+            // DSH exposes no way to make the renderer re-read its Workspace store - the Workspaces
+            // service has no refresh - so the remote Workspace this page is showing cannot be turned
+            // into the local one from here. Reloading is what the user does by hand in this situation,
+            // and the recovery path re-opens the remote Workspace on its own once the link is back.
+            if (wasRemoteView && Date.now() - lastFallbackReloadAt > 20_000) {
+              lastFallbackReloadAt = Date.now()
+              window.location.reload()
+            }
           }
         } else {
           wasFallenBack = false
         }
-        if (current?.reconnecting !== undefined) {
+        if (current.reconnecting !== undefined) {
           wasReconnecting = true
           return
         }
         if (!wasReconnecting) return
         wasReconnecting = false
-        if (current?.connected !== true) return
+        if (current.connected !== true) return
         void ctx.sessions.refresh().catch(() => undefined)
       })
       ctx.effect(
