@@ -3209,6 +3209,7 @@ window.__ModuleLoader__.load({
       let wasFallenBack = false
       let wasReconnecting = false
       let lastFallbackReloadAt = 0
+      let lastRecoveryReloadAt = 0
       const unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
         const current = statusFeed.getSnapshot()
         if (current === undefined) return
@@ -3245,6 +3246,14 @@ window.__ModuleLoader__.load({
         wasReconnecting = false
         if (current.connected !== true) return
         void ctx.sessions.refresh().catch(() => undefined)
+        // A page that reloaded into the local shell during the fallback holds local Workspaces, and the
+        // store cannot be re-read from here, so the remote Workspace it should show after recovery is not
+        // in it - which is why the sessions come back ungrouped. Landing on the remote carriers again is
+        // the only way to a Workspace store that has them.
+        if (!wasRemoteView && Date.now() - lastRecoveryReloadAt > 5_000) {
+          lastRecoveryReloadAt = Date.now()
+          window.location.reload()
+        }
       })
       ctx.effect(
         () => () => unsubscribeReconnectRefresh(),

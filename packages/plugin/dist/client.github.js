@@ -4164,7 +4164,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           }
         });
         ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream");
-        let firstSnapshot = !0, wasRemoteView = !1, wasFallenBack = !1, wasReconnecting = !1, lastFallbackReloadAt = 0, unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
+        let firstSnapshot = !0, wasRemoteView = !1, wasFallenBack = !1, wasReconnecting = !1, lastFallbackReloadAt = 0, lastRecoveryReloadAt = 0, unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
           let current = statusFeed.getSnapshot();
           if (current !== void 0) {
             if (firstSnapshot) {
@@ -4175,8 +4175,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
               wasReconnecting = !0;
               return;
             }
-            wasReconnecting && (wasReconnecting = !1, current.connected === !0 && ctx.sessions.refresh().catch(() => {
-            }));
+            wasReconnecting && (wasReconnecting = !1, current.connected === !0 && (ctx.sessions.refresh().catch(() => {
+            }), !wasRemoteView && Date.now() - lastRecoveryReloadAt > 5e3 && (lastRecoveryReloadAt = Date.now(), window.location.reload())));
           }
         });
         ctx.effect(
