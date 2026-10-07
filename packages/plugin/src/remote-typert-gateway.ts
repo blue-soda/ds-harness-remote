@@ -9,6 +9,7 @@ import {
   type HarnessRemoteStreamClosedData,
 } from '@dsh-remote/protocol'
 import { uuidV7 } from './ids.js'
+import { hydrateRpcAttachments } from './rpc-binary-attachments.js'
 import {
   normalizeLegacySessionGatewayValue,
   type SessionFormatCompatibility,
@@ -63,7 +64,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
         response = await this.callTransferred(encoded, signal)
       }
     }
-    const result = parseRpcResult(response)
+    const result = parseRpcResult(hydrateRpcAttachments(response))
     const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result)
     if (settingsResult !== undefined) return settingsResult
     if (result.ok && this.compatibility === 'legacy-to-v3') {
@@ -124,9 +125,10 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
   ): AsyncGenerator<unknown> {
     try {
       for await (const value of queue) {
+        const hydrated = hydrateRpcAttachments(value)
         yield this.compatibility === 'legacy-to-v3'
-          ? normalizeLegacySessionGatewayValue(endpoint, value)
-          : value
+          ? normalizeLegacySessionGatewayValue(endpoint, hydrated)
+          : hydrated
       }
     } finally {
       signal.removeEventListener('abort', onAbort)
