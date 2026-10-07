@@ -20957,11 +20957,6 @@ var ClientModeRuntime = class {
   handleRemoteTransportLost(client, targetDeviceId) {
     if (this.connected?.client !== client) return;
     const targetName = this.connected.target.name;
-    if (this.reconnecting === void 0) {
-      this.livenessFailures = LIVENESS_TOLERATED_FAILURES - 1;
-      void this.enterFastReconnect(targetDeviceId, targetName);
-      return;
-    }
     this.stopLivenessWatch();
     void this.closePreview();
     this.connected = void 0;

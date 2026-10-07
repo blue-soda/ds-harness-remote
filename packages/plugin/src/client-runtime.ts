@@ -740,15 +740,9 @@ export class ClientModeRuntime {
   private handleRemoteTransportLost(client: RemoteClientCore, targetDeviceId: string): void {
     if (this.connected?.client !== client) return
     const targetName = this.connected.target.name
-    // A closed transport is not automatically the end of the session: the peer may be restarting, or
-    // it may have paused remote control on purpose. Rebuild in place first and let the next
-    // unanswered check decide, so a link that comes straight back does not cost the user their view.
-    if (this.reconnecting === undefined) {
-      // The close is the first miss; the next unanswered check is what gives the session up.
-      this.livenessFailures = LIVENESS_TOLERATED_FAILURES - 1
-      void this.enterFastReconnect(targetDeviceId, targetName)
-      return
-    }
+    // A closed transport is the disaster fallback: the session is gone and the retry loop takes over.
+    // Only an unanswered liveness check rebuilds in place first, so a peer that merely went quiet
+    // keeps the user's view while its link is re-established.
     this.stopLivenessWatch()
     void this.closePreview()
     this.connected = undefined
