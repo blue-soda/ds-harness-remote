@@ -258,6 +258,12 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 - **自我替换的关闭不是"对端断了"**：快速重连的重建会新建控制连接，Server 会关闭同一设备的旧连接；旧传输的
   `onClose` 若被当作灾难回退，快速重连就会**永远自我升级**（实测表现：只看到灾难回退）。正在被替换的传输的
   关闭必须忽略，升级判定权只归存活探测；升级日志带 `reason`（`transport-closed` / `unanswered-twice`）。
+- **载体切换必须留给本地一条活路**：`TypertGatewaySwitch` 是唯一写 `runtime.dispatchRpc/invoke/stream` 的组件，
+  所以它"往下传"的目标其实就是**本地 dispatcher**。两条实测教训（2026-10-08，都是我改出来的）：把本地 dispatcher
+  当自由函数调用会让它失去接收者（`this` 丢失 → DSH 内部读 `invokeRpc` 报 undefined → **本地全线 500**，
+  表现是"灾难回退后连选工作区、建会话都不行"）；因此**捕获载体时必须 `.bind(runtime)`**。另外"往下传"只能在
+  `remoteAvailability()` 为真时发生：对端不可达（回退中、或启动未连上）时必须由本地 shell 回答，否则窗口既不
+  远程也不本地可用。回归测试：`tests/typert-gateway-switch.test.ts` 的 carrier chain 与 forwarded receiver 两组。
 - **回退/恢复必须重建渲染器视图**：DSH 的工作区 store 无公开刷新入口（`IWorkspaces` 只读 list + 命令），
   所以进灾难回退时客户端半重载一次页面（显示本地列表）、重连成功后再重载一次（回到远程工作区）；标签页记住
   工作区选择以便重载落回原处。任何"只刷新会话列表"的做法都不足以切换视图（实测：会话可打开但仍全部落在未分组）。
