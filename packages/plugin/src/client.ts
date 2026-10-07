@@ -148,6 +148,19 @@ const QR_LOGIN_ENABLED = false
 type EnabledQrProvider = (typeof ENABLED_QR_PROVIDERS)[number]
 type LoginMethod = OAuthProvider | 'password'
 
+/** `as const` keeps each value a literal locale key rather than a plain string. */
+const QR_PROVIDER_LABELS = {
+  wechat: 'wechatLogin',
+  github: 'githubLogin',
+  zhihu: 'zhihuLogin',
+} as const satisfies Record<OAuthProvider, LocaleKey>
+
+const QR_PROVIDER_SCAN_LABELS = {
+  wechat: 'scanWithWeChat',
+  github: 'scanWithGitHub',
+  zhihu: 'scanWithZhihu',
+} as const satisfies Record<OAuthProvider, LocaleKey>
+
 const defaultQrProvider: OAuthProvider = ENABLED_QR_PROVIDERS[0] ?? 'wechat'
 
 /** Whether this build offers the given provider; the panel must not select one it cannot render. */
@@ -1714,6 +1727,7 @@ window.__ModuleLoader__.load({
       const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(
         isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider,
       )
+      const [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(false)
       const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
       const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
       const [qrExpired, setQrExpired] = React.useState(false)
@@ -1768,24 +1782,6 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
-      }, [])
-
-      React.useEffect(() => {
-        // Nothing in this plugin polls status on a timer: the Host pushes its own status only
-        // when it changes, so a client that returns from the background would otherwise never
-        // ask again. That matters because the status read is what runs the Host-side liveness
-        // probe - a transport the peer dropped while the client was suspended reports no close
-        // event, and this is how the runtime finds out and reconnects.
-        const refreshOnResume = (): void => {
-          if (document.visibilityState === 'hidden') return
-          void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
-        }
-        document.addEventListener('visibilitychange', refreshOnResume)
-        window.addEventListener('focus', refreshOnResume)
-        return () => {
-          document.removeEventListener('visibilitychange', refreshOnResume)
-          window.removeEventListener('focus', refreshOnResume)
-        }
       }, [])
 
       React.useEffect(() => {
@@ -1888,15 +1884,34 @@ window.__ModuleLoader__.load({
       }, [open, loginMethod, qrSession])
 
       React.useEffect(() => {
-        // The tab that used to pin a manual choice is gone, so the preferred provider wins.
-        if (loginMethod === props.preferredQrProvider) return
+        if (loginMethodManuallySelected || loginMethod === props.preferredQrProvider) return
         qrFlowRun.current += 1
         setLoginMethod(props.preferredQrProvider)
         setQrSession(undefined)
         setQrImage(undefined)
         setQrExpired(false)
         setError(undefined)
-      }, [props.preferredQrProvider, loginMethod])
+      }, [props.preferredQrProvider, loginMethodManuallySelected])
+
+      const selectLoginMethod = (method: LoginMethod): void => {
+        setLoginMethodManuallySelected(true)
+        if (method === loginMethod) return
+        qrFlowRun.current += 1
+        setLoginMethod(method)
+        setQrSession(undefined)
+        setQrImage(undefined)
+        setQrExpired(false)
+        setError(undefined)
+      }
+
+      const orderedQrProviders: readonly OAuthProvider[] = ENABLED_QR_PROVIDERS
+
+      const qrLoginTab = (provider: OAuthProvider): unknown => React.createElement('button', {
+        key: provider, type: 'button', role: 'tab', id: `dsh-remote-${provider}-tab`,
+        'aria-selected': loginMethod === provider, 'aria-controls': `dsh-remote-${provider}-panel`,
+        className: loginMethod === provider ? 'isActive' : '', disabled: busy,
+        onClick: () => selectLoginMethod(provider),
+      }, t(QR_PROVIDER_LABELS[provider]))
 
       const selectHost = async (host: RemoteDevice): Promise<void> => {
         setBusy(true)

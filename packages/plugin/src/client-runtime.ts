@@ -513,97 +513,6 @@ export class ClientModeRuntime {
     return this.status()
   }
 
-  /** When the last liveness probe started, so status polling cannot flood the peer. */
-  private lastLivenessProbeAt = 0
-  /** Whether a liveness probe is still waiting for its answer. */
-  private livenessProbeInFlight = false
-  /** Consecutive unanswered probes; any answer clears it. */
-  private livenessFailures = 0
-
-  /**
-   * Treat a remote transport as lost: clear the target and start the reconnect loop.
-   *
-   * Reached from the transport's own close event and from the liveness watch. Both paths
-   * must leave the runtime in exactly the same state, which is why they share this method:
-   * a suspended client can come back to a connection the peer already reaped without any
-   * close event ever arriving here.
-   * @param client - the connection that is gone.
-   * @param targetDeviceId - the Host it was bound to.
-   */
-  private handleRemoteTransportLost(client: RemoteClientCore, targetDeviceId: string): void {
-    if (this.connected?.client !== client) return
-    void this.closePreview()
-    this.connected = undefined
-    this.connectionProgress = undefined
-    this.pendingWorkspaceSelection = undefined
-    void this.closeCodexVirtual()
-    this.proxySwitch?.selectLocal()
-    this.gatewaySwitch.selectLocal()
-    // The UI keeps whatever the remote session rendered and offers no exit
-    // route once the mode reads 'local' again, so remember that the session
-    // dropped. The card uses this to keep a way back to the local shell.
-    this.fellBackToLocal = true
-    this.livenessFailures = 0
-    this.livenessProbeInFlight = false
-    void client.close().catch(() => undefined)
-    this.logger.warn('remote Harness transport lost; reconnecting', {
-      targetDeviceId: shortId(targetDeviceId),
-    })
-    void this.reconnectRemoteSession(targetDeviceId)
-  }
-
-  /**
-   * Probe a remote session when the UI asks for its status, because no close event reports a
-   * half-open link.
-   *
-   * A client that spends a long time in the background comes back to a connection the peer
-   * already dropped: nothing closed the socket here, so the session still looks connected,
-   * every call fails, and the UI keeps rendering a remote workspace it can no longer read.
-   * The UI polls status on its own cadence - and immediately after the app returns from the
-   * background - so this needs no timer of its own: one cheap `ping` per status read, at
-   * most one in flight, and only once the previous probe is older than the interval.
-   *
-   * The probe asks for a reply rather than for success: any answer, including a refusal,
-   * proves the peer is there, and only a timeout means it is gone. Two consecutive timeouts
-   * reuse the close path, so recovery is the same reconnect loop a user would otherwise
-   * trigger by exiting and reconnecting.
-   */
-  private maybeProbeRemoteLiveness(): void {
-    const connected = this.connected
-    if (connected === undefined || this.livenessProbeInFlight) return
-    const now = Date.now()
-    if (now - this.lastLivenessProbeAt < LIVENESS_PROBE_INTERVAL_MS) return
-    this.lastLivenessProbeAt = now
-    this.livenessProbeInFlight = true
-    // A probe must never break the status read that triggered it: a client without a usable
-    // rpc, or one that throws synchronously, simply leaves the connection as it was.
-    let probe: Promise<unknown>
-    try {
-      probe = connected.client.rpc('ping', {}, undefined, { timeoutMs: LIVENESS_PROBE_TIMEOUT_MS })
-    } catch {
-      this.livenessProbeInFlight = false
-      return
-    }
-    void probe
-      .then(() => { this.livenessFailures = 0 })
-      .catch((error: unknown) => {
-        if (!livenessProbeLost(error)) {
-          // Any answer proves the peer is alive, including a refusal.
-          this.livenessFailures = 0
-          return
-        }
-        this.livenessFailures += 1
-        this.logger.warn('remote Harness liveness probe found no answer', {
-          targetDeviceId: shortId(connected.target.deviceId),
-          attempt: this.livenessFailures,
-        })
-        if (this.livenessFailures >= LIVENESS_PROBE_TOLERATED_FAILURES) {
-          this.handleRemoteTransportLost(connected.client, connected.target.deviceId)
-        }
-      })
-      .finally(() => { this.livenessProbeInFlight = false })
-  }
-
   /**
    * Re-establish a remote session whose transport closed.
    *
@@ -1143,7 +1052,23 @@ export class ClientModeRuntime {
         connectedPreference === undefined ? undefined : [connectedPreference],
       )
       connectedClient.onClose(() => {
-        this.handleRemoteTransportLost(connectedClient, target.deviceId)
+        if (this.connected?.client !== connectedClient) return
+        void this.closePreview()
+        this.connected = undefined
+        this.connectionProgress = undefined
+        this.pendingWorkspaceSelection = undefined
+        void this.closeCodexVirtual()
+        this.proxySwitch?.selectLocal()
+        this.gatewaySwitch.selectLocal()
+        // The UI keeps whatever the remote session rendered and offers no exit
+        // route once the mode reads 'local' again, so remember that the session
+        // dropped. The card uses this to keep a way back to the local shell.
+        this.fellBackToLocal = true
+        void connectedClient.close().catch(() => undefined)
+        this.logger.warn('remote Harness transport closed; reconnecting', {
+          targetDeviceId: shortId(target.deviceId),
+        })
+        void this.reconnectRemoteSession(target.deviceId)
       })
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => undefined)
       this.logger.info('remote Harness transport ready', {
@@ -1226,13 +1151,7 @@ export class ClientModeRuntime {
 
   async handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
     try {
-      if (endpoint === 'status') {
-        // Status polling is the only clock this needs: the UI asks on its own cadence and
-        // straight after the app returns from the background, which is when a half-open
-        // transport has to be noticed.
-        this.maybeProbeRemoteLiveness()
-        return ok(await this.detailedStatus())
-      }
+      if (endpoint === 'status') return ok(await this.detailedStatus())
       if (endpoint === 'devices') return ok(await this.devices())
       if (endpoint === 'client.account.login') {
         const value = record(payload)
@@ -1672,33 +1591,3 @@ function transportPreferenceForMode(
 function iceServersForAttempt(attempt: TransportAttempt, iceServers: RtcIceServer[]): RtcIceServer[] {
   return attempt === 'direct' ? stunOnlyIceServers(iceServers) : iceServers
 }
-
-/** Codes the client core raises locally when an RPC never reached an answer. */
-const NO_ANSWER_CODES = new Set(['RPC_TIMEOUT', 'CLIENT_CLOSED', 'TRANSPORT_CLOSED', 'RPC_ABORTED'])
-
-/**
- * Whether a liveness probe failed to reach the peer.
- *
- * The probe asks for a reply, not for success, so the two outcomes must be told apart by where
- * the error came from. An answer from the peer arrives as an error carrying the peer's own code
- * (METHOD_NOT_FOUND, FEATURE_NOT_SUPPORTED, ...). A local failure is either one of the core's
- * own codes above or a raw transport error with no code at all - a send that failed on a socket
- * the process has not noticed is closed. Counting that second kind as liveness would make the
- * probe useless exactly when it matters.
- * @param error - the error the probe rejected with.
- * @returns true when no answer arrived, so the transport must be treated as lost.
- */
-export function livenessProbeLost(error: unknown): boolean {
-  const code = typeof error === 'object' && error !== null && 'code' in error
-    ? (error as { code?: unknown }).code
-    : undefined
-  if (typeof code !== 'string') return true
-  return NO_ANSWER_CODES.has(code)
-}
-
-/** How long a liveness probe stays fresh before status polling may probe again. */
-const LIVENESS_PROBE_INTERVAL_MS = 10_000
-/** How long a probe waits for a reply before the peer counts as silent. */
-const LIVENESS_PROBE_TIMEOUT_MS = 5_000
-/** Consecutive unanswered probes that mark the transport lost. */
-const LIVENESS_PROBE_TOLERATED_FAILURES = 2

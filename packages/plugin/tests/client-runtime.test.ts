@@ -6,7 +6,6 @@ import { generateKeyPair } from '@dsh-remote/crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
-  livenessProbeLost,
   probeRemoteHostFeatures,
   remoteHostFeatures,
   type HostAuthorizationControl,
@@ -878,91 +877,3 @@ function gatewayWithCarrier() {
     },
   }
 }
-
-describe('remote liveness watch', () => {
-  const buildRuntime = async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-liveness-'))
-    directories.push(directory)
-    return new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      apiProxy(),
-      gateway(),
-      logger(),
-    )
-  }
-
-  const internals = (runtime: ClientModeRuntime) => runtime as unknown as {
-    connected: { client: unknown } | undefined
-    fellBackToLocal: boolean
-    maybeProbeRemoteLiveness: () => void
-  }
-
-  const armed = (rpc: unknown) => {
-    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
-    return { client, target: { deviceId: 'device-a' } }
-  }
-
-  it('treats two unanswered probes as a lost connection and falls back for reconnecting', async () => {
-    const runtime = await buildRuntime()
-    const rpc = vi.fn(async () => {
-      throw Object.assign(new Error('RPC ping timed out after 5000ms'), { code: 'RPC_TIMEOUT' })
-    })
-    const state = internals(runtime)
-    const settled = async (calls: number) => {
-      // Only one probe is ever in flight, and the next is gated by the staleness window
-      // rather than by a timer, so wait for the call and for the gate to reopen.
-      await vi.waitFor(() => {
-        expect(rpc.mock.calls.length).toBeGreaterThanOrEqual(calls)
-        expect((runtime as unknown as { livenessProbeInFlight: boolean }).livenessProbeInFlight).toBe(false)
-      })
-    }
-    state.connected = armed(rpc) as never
-    state.fellBackToLocal = false
-
-    state.maybeProbeRemoteLiveness()
-    await settled(1)
-    expect(state.connected).toBeDefined()
-
-    // The staleness window is what keeps status polling from flooding the peer; step past it.
-    ;(runtime as unknown as { lastLivenessProbeAt: number }).lastLivenessProbeAt = 0
-    state.maybeProbeRemoteLiveness()
-    await vi.waitFor(() => { expect(state.connected).toBeUndefined() })
-    expect(state.fellBackToLocal).toBe(true)
-  })
-
-  it('keeps a connection whose probe is answered with a refusal', async () => {
-    const runtime = await buildRuntime()
-    const rpc = vi.fn(async () => {
-      throw Object.assign(new Error('METHOD_NOT_ALLOWED'), { code: 'METHOD_NOT_ALLOWED' })
-    })
-    const state = internals(runtime)
-    state.connected = armed(rpc) as never
-    state.fellBackToLocal = false
-
-    for (let round = 0; round < 3; round++) {
-      ;(runtime as unknown as { lastLivenessProbeAt: number }).lastLivenessProbeAt = 0
-      state.maybeProbeRemoteLiveness()
-      await vi.waitFor(() => {
-        expect(rpc.mock.calls.length).toBe(round + 1)
-        expect((runtime as unknown as { livenessProbeInFlight: boolean }).livenessProbeInFlight).toBe(false)
-      })
-    }
-    expect(state.connected).toBeDefined()
-    expect(state.fellBackToLocal).toBe(false)
-  })
-
-  it('treats only a missing answer as loss, never a refusal', () => {
-    // No answer: the core's own timeout/close codes, and raw transport errors with no code.
-    expect(livenessProbeLost({ code: 'RPC_TIMEOUT' })).toBe(true)
-    expect(livenessProbeLost({ code: 'CLIENT_CLOSED' })).toBe(true)
-    expect(livenessProbeLost({ code: 'TRANSPORT_CLOSED' })).toBe(true)
-    expect(livenessProbeLost(new Error('relay control socket is not open'))).toBe(true)
-    expect(livenessProbeLost('not an error')).toBe(true)
-    // An answer from the peer, however unwelcome, proves it is there.
-    expect(livenessProbeLost({ code: 'METHOD_NOT_ALLOWED' })).toBe(false)
-    expect(livenessProbeLost({ code: 'FEATURE_NOT_SUPPORTED' })).toBe(false)
-    expect(livenessProbeLost({ code: 'SESSION_NOT_FOUND' })).toBe(false)
-  })
-})
