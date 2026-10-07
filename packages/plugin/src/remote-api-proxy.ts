@@ -439,6 +439,16 @@ function base64ToBytes(value: string): Uint8Array {
  * @param response - the peer's response.
  * @returns the response with byte-valued fields restored.
  */
+/** Shapes only: what a byte field looks like where it crosses a seam (never the content). */
+function describeBytes(data: unknown): Record<string, unknown> {
+  return {
+    dataIsBytes: data instanceof Uint8Array,
+    dataType: typeof data,
+    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    preview: typeof data === 'string' ? data.slice(0, 12) : undefined,
+  }
+}
+
 function normalizeByteResult(method: string, response: NativeResponse): NativeResponse {
   if (method !== 'workspaceFiles.readBytes') return response
   const result = response.result
@@ -446,6 +456,7 @@ function normalizeByteResult(method: string, response: NativeResponse): NativeRe
   const value = result.value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return response
   const data = (value as { data?: unknown }).data
+  console.warn('[dsh-remote] workspaceFiles/readBytes at the ApiProxy exit', describeBytes(data))
   if (data instanceof Uint8Array) return response
   const bytes = decodeByteValue(data)
   // Shapes only; never the content itself. This is the seam that faces the local shell.

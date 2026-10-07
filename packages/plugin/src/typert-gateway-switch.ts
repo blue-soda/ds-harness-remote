@@ -461,12 +461,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param result - the peer's result.
  * @returns the result with byte-valued fields restored to \`Uint8Array\`.
  */
+/** Shapes only: what a byte field looks like where it crosses a seam (never the content). */
+function describeBytes(data: unknown): Record<string, unknown> {
+  return {
+    dataIsBytes: data instanceof Uint8Array,
+    dataType: typeof data,
+    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    preview: typeof data === 'string' ? data.slice(0, 12) : undefined,
+  }
+}
+
 function normalizeByteResult(endpoint: string, result: unknown): unknown {
   if (endpoint !== 'workspaceFiles/readBytes') return result
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return result
   const value = (result as { value?: unknown }).value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return result
   const data = (value as { data?: unknown }).data
+  console.warn('[dsh-remote] workspaceFiles/readBytes at the switch exit', describeBytes(data))
   if (data instanceof Uint8Array) return result
   const bytes = decodeByteValue(data)
   // Shapes only; never the content itself. This is the seam that faces the local shell.

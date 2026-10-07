@@ -15256,6 +15256,14 @@ function base64ToBytes2(value) {
   }
   return bytes;
 }
+function describeBytes(data2) {
+  return {
+    dataIsBytes: data2 instanceof Uint8Array,
+    dataType: typeof data2,
+    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
+    preview: typeof data2 === "string" ? data2.slice(0, 12) : void 0
+  };
+}
 function normalizeByteResult(method, response) {
   if (method !== "workspaceFiles.readBytes") return response;
   const result = response.result;
@@ -15263,6 +15271,7 @@ function normalizeByteResult(method, response) {
   const value = result.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return response;
   const data2 = value.data;
+  console.warn("[dsh-remote] workspaceFiles/readBytes at the ApiProxy exit", describeBytes(data2));
   if (data2 instanceof Uint8Array) return response;
   const bytes = decodeByteValue(data2);
   console.warn("[dsh-remote] workspace probe", {
@@ -19533,12 +19542,21 @@ var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
 function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function describeBytes2(data2) {
+  return {
+    dataIsBytes: data2 instanceof Uint8Array,
+    dataType: typeof data2,
+    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0,
+    preview: typeof data2 === "string" ? data2.slice(0, 12) : void 0
+  };
+}
 function normalizeByteResult3(endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes") return result;
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
   const value = result.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
   const data2 = value.data;
+  console.warn("[dsh-remote] workspaceFiles/readBytes at the switch exit", describeBytes2(data2));
   if (data2 instanceof Uint8Array) return result;
   const bytes = decodeByteValue(data2);
   console.warn("[dsh-remote] workspace probe", {
