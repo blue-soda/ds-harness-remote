@@ -7,6 +7,7 @@ import type {
   RpcResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RemoteClientError, type RemoteClientCore } from '@dsh-remote/client-core'
+import { hydrateRpcAttachments } from './rpc-binary-attachments.js'
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
@@ -133,7 +134,10 @@ export class RemoteHarnessApiProxy {
     if (String(response.rpcId) !== String(request.rpcId) || typeof response.result !== 'object' || response.result === null) {
       throw new Error('The remote Host returned an invalid Harness API response.')
     }
-    const normalized = normalizeLegacyResponse(method, response)
+    // The Host sends bytes beside the result (see collectRpcAttachments); DSH's own connection layer
+    // would copy them back before validation, so restore them here.
+    const hydrated = { ...response, result: hydrateRpcAttachments(response.result) } as NativeResponse
+    const normalized = normalizeLegacyResponse(method, hydrated)
     return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized)
   }
 

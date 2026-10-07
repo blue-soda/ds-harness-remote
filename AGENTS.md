@@ -138,7 +138,10 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 截至 2026-10-07（当前基线）：
 
 - workspace check 与 DSH bundle 校验通过；`git diff --check` 通过
-- Plugin 测试 **345 个全部通过**（38 个文件，5.5s；此前为 57s 且有 16 个失败）。以**连跑两次一致**的结果为准：
+- Plugin 测试 **347 通过 / 1 环境失败**（38 个文件，348 个用例）。唯一失败是 `werift-rtc.test.ts` 的
+  `lan`/`p2p` 路径断言（`expected 'p2p' to be 'lan'`）：本机启用 Hyper-V 虚拟网卡（`vEthernet (Default Switch)`、
+  `Meta Tunnel`）且三档防火墙全开后稳定复现，与该测试导入的 `@dsh-remote/webrtc` 代码无关，也不是本仓库改动引入
+  （改动文件清单里没有任何 WebRTC 相关文件）。改回 345 用例前的基线见下一行；恢复环境后应能再次全绿。以**连跑两次一致**的结果为准：
   2026-10-07 早先几次曾报告 37 个文件 / 332 个用例，属于少收集一个文件，不是用例缺失（磁盘 38 个文件均在版本控制内）
 - Server 测试 **43 个全部通过**（5 个文件，3.2s）；`pnpm -r check` 通过
 - 平台的收敛必须继续：测试不得假设 POSIX 分隔符、点号即隐藏、或可无特权创建 symlink（`linkDirectory()`

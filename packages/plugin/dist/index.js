@@ -14812,6 +14812,93 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   }
 }
 
+// src/rpc-binary-attachments.ts
+function hydrateRpcAttachments(result) {
+  if (!isRecord2(result)) return result;
+  const envelope = result;
+  if (!Array.isArray(envelope.attachments) || envelope.attachments.length === 0) return result;
+  const { attachments, ...rest } = result;
+  const base = Object.hasOwn(rest, "value") ? rest.value : void 0;
+  for (const attachment of attachments) {
+    const entry = attachment;
+    const path = Array.isArray(entry.path) ? entry.path : void 0;
+    if (path === void 0 || path.length === 0) {
+      throw new Error("The remote Host returned a byte attachment without a path.");
+    }
+    assignAtPath(base, path, decodeAttachmentBytes(entry.bytes));
+  }
+  return rest;
+}
+function assignAtPath(base, path, bytes) {
+  if (base === null || typeof base !== "object") {
+    throw new Error("The remote Host returned a byte attachment that its result cannot hold.");
+  }
+  let cursor2 = base;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = pathKey(path[index]);
+    const next = cursor2[key];
+    if (next === null || typeof next !== "object") {
+      throw new Error("The remote Host returned a byte attachment at an unknown result path.");
+    }
+    cursor2 = next;
+  }
+  cursor2[pathKey(path[path.length - 1])] = bytes;
+}
+function pathKey(segment) {
+  if (typeof segment === "string") return segment;
+  if (typeof segment === "number" && Number.isInteger(segment) && segment >= 0) return String(segment);
+  throw new Error("The remote Host returned a byte attachment with an invalid path segment.");
+}
+function decodeAttachmentBytes(value) {
+  if (value instanceof Uint8Array) return value;
+  if (typeof value === "string") return decodeBase64(value);
+  if (Array.isArray(value)) return Uint8Array.from(value);
+  if (!isRecord2(value)) throw new Error("The remote Host returned invalid byte attachment data.");
+  if (Array.isArray(value.data)) {
+    return Uint8Array.from(value.data);
+  }
+  const keys = Object.keys(value);
+  if (keys.every((key) => /^\d+$/u.test(key))) {
+    const ordered = keys.map(Number).sort((left, right) => left - right);
+    return Uint8Array.from(ordered.map((key) => value[String(key)]));
+  }
+  throw new Error("The remote Host returned invalid byte attachment data.");
+}
+function decodeBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function collectRpcAttachments(result) {
+  if (!isRecord2(result) || !Object.hasOwn(result, "value")) return result;
+  const attachments = [];
+  const value = replaceBytes(result.value, [], attachments);
+  if (attachments.length === 0) return result;
+  return { ...result, value, attachments };
+}
+function replaceBytes(value, path, attachments) {
+  if (value instanceof Uint8Array) {
+    attachments.push({ path: [...path], bytes: encodeBase64(value) });
+    return null;
+  }
+  if (Array.isArray(value)) return value.map((item, index) => replaceBytes(item, [...path, index], attachments));
+  if (!isRecord2(value)) return value;
+  const clone = {};
+  for (const [key, item] of Object.entries(value)) clone[key] = replaceBytes(item, [...path, key], attachments);
+  return clone;
+}
+function encodeBase64(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.byteLength; offset += 32768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  }
+  return btoa(binary);
+}
+
 // src/remote-api-proxy.ts
 var DIRECT_API_CALL_BYTES = 2 * 1024 * 1024;
 var AGENT_PRESET_SETTINGS_NS = "agent-presets";
@@ -14919,12 +15006,13 @@ var RemoteHarnessApiProxy = class {
     if (String(response.rpcId) !== String(request.rpcId) || typeof response.result !== "object" || response.result === null) {
       throw new Error("The remote Host returned an invalid Harness API response.");
     }
-    const normalized = normalizeLegacyResponse(method, response);
+    const hydrated = { ...response, result: hydrateRpcAttachments(response.result) };
+    const normalized = normalizeLegacyResponse(method, hydrated);
     return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized);
   }
   normalizeLegacyWelcomeSettings(method, payload, response) {
     if (!isLegacyRemoteHost(this.harnessVersion)) return response;
-    if (method === "settings.describe" && response.result.ok && isRecord2(response.result.value)) {
+    if (method === "settings.describe" && response.result.ok && isRecord3(response.result.value)) {
       this.settingsDescribeValue = response.result.value;
       return this.legacyWelcomeAcknowledged ? patchWelcomeDescribe(response) : response;
     }
@@ -15036,7 +15124,7 @@ function normalizeLegacyResponse(method, response) {
   };
 }
 function normalizeLegacyRequest(method, payload) {
-  if (!isRecord2(payload)) return payload;
+  if (!isRecord3(payload)) return payload;
   if (method === "agentPreset.read") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.select") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.copy") return replaceAgentPreset(payload, "from");
@@ -15051,7 +15139,7 @@ function replaceAgentPreset(payload, key) {
   return replacement === void 0 ? payload : { ...payload, [key]: replacement };
 }
 function replaceAgentPresetSettings(payload) {
-  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord2(payload.patch)) return payload;
+  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord3(payload.patch)) return payload;
   const patch = replaceAgentPreset(payload.patch, "default");
   return patch === payload.patch ? payload : { ...payload, patch };
 }
@@ -15061,11 +15149,11 @@ function isLegacyRemoteHost(version) {
   return match !== null && Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
 }
 function isWelcomeNoticeRequest(payload) {
-  if (!isRecord2(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
-  return payload.ops.some((operation) => isRecord2(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
+  if (!isRecord3(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
+  return payload.ops.some((operation) => isRecord3(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
 }
 function patchWelcomeDescribe(response) {
-  if (!response.result.ok || !isRecord2(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
+  if (!response.result.ok || !isRecord3(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
   return {
     ...response,
     result: {
@@ -15073,8 +15161,8 @@ function patchWelcomeDescribe(response) {
       value: {
         ...response.result.value,
         namespaces: response.result.value.namespaces.map((namespace) => {
-          if (!isRecord2(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-          const value = isRecord2(namespace.value) ? namespace.value : {};
+          if (!isRecord3(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+          const value = isRecord3(namespace.value) ? namespace.value : {};
           return { ...namespace, value: { ...value, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
         })
       }
@@ -15088,8 +15176,8 @@ function patchWelcomeMutate(value, rpcId2) {
   };
   const namespaces = Array.isArray(value.namespaces) ? value.namespaces : [];
   response.result.value.namespaces = namespaces.map((namespace) => {
-    if (!isRecord2(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-    const current = isRecord2(namespace.value) ? namespace.value : {};
+    if (!isRecord3(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+    const current = isRecord3(namespace.value) ? namespace.value : {};
     return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
   });
   return response;
@@ -15097,7 +15185,7 @@ function patchWelcomeMutate(value, rpcId2) {
 function isRemoteDisconnect(error) {
   return error instanceof RemoteClientError && (error.code === "TRANSPORT_CLOSED" || error.code === "CLIENT_CLOSED");
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 var AsyncFrameQueue = class {
@@ -15160,68 +15248,6 @@ function base64ToBytes2(value) {
     throw new Error("The remote Host returned a non-canonical Harness API transfer chunk.");
   }
   return bytes;
-}
-
-// src/rpc-binary-attachments.ts
-function hydrateRpcAttachments(result) {
-  if (!isRecord3(result)) return result;
-  const envelope = result;
-  if (!Array.isArray(envelope.attachments) || envelope.attachments.length === 0) return result;
-  const { attachments, ...rest } = result;
-  const base = Object.hasOwn(rest, "value") ? rest.value : void 0;
-  for (const attachment of attachments) {
-    const entry = attachment;
-    const path = Array.isArray(entry.path) ? entry.path : void 0;
-    if (path === void 0 || path.length === 0) {
-      throw new Error("The remote Host returned a byte attachment without a path.");
-    }
-    assignAtPath(base, path, decodeAttachmentBytes(entry.bytes));
-  }
-  return rest;
-}
-function assignAtPath(base, path, bytes) {
-  if (base === null || typeof base !== "object") {
-    throw new Error("The remote Host returned a byte attachment that its result cannot hold.");
-  }
-  let cursor2 = base;
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const key = pathKey(path[index]);
-    const next = cursor2[key];
-    if (next === null || typeof next !== "object") {
-      throw new Error("The remote Host returned a byte attachment at an unknown result path.");
-    }
-    cursor2 = next;
-  }
-  cursor2[pathKey(path[path.length - 1])] = bytes;
-}
-function pathKey(segment) {
-  if (typeof segment === "string") return segment;
-  if (typeof segment === "number" && Number.isInteger(segment) && segment >= 0) return String(segment);
-  throw new Error("The remote Host returned a byte attachment with an invalid path segment.");
-}
-function decodeAttachmentBytes(value) {
-  if (value instanceof Uint8Array) return value;
-  if (typeof value === "string") return decodeBase64(value);
-  if (Array.isArray(value)) return Uint8Array.from(value);
-  if (!isRecord3(value)) throw new Error("The remote Host returned invalid byte attachment data.");
-  if (Array.isArray(value.data)) {
-    return Uint8Array.from(value.data);
-  }
-  const keys = Object.keys(value);
-  if (keys.every((key) => /^\d+$/u.test(key))) {
-    const ordered = keys.map(Number).sort((left, right) => left - right);
-    return Uint8Array.from(ordered.map((key) => value[String(key)]));
-  }
-  throw new Error("The remote Host returned invalid byte attachment data.");
-}
-function decodeBase64(value) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-function isRecord3(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // src/session-format-compat.ts
@@ -26354,7 +26380,15 @@ var HarnessApiBridge = class {
   mux;
   host;
   answer;
+  /** Answer one ApiProxy call, sending bytes in the form DSH's own connection layer expects. */
   async call(input2) {
+    const response = await this.dispatchCall(input2);
+    const result = response.result;
+    if (result === void 0) return response;
+    const tagged = collectRpcAttachments(result);
+    return tagged === result ? response : { ...response, result: tagged };
+  }
+  async dispatchCall(input2) {
     const params = callSchema2.parse(input2);
     const signal = AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS);
     const method = this.methods.get(params.method);
@@ -27065,7 +27099,17 @@ var HarnessRemoteBridge = class {
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
+  /**
+   * Answer one remote Gateway call.
+   *
+   * Bytes have to leave in DSH's own form: this result is JSON-encoded on its way to the client, and a
+   * \`Uint8Array\` would arrive there as \`{"0":…}\` and fail the generated schema (the image-preview
+   * failure). Tagging here, hydrating on the client, keeps one convention on both sides.
+   */
   async call(input2) {
+    return collectRpcAttachments(await this.dispatchCall(input2));
+  }
+  async dispatchCall(input2) {
     const params = callSchema3.parse(input2);
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
@@ -27285,7 +27329,7 @@ var HarnessRemoteBridge = class {
         await this.publish("harness.remote.frame", {
           streamId,
           hasValue: true,
-          ...value === void 0 ? {} : { value }
+          ...value === void 0 ? {} : { value: collectRpcAttachments(value) }
         });
       }
       if (signal.aborted) reason = "cancelled";

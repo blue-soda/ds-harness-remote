@@ -22,6 +22,7 @@ import { harnessSessionGeneration } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
 import { listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
+import { collectRpcAttachments } from './rpc-binary-attachments.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
 
@@ -192,7 +193,18 @@ export class HarnessRemoteBridge {
     private readonly codexWorkspace?: CodexWorkspaceBridge,
   ) {}
 
+  /**
+   * Answer one remote Gateway call.
+   *
+   * Bytes have to leave in DSH's own form: this result is JSON-encoded on its way to the client, and a
+   * \`Uint8Array\` would arrive there as \`{"0":…}\` and fail the generated schema (the image-preview
+   * failure). Tagging here, hydrating on the client, keeps one convention on both sides.
+   */
   async call(input: unknown): Promise<TypertRpcResult> {
+    return collectRpcAttachments(await this.dispatchCall(input))
+  }
+
+  private async dispatchCall(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
@@ -429,7 +441,7 @@ export class HarnessRemoteBridge {
         await this.publish('harness.remote.frame', {
           streamId,
           hasValue: true,
-          ...(value === undefined ? {} : { value }),
+          ...(value === undefined ? {} : { value: collectRpcAttachments(value) }),
         })
       }
       if (signal.aborted) reason = 'cancelled'

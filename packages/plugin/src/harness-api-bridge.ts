@@ -34,6 +34,7 @@ import {
 } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
 import { RpcError } from './rpc-router.js'
+import { collectRpcAttachments } from './rpc-binary-attachments.js'
 import { safeErrorCode } from './safe-error.js'
 import { listRemoteDirectory } from './remote-directory-browser.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
@@ -316,7 +317,16 @@ export class HarnessApiBridge {
     this.answer = api.respond.bind(api)
   }
 
+  /** Answer one ApiProxy call, sending bytes in the form DSH's own connection layer expects. */
   async call(input: unknown): Promise<RpcResponse<unknown>> {
+    const response = await this.dispatchCall(input)
+    const result = response.result
+    if (result === undefined) return response
+    const tagged = collectRpcAttachments(result)
+    return tagged === result ? response : { ...response, result: tagged }
+  }
+
+  private async dispatchCall(input: unknown): Promise<RpcResponse<unknown>> {
     const params = callSchema.parse(input) as HarnessApiCallParams
     const signal = AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS)
     const method = this.methods.get(params.method)

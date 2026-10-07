@@ -1,0 +1,17 @@
+fix(plugin): send bytes to the client the way DSH does
+
+Clicking an image in a remote session failed the client schema with
+"workspaceFiles/readBytes failed: expected Uint8Array, path: [data]". The Gateway rehydrates its own
+byte attachments before the Host plugin sees a result, so what crossed this plugin tunnel was a real
+Uint8Array - and JSON turned it into an object keyed 0, 1, 2, a shape no generated schema accepts.
+Hydration only helps when attachments are present, which is why the earlier fix covered the Typert
+carrier's own direction but not this one.
+
+Both carriers now send bytes in DSH own form - a placeholder plus attachments - and both client sides
+hydrate them back, so one convention spans the tunnel: the Typert bridge tags results and stream
+frames, the ApiProxy bridge tags its result half and the ApiProxy carrier hydrates it. Tagging is
+idempotent and a result without bytes is returned untouched.
+
+Tests: Host tagging round-trips through the tunnel encoding, tags nested and array paths, leaves plain
+results alone and is safe to apply twice. Suite: 347 passing, plus the unrelated werift LAN-path
+assertion that this machine virtual adapters now break (recorded in AGENTS).
