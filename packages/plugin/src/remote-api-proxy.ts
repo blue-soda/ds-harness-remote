@@ -122,6 +122,7 @@ export class RemoteHarnessApiProxy {
   }
 
   private async call(method: string, request: NativeRequest, signal?: AbortSignal): Promise<NativeResponse> {
+    if (method.startsWith('workspaceFiles')) console.warn('[dsh-remote] workspace probe', { where: 'apiproxy.call', endpoint: method })
     const params: HarnessApiCallParams = {
       method,
       rpcId: String(request.rpcId),
@@ -448,12 +449,14 @@ function normalizeByteResult(method: string, response: NativeResponse): NativeRe
   const data = (value as { data?: unknown }).data
   if (data instanceof Uint8Array) return response
   const bytes = decodeByteValue(data)
-  if (bytes === undefined) {
-    console.warn('[dsh-remote] workspaceFiles/readBytes arrived without usable bytes', {
-      dataType: typeof data,
-      dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    })
-    return response
-  }
+  // Shapes only; never the content itself. This is the seam that faces the local shell.
+  console.warn('[dsh-remote] workspace probe', {
+    where: 'apiproxy.exit',
+    endpoint: method,
+    dataType: typeof data,
+    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    decoded: bytes !== undefined,
+  })
+  if (bytes === undefined) return response
   return { ...response, result: { ...result, value: { ...(value as Record<string, unknown>), data: bytes } } }
 }

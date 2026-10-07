@@ -144,13 +144,24 @@ export class TypertGatewaySwitch {
         )
     }
     if (this.originalDispatch !== undefined) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => !this.routesToRemote(endpoint)
-        ? this.localDispatch!(endpoint, payload, signal)
-        : this.withLocalFallback(
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => {
+        const routes = this.routesToRemote(endpoint)
+        logWorkspaceProbe('dispatch', endpoint, {
+          routes,
+          hasTarget: this.remoteTarget !== undefined,
+          available: this.remoteAvailability(),
+          localOnly: isLocalOnlyEndpoint(endpoint),
+        })
+        if (!routes) {
+          return Promise.resolve(this.localDispatch!(endpoint, payload, signal))
+            .then(result => (logWorkspaceProbe('local.exit', endpoint, describeProbeValue(result)), result))
+        }
+        return this.withLocalFallback(
           endpoint,
           () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
           () => this.localDispatch!(endpoint, payload, signal),
         ).then(result => normalizeByteResult(endpoint, result) as typeof result)
+      }
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen
@@ -238,6 +249,7 @@ export class TypertGatewaySwitch {
   }
 
   private selectInvoke(request: TypertGatewayRequest): Promise<unknown> {
+    logWorkspaceProbe('invoke', endpointOf(request))
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request)
     if (this.remoteTarget !== undefined && this.remoteAvailability()) {
       // A remote-mode boot still issues RPCs only the local shell can answer: the
@@ -452,13 +464,34 @@ function normalizeByteResult(endpoint: string, result: unknown): unknown {
   const data = (value as { data?: unknown }).data
   if (data instanceof Uint8Array) return result
   const bytes = decodeByteValue(data)
-  if (bytes === undefined) {
-    // Shapes only; never the content itself. Without this the failure is invisible here.
-    console.warn('[dsh-remote] workspaceFiles/readBytes arrived without usable bytes', {
-      dataType: typeof data,
-      dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    })
-    return result
-  }
+  // Shapes only; never the content itself. This is the seam that faces the local shell.
+  console.warn('[dsh-remote] workspace probe', {
+    where: 'switch.exit',
+    endpoint,
+    dataType: typeof data,
+    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    decoded: bytes !== undefined,
+  })
+  if (bytes === undefined) return result
   return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
+}
+
+/** Temporary diagnosis: report every workspaceFiles call a carrier receives. */
+function logWorkspaceProbe(where: string, endpoint: string, detail?: Record<string, unknown>): void {
+  if (!endpoint.startsWith('workspaceFiles')) return
+  console.warn('[dsh-remote] workspace probe', { where, endpoint, ...(detail ?? {}) })
+}
+
+/** Shapes only: what the value's byte field looks like after a carrier answered. */
+function describeProbeValue(result: unknown): Record<string, unknown> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return { resultType: typeof result }
+  const value = (result as { value?: unknown }).value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { resultType: 'envelope', valueType: typeof value }
+  const data = (value as { data?: unknown }).data
+  return {
+    ok: (result as { ok?: unknown }).ok === true,
+    dataType: typeof data,
+    dataIsBytes: data instanceof Uint8Array,
+    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+  }
 }
