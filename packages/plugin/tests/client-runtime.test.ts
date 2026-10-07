@@ -6,6 +6,7 @@ import { generateKeyPair } from '@dsh-remote/crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
+  livenessProbeLost,
   probeRemoteHostFeatures,
   remoteHostFeatures,
   type HostAuthorizationControl,
@@ -129,6 +130,59 @@ describe('ClientModeRuntime Host account control', () => {
     expect(runtime.status().restoringTargetDeviceId).toBeUndefined()
     await expect(store.load()).resolves.toMatchObject({ mode: 'local' })
     // Let the superseded loop observe the new run id and exit instead of leaking a timer.
+    await new Promise(resolve => { setTimeout(resolve, 1_100) })
+  })
+
+  it('treats only a missing answer as loss, never a refusal', () => {
+    // No answer: the core's own timeout/close codes, and raw transport errors with no code.
+    expect(livenessProbeLost({ code: 'RPC_TIMEOUT' })).toBe(true)
+    expect(livenessProbeLost({ code: 'CLIENT_CLOSED' })).toBe(true)
+    expect(livenessProbeLost({ code: 'TRANSPORT_CLOSED' })).toBe(true)
+    expect(livenessProbeLost(new Error('relay control socket is not open'))).toBe(true)
+    expect(livenessProbeLost('not an error')).toBe(true)
+    // An answer from the peer, however unwelcome, proves it is there.
+    expect(livenessProbeLost({ code: 'METHOD_NOT_FOUND' })).toBe(false)
+    expect(livenessProbeLost({ code: 'FEATURE_NOT_SUPPORTED' })).toBe(false)
+  })
+
+  it('falls back to local only after two unanswered liveness checks', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-liveness-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+
+    const rpc = vi.fn()
+    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client,
+      target: { deviceId: 'host-1', name: 'Host' },
+      features: remoteHostFeatures(),
+    }
+
+    // The peer's own error means it answered, so the session stays up.
+    rpc.mockRejectedValueOnce(Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().connected).toBe(true)
+
+    // One unanswered check is tolerated: a single slow round trip is not a dead link.
+    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().connected).toBe(true)
+
+    // The second one ends the session and hands it to the reconnect loop.
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status()).toMatchObject({ connected: false, fellBackToLocal: true })
+    expect(client.close).toHaveBeenCalled()
+
+    // Supersede the retry loop this started instead of leaking its timer.
+    await runtime.setMode('local')
     await new Promise(resolve => { setTimeout(resolve, 1_100) })
   })
 

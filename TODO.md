@@ -239,10 +239,14 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   切回本地会写回 `local` 记录并顶掉重试循环；认证类失败（`AUTH_REQUIRED`/`ACCOUNT_AUTH_REQUIRED`/
   `AUTH_INVALID`/`TOKEN_EXPIRED`/`DEVICE_*`/`MEMBERSHIP_REQUIRED`）**立即停止重试**，因为等待无法修复它。
   **Android 真机验收待做**（进程被回收后重开，确认自动连回与侧栏状态）。
-- [ ] **半开连接（本端收不到 close）仍然没有检测手段**：服务端心跳 25s、75s 无 pong 会 drop link 并通知 Host，
-  因此 Relay 链路下通常由服务端先发现；但若本端 socket 静默失效且 close 事件丢失，插件会一直保持"已连接"状态。
-  2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），被判定为**无效修复**并已整体回退。
-  重做之前先确认服务端超时是否已经足够，避免再加一层没有实际收益的机制。
+- [x] **半开连接已由客户端周期存活检查覆盖**（2026-10-07，按用户决定重做）：`ClientModeRuntime` 在会话
+  建立后每 **30 秒**发一次 `harness.transport.describe`（`client.rpc` 的逐调用超时 10 秒），**只有"没有应答"才算断**
+  ——对端返回自己的错误码（如 `METHOD_NOT_FOUND`）同样证明它在线；连续 **2 次**无应答即走与 socket 关闭完全相同的
+  收尾（`handleRemoteTransportLost`：回退本地 + 进入既有退避重连）。定时器 `unref()`、只在连接建立后创建、
+  切回本地/丢链/关闭时清除，因此不持有事件循环，也不会拖住测试。**回前台立即触发**：浏览器半在
+  `visibilitychange`（仅 visible）与 `focus` 时调用控制端点 `client.connection.verify`，不等下一个周期。
+  与 2026-10-07 早先被回退那版的区别：不藏在 `status` 读取里（独立端点）、判定区分"对端拒绝"与"没有应答"、
+  定时器不持有事件循环。
 - [ ] **断连期间会话列表出现"本地+远程"混合**：远程目标仍被选中时，对端无法应答的**数据类**端点会落到本地兜底，
   于是"未分组"里混入本地会话、点进去报"找不到会话"。建议把本地兜底收窄到 **shell/引导** 端点（`settings/describe`、
   插件注册表、账号读取），会话/工作区数据端点不回退而是显式失败。

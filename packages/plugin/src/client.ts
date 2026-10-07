@@ -1787,6 +1787,25 @@ window.__ModuleLoader__.load({
         void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
       }, [])
 
+      /**
+       * A suspended client stops answering and can miss the transport close entirely, so ask for an
+       * immediate check as soon as the page is visible again instead of waiting for the next
+       * interval. Only the visible transition matters; leaving the page needs no work.
+       */
+      React.useEffect(() => {
+        const verify = (): void => {
+          if (document.visibilityState !== 'visible') return
+          void props.control<RemoteStatus>('client.connection.verify').then(setStatus).catch(() => undefined)
+        }
+        document.addEventListener('visibilitychange', verify)
+        // Some containers report focus without a visibility transition, so both are watched.
+        window.addEventListener('focus', verify)
+        return () => {
+          document.removeEventListener('visibilitychange', verify)
+          window.removeEventListener('focus', verify)
+        }
+      }, [])
+
       React.useEffect(() => {
         if (status?.serverUrl !== undefined && loginServerUrl === DEFAULT_REMOTE_SERVER_URL) {
           setLoginServerUrl(status.serverUrl)

@@ -20451,6 +20451,15 @@ var CREDENTIAL_FAILURE_CODES = /* @__PURE__ */ new Set([
   "DEVICE_REVOKED",
   "MEMBERSHIP_REQUIRED"
 ]);
+var LIVENESS_INTERVAL_MS = 3e4;
+var LIVENESS_TIMEOUT_MS = 1e4;
+var LIVENESS_TOLERATED_FAILURES = 2;
+var NO_ANSWER_CODES = /* @__PURE__ */ new Set(["RPC_TIMEOUT", "CLIENT_CLOSED", "TRANSPORT_CLOSED", "RPC_ABORTED"]);
+function livenessProbeLost(error) {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : void 0;
+  if (typeof code !== "string") return true;
+  return NO_ANSWER_CODES.has(code);
+}
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
     this.config = config;
@@ -20497,6 +20506,10 @@ var ClientModeRuntime = class {
    * user is still looking at the remote workspace they left.
    */
   restoringTargetDeviceId;
+  /** Periodic proof of life for the live remote session; absent while nothing is connected. */
+  livenessTimer;
+  livenessInFlight = false;
+  livenessFailures = 0;
   closed = false;
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
@@ -20708,6 +20721,7 @@ var ClientModeRuntime = class {
       await previous2?.client.close().catch(() => void 0);
       this.fellBackToLocal = false;
       this.restoringTargetDeviceId = void 0;
+      this.stopLivenessWatch();
       this.remoteReconnectRun += 1;
       await this.rememberTarget({ mode: "local" });
       this.logger.info("Harness target switched", { mode: "local" });
@@ -20738,6 +20752,90 @@ var ClientModeRuntime = class {
     await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
     return this.status();
+  }
+  /**
+   * Prove the live remote link still answers, and decide the session on the result.
+   *
+   * Only a missing answer counts as loss: the peer's own error (a refusal, an unknown method) came
+   * back over the same link and therefore proves it is there.
+   * @param client - the client bound to the session being checked.
+   * @param targetDeviceId - the Host the session is bound to.
+   */
+  async verifyRemoteLiveness(client, targetDeviceId) {
+    if (this.livenessInFlight) return;
+    if (this.connected?.client !== client) return;
+    this.livenessInFlight = true;
+    try {
+      await client.rpc("harness.transport.describe", {}, void 0, { timeoutMs: LIVENESS_TIMEOUT_MS });
+      this.livenessFailures = 0;
+    } catch (error) {
+      if (!livenessProbeLost(error)) {
+        this.livenessFailures = 0;
+        return;
+      }
+      this.livenessFailures += 1;
+      this.logger.warn("remote Harness liveness check found no answer", {
+        targetDeviceId: shortId(targetDeviceId),
+        attempt: this.livenessFailures
+      });
+      if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
+        this.handleRemoteTransportLost(client, targetDeviceId);
+      }
+    } finally {
+      this.livenessInFlight = false;
+    }
+  }
+  /**
+   * Check the live session now, outside the cadence.
+   *
+   * Used when the page becomes visible again, which is when a suspended client is most likely to be
+   * holding a link that already ended.
+   * @returns the status after the check.
+   */
+  async verifyRemoteConnection() {
+    const connected = this.connected;
+    if (connected !== void 0) await this.verifyRemoteLiveness(connected.client, connected.target.deviceId);
+    return this.status();
+  }
+  startLivenessWatch(client, targetDeviceId) {
+    if (this.livenessTimer !== void 0) return;
+    this.livenessFailures = 0;
+    const timer = setInterval(() => {
+      void this.verifyRemoteLiveness(client, targetDeviceId);
+    }, LIVENESS_INTERVAL_MS);
+    timer.unref?.();
+    this.livenessTimer = timer;
+  }
+  stopLivenessWatch() {
+    if (this.livenessTimer !== void 0) clearInterval(this.livenessTimer);
+    this.livenessTimer = void 0;
+    this.livenessFailures = 0;
+    this.livenessInFlight = false;
+  }
+  /**
+   * Shared cleanup for a session whose transport is gone.
+   *
+   * A close event and a failed liveness check must leave exactly the same state behind, so both
+   * paths run this.
+   * @param client - the client that was connected.
+   * @param targetDeviceId - the Host it was bound to.
+   */
+  handleRemoteTransportLost(client, targetDeviceId) {
+    if (this.connected?.client !== client) return;
+    this.stopLivenessWatch();
+    void this.closePreview();
+    this.connected = void 0;
+    this.connectionProgress = void 0;
+    this.pendingWorkspaceSelection = void 0;
+    void this.closeCodexVirtual();
+    this.proxySwitch?.selectLocal();
+    this.gatewaySwitch.selectLocal();
+    this.fellBackToLocal = true;
+    void client.close().catch(() => void 0);
+    this.logger.warn("remote Harness transport lost; reconnecting", {
+      targetDeviceId: shortId(targetDeviceId)
+    });
+    void this.reconnectRemoteSession(targetDeviceId);
   }
   /**
    * Re-establish a remote session whose transport closed.
@@ -20958,6 +21056,7 @@ var ClientModeRuntime = class {
     await this.closePreview();
     if (this.closed) return;
     this.closed = true;
+    this.stopLivenessWatch();
     this.proxySwitch?.selectLocal();
     await this.closePreview();
     this.gatewaySwitch.selectLocal();
@@ -21261,21 +21360,9 @@ var ClientModeRuntime = class {
         connectedPreference === void 0 ? void 0 : [connectedPreference]
       );
       connectedClient.onClose(() => {
-        if (this.connected?.client !== connectedClient) return;
-        void this.closePreview();
-        this.connected = void 0;
-        this.connectionProgress = void 0;
-        this.pendingWorkspaceSelection = void 0;
-        void this.closeCodexVirtual();
-        this.proxySwitch?.selectLocal();
-        this.gatewaySwitch.selectLocal();
-        this.fellBackToLocal = true;
-        void connectedClient.close().catch(() => void 0);
-        this.logger.warn("remote Harness transport closed; reconnecting", {
-          targetDeviceId: shortId(target2.deviceId)
-        });
-        void this.reconnectRemoteSession(target2.deviceId);
+        this.handleRemoteTransportLost(connectedClient, target2.deviceId);
       });
+      this.startLivenessWatch(connectedClient, target2.deviceId);
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
       this.logger.info("remote Harness transport ready", {
         targetDeviceId: shortId(target2.deviceId),
@@ -21346,6 +21433,7 @@ var ClientModeRuntime = class {
   async handleControl(endpoint, payload, signal) {
     try {
       if (endpoint === "status") return ok2(await this.detailedStatus());
+      if (endpoint === "client.connection.verify") return ok2(await this.verifyRemoteConnection());
       if (endpoint === "devices") return ok2(await this.devices());
       if (endpoint === "client.account.login") {
         const value = record4(payload);
