@@ -205,6 +205,46 @@ describe('ClientModeRuntime Host account control', () => {
     await new Promise(resolve => { setTimeout(resolve, 1_100) })
   })
 
+  it('rebuilds in place when a transport closes, and falls back only after the next miss', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-close-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+
+    const rpc = vi.fn()
+    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client,
+      target: { deviceId: 'host-1', name: 'Host' },
+      features: remoteHostFeatures(),
+    }
+
+    // A dropped transport is not automatically the end of the session: the peer may be restarting or
+    // may have paused itself on purpose, so the session is kept while the link is rebuilt in place.
+    // The close itself counts as the first miss, which is why the next one decides.
+    ;(runtime as unknown as { handleRemoteTransportLost(client: unknown, targetDeviceId: string): void })
+      .handleRemoteTransportLost(client, 'host-1')
+    expect(runtime.status()).toMatchObject({
+      connected: true,
+      reconnecting: { targetDeviceId: 'host-1', targetName: 'Host', phase: 'fast' },
+    })
+
+    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status()).toMatchObject({ connected: false, fellBackToLocal: true })
+
+    // Supersede the retry loop this started instead of leaking its timer.
+    await runtime.setMode('local')
+    await new Promise(resolve => { setTimeout(resolve, 1_100) })
+  })
+
   it('forwards only supported QR login providers to the Server API', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-qr-provider-'))
     directories.push(directory)

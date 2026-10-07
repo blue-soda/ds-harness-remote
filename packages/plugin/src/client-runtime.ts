@@ -285,7 +285,7 @@ export class ClientModeRuntime {
    * the local shell. The UI shows all three, so a reconnect is never invisible, and the retry loop
    * stops as soon as the user asks for local.
    */
-  private reconnecting?: { targetDeviceId: string; phase: 'restore' | 'fast' | 'fallback' }
+  private reconnecting?: { targetDeviceId: string; targetName?: string; phase: 'restore' | 'fast' | 'fallback' }
   /** Periodic proof of life for the live remote session; absent while nothing is connected. */
   private livenessTimer?: ReturnType<typeof setInterval>
   private livenessInFlight = false
@@ -628,7 +628,7 @@ export class ClientModeRuntime {
         attempt: this.livenessFailures,
       })
       if (this.livenessFailures === 1) {
-        await this.enterFastReconnect(connected.target.deviceId)
+        await this.enterFastReconnect(connected.target.deviceId, connected.target.name)
         return
       }
       if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
@@ -646,9 +646,9 @@ export class ClientModeRuntime {
    * link that recovers does not cost the user the view they were working in.
    * @param targetDeviceId - the Host to rebuild the link to.
    */
-  private async enterFastReconnect(targetDeviceId: string): Promise<void> {
+  private async enterFastReconnect(targetDeviceId: string, targetName?: string): Promise<void> {
     if (this.reconnecting !== undefined) return
-    this.reconnecting = { targetDeviceId, phase: 'fast' }
+    this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fast' }
     this.logger.warn('remote Harness link stopped answering; reconnecting in place', {
       targetDeviceId: shortId(targetDeviceId),
     })
@@ -739,6 +739,16 @@ export class ClientModeRuntime {
    */
   private handleRemoteTransportLost(client: RemoteClientCore, targetDeviceId: string): void {
     if (this.connected?.client !== client) return
+    const targetName = this.connected.target.name
+    // A closed transport is not automatically the end of the session: the peer may be restarting, or
+    // it may have paused remote control on purpose. Rebuild in place first and let the next
+    // unanswered check decide, so a link that comes straight back does not cost the user their view.
+    if (this.reconnecting === undefined) {
+      // The close is the first miss; the next unanswered check is what gives the session up.
+      this.livenessFailures = LIVENESS_TOLERATED_FAILURES - 1
+      void this.enterFastReconnect(targetDeviceId, targetName)
+      return
+    }
     this.stopLivenessWatch()
     void this.closePreview()
     this.connected = undefined
@@ -748,7 +758,7 @@ export class ClientModeRuntime {
     this.proxySwitch?.selectLocal()
     this.gatewaySwitch.selectLocal()
     this.fellBackToLocal = true
-    this.reconnecting = { targetDeviceId, phase: 'fallback' }
+    this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fallback' }
     void client.close().catch(() => undefined)
     this.logger.warn('remote Harness transport lost; reconnecting', {
       targetDeviceId: shortId(targetDeviceId),

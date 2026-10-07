@@ -20854,7 +20854,7 @@ var ClientModeRuntime = class {
         attempt: this.livenessFailures
       });
       if (this.livenessFailures === 1) {
-        await this.enterFastReconnect(connected.target.deviceId);
+        await this.enterFastReconnect(connected.target.deviceId, connected.target.name);
         return;
       }
       if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
@@ -20871,9 +20871,9 @@ var ClientModeRuntime = class {
    * link that recovers does not cost the user the view they were working in.
    * @param targetDeviceId - the Host to rebuild the link to.
    */
-  async enterFastReconnect(targetDeviceId) {
+  async enterFastReconnect(targetDeviceId, targetName) {
     if (this.reconnecting !== void 0) return;
-    this.reconnecting = { targetDeviceId, phase: "fast" };
+    this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fast" };
     this.logger.warn("remote Harness link stopped answering; reconnecting in place", {
       targetDeviceId: shortId(targetDeviceId)
     });
@@ -20956,6 +20956,12 @@ var ClientModeRuntime = class {
    */
   handleRemoteTransportLost(client, targetDeviceId) {
     if (this.connected?.client !== client) return;
+    const targetName = this.connected.target.name;
+    if (this.reconnecting === void 0) {
+      this.livenessFailures = LIVENESS_TOLERATED_FAILURES - 1;
+      void this.enterFastReconnect(targetDeviceId, targetName);
+      return;
+    }
     this.stopLivenessWatch();
     void this.closePreview();
     this.connected = void 0;
@@ -20965,7 +20971,7 @@ var ClientModeRuntime = class {
     this.proxySwitch?.selectLocal();
     this.gatewaySwitch.selectLocal();
     this.fellBackToLocal = true;
-    this.reconnecting = { targetDeviceId, phase: "fallback" };
+    this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fallback" };
     void client.close().catch(() => void 0);
     this.logger.warn("remote Harness transport lost; reconnecting", {
       targetDeviceId: shortId(targetDeviceId)
