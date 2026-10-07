@@ -289,13 +289,14 @@ describe('TypertGatewaySwitch carrier chain', () => {
 
 describe('TypertGatewaySwitch forwarded receiver', () => {
   it('calls the carrier it forwards to with its own receiver', async () => {
-    const shell = {
+    // The dispatcher belongs to the runtime object, exactly as the real local one does.
+    const gateway = {
       marker: 'local-shell',
+      invoke: vi.fn(async () => 'local'),
       async dispatchRpc(): Promise<{ ok: true; value: string }> {
-        return { ok: true, value: this.marker }
+        return { ok: true, value: (this as unknown as { marker: string }).marker }
       },
-    }
-    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: shell.dispatchRpc } as unknown as TypertGatewayLike
+    } as unknown as TypertGatewayLike
     const target = new TypertGatewaySwitch(gateway)
     target.install()
     target.selectRemote(async () => 'command', { execute: true, list: true })
