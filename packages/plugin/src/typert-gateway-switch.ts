@@ -452,6 +452,13 @@ function normalizeByteResult(endpoint: string, result: unknown): unknown {
   const data = (value as { data?: unknown }).data
   if (data instanceof Uint8Array) return result
   const bytes = decodeByteValue(data)
-  if (bytes === undefined) return result
+  if (bytes === undefined) {
+    // Shapes only; never the content itself. Without this the failure is invisible here.
+    console.warn('[dsh-remote] workspaceFiles/readBytes arrived without usable bytes', {
+      dataType: typeof data,
+      dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    })
+    return result
+  }
   return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
 }

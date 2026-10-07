@@ -7,7 +7,7 @@ import type {
   RpcResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RemoteClientError, type RemoteClientCore } from '@dsh-remote/client-core'
-import { hydrateRpcAttachments } from './rpc-binary-attachments.js'
+import { decodeByteValue, hydrateRpcAttachments } from './rpc-binary-attachments.js'
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
@@ -137,7 +137,7 @@ export class RemoteHarnessApiProxy {
     // The Host sends bytes beside the result (see collectRpcAttachments); DSH's own connection layer
     // would copy them back before validation, so restore them here.
     const hydrated = { ...response, result: hydrateRpcAttachments(response.result) } as NativeResponse
-    const normalized = normalizeLegacyResponse(method, hydrated)
+    const normalized = normalizeLegacyResponse(method, normalizeByteResult(method, hydrated))
     return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized)
   }
 
@@ -425,4 +425,35 @@ function base64ToBytes(value: string): Uint8Array {
     throw new Error('The remote Host returned a non-canonical Harness API transfer chunk.')
   }
   return bytes
+}
+
+/**
+ * \`workspaceFiles.readBytes\` must reach the native UI as a \`Uint8Array\`.
+ *
+ * The CodeX workspace projection answers it with base64 for its own consumers, and the generated schema
+ * on the native side rejects that with \`expected "Uint8Array", path: ["data"]\`. This carrier uses the
+ * dotted method name, so the check is separate from the Typert one. A shape warning (type and key count
+ * only) makes a value that still cannot be decoded identifiable instead of invisible.
+ *
+ * @param method - ApiProxy method name.
+ * @param response - the peer's response.
+ * @returns the response with byte-valued fields restored.
+ */
+function normalizeByteResult(method: string, response: NativeResponse): NativeResponse {
+  if (method !== 'workspaceFiles.readBytes') return response
+  const result = response.result
+  if (result === undefined || result.ok !== true) return response
+  const value = result.value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return response
+  const data = (value as { data?: unknown }).data
+  if (data instanceof Uint8Array) return response
+  const bytes = decodeByteValue(data)
+  if (bytes === undefined) {
+    console.warn('[dsh-remote] workspaceFiles/readBytes arrived without usable bytes', {
+      dataType: typeof data,
+      dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
+    })
+    return response
+  }
+  return { ...response, result: { ...result, value: { ...(value as Record<string, unknown>), data: bytes } } }
 }
