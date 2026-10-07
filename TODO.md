@@ -226,6 +226,13 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 ## 远程连接：断联检测与列表兜底
 
+- [ ] **刷新 Desktop 副本前必须确认 dist 是"打包产物"（2026-10-08 实测事故）**：`pnpm build` 的某个中间状态会
+  把 `tsconfig.emit.json` 的**源码直出**写进 `packages/plugin/dist/index.js`（约 20KB、带着 `import { … , }` 类型导入），
+  而正确的 esbuild 产物约 **1071KB**。我用 `file:` 依赖把当时那份 20KB 文件拷进 desktop profile 后，Desktop 重启即
+  **插件加载崩溃**（Host 掉线 → 客户端走灾难回退 → 重连拿不到 Host，自部署 Server 还把它答成 `INTERNAL_ERROR` 而不是
+  "对端离线"）。规则：**先比对大小**（`Get-Item packages/plugin/dist/index.js` 应 ≈1MB），再执行
+  `pnpm remove @blue-soda/dsh-remote && pnpm add -w file:…`；构建脚本里"emit 覆盖 bundle"的顺序问题应另行修掉。
+
 - [ ] **半开连接（本端收不到 close）目前没有检测手段**：服务端心跳 25s、75s 无 pong 会 drop link 并通知 Host，
   因此 Relay 链路下通常由服务端先发现；但若本端 socket 静默失效且 close 事件丢失，插件会一直保持"已连接"状态。
   2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），被判定为**
