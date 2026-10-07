@@ -1785,6 +1785,24 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
+        // Nothing in this plugin polls status on a timer: the Host pushes its own status only
+        // when it changes, so a client that returns from the background would otherwise never
+        // ask again. That matters because the status read is what runs the Host-side liveness
+        // probe - a transport the peer dropped while the client was suspended reports no close
+        // event, and this is how the runtime finds out and reconnects.
+        const refreshOnResume = (): void => {
+          if (document.visibilityState === 'hidden') return
+          void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
+        }
+        document.addEventListener('visibilitychange', refreshOnResume)
+        window.addEventListener('focus', refreshOnResume)
+        return () => {
+          document.removeEventListener('visibilitychange', refreshOnResume)
+          window.removeEventListener('focus', refreshOnResume)
+        }
+      }, [])
+
+      React.useEffect(() => {
         if (status?.serverUrl !== undefined && loginServerUrl === DEFAULT_REMOTE_SERVER_URL) {
           setLoginServerUrl(status.serverUrl)
         }

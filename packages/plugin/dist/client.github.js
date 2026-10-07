@@ -3018,6 +3018,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
           props.control("status").then(setStatus).catch(() => {
           });
         }, []), React.useEffect(() => {
+          let refreshOnResume = () => {
+            document.visibilityState !== "hidden" && props.control("status").then(setStatus).catch(() => {
+            });
+          };
+          return document.addEventListener("visibilitychange", refreshOnResume), window.addEventListener("focus", refreshOnResume), () => {
+            document.removeEventListener("visibilitychange", refreshOnResume), window.removeEventListener("focus", refreshOnResume);
+          };
+        }, []), React.useEffect(() => {
           status?.serverUrl !== void 0 && loginServerUrl === DEFAULT_REMOTE_SERVER_URL && setLoginServerUrl(status.serverUrl);
         }, [status?.serverUrl]), React.useEffect(() => {
           let remoteActive = status?.mode === "remote";
