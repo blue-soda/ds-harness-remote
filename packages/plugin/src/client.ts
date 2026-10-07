@@ -3222,6 +3222,9 @@ window.__ModuleLoader__.load({
           wasReconnecting = current.reconnecting !== undefined
           return
         }
+        // Read the flag before updating it: a snapshot that carries the recovery also carries the remote
+        // mode, and testing the updated flag would make the recovery reload unreachable.
+        const sawRemoteViewBefore = wasRemoteView
         if (current.mode === 'remote') wasRemoteView = true
         if (current.fellBackToLocal === true) {
           if (!wasFallenBack) {
@@ -3250,7 +3253,7 @@ window.__ModuleLoader__.load({
         // store cannot be re-read from here, so the remote Workspace it should show after recovery is not
         // in it - which is why the sessions come back ungrouped. Landing on the remote carriers again is
         // the only way to a Workspace store that has them.
-        if (!wasRemoteView && Date.now() - lastRecoveryReloadAt > 5_000) {
+        if (!sawRemoteViewBefore && Date.now() - lastRecoveryReloadAt > 5_000) {
           lastRecoveryReloadAt = Date.now()
           window.location.reload()
         }

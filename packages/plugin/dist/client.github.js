@@ -4166,18 +4166,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
         ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream");
         let firstSnapshot = !0, wasRemoteView = !1, wasFallenBack = !1, wasReconnecting = !1, lastFallbackReloadAt = 0, lastRecoveryReloadAt = 0, unsubscribeReconnectRefresh = statusFeed.subscribe(() => {
           let current = statusFeed.getSnapshot();
-          if (current !== void 0) {
-            if (firstSnapshot) {
-              firstSnapshot = !1, wasRemoteView = current.mode === "remote", wasFallenBack = current.fellBackToLocal === !0, wasReconnecting = current.reconnecting !== void 0;
-              return;
-            }
-            if (current.mode === "remote" && (wasRemoteView = !0), current.fellBackToLocal === !0 ? wasFallenBack || (wasFallenBack = !0, wasRemoteView && Date.now() - lastFallbackReloadAt > 2e4 && (lastFallbackReloadAt = Date.now(), window.location.reload())) : wasFallenBack = !1, current.reconnecting !== void 0) {
-              wasReconnecting = !0;
-              return;
-            }
-            wasReconnecting && (wasReconnecting = !1, current.connected === !0 && (ctx.sessions.refresh().catch(() => {
-            }), !wasRemoteView && Date.now() - lastRecoveryReloadAt > 5e3 && (lastRecoveryReloadAt = Date.now(), window.location.reload())));
+          if (current === void 0) return;
+          if (firstSnapshot) {
+            firstSnapshot = !1, wasRemoteView = current.mode === "remote", wasFallenBack = current.fellBackToLocal === !0, wasReconnecting = current.reconnecting !== void 0;
+            return;
           }
+          let sawRemoteViewBefore = wasRemoteView;
+          if (current.mode === "remote" && (wasRemoteView = !0), current.fellBackToLocal === !0 ? wasFallenBack || (wasFallenBack = !0, wasRemoteView && Date.now() - lastFallbackReloadAt > 2e4 && (lastFallbackReloadAt = Date.now(), window.location.reload())) : wasFallenBack = !1, current.reconnecting !== void 0) {
+            wasReconnecting = !0;
+            return;
+          }
+          wasReconnecting && (wasReconnecting = !1, current.connected === !0 && (ctx.sessions.refresh().catch(() => {
+          }), !sawRemoteViewBefore && Date.now() - lastRecoveryReloadAt > 5e3 && (lastRecoveryReloadAt = Date.now(), window.location.reload())));
         });
         ctx.effect(
           () => () => unsubscribeReconnectRefresh(),
