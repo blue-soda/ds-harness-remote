@@ -287,6 +287,29 @@ describe('TypertGatewaySwitch carrier chain', () => {
   })
 })
 
+describe('TypertGatewaySwitch forwarded receiver', () => {
+  it('calls the carrier it forwards to with its own receiver', async () => {
+    const shell = {
+      marker: 'local-shell',
+      async dispatchRpc(): Promise<{ ok: true; value: string }> {
+        return { ok: true, value: this.marker }
+      },
+    }
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: shell.dispatchRpc } as unknown as TypertGatewayLike
+    const target = new TypertGatewaySwitch(gateway)
+    target.install()
+    target.selectRemote(async () => 'command', { execute: true, list: true })
+    target.setRemoteAvailability(() => false)
+
+    // Unbound, the forwarded call lost its receiver and the real dispatcher threw while reading its own
+    // fields - every local call failed with a missing invokeRpc.
+    const result = await (
+      gateway as unknown as { dispatchRpc(endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> }
+    ).dispatchRpc('session/list', {}, new AbortController().signal)
+    expect(result).toMatchObject({ value: 'local-shell' })
+  })
+})
+
 describe('TypertGatewaySwitch byte results', () => {
   it('restores bytes the CodeX projection answers as base64', async () => {
     const localDispatch = vi.fn(async () => ({ ok: true as const, value: 'local' }))

@@ -19316,8 +19316,8 @@ var TypertGatewaySwitch = class {
   install() {
     if (this.installed) return;
     this.runtime.invoke = (request) => this.selectInvoke(request);
-    const previousStream = this.runtime.stream;
-    const previousDispatch = this.runtime.dispatchRpc;
+    const previousStream = this.runtime.stream?.bind(this.runtime);
+    const previousDispatch = this.runtime.dispatchRpc?.bind(this.runtime);
     const previousOpen = this.runtime.openWireStream;
     const forwards = (endpoint) => this.remoteTarget === void 0 && this.remoteAvailability() && !isLocalOnlyEndpoint(endpoint);
     if (previousStream !== void 0) {

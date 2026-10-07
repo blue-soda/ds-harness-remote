@@ -138,8 +138,11 @@ export class TypertGatewaySwitch {
     // space - the command namespace in an rc.2 window, where the ApiProxy switch owns the data plane - must
     // pass every other endpoint down to them. Answering one here sends it to the local shell instead of the
     // peer: that is how workspaceFiles/readBytes came back in a shape the native schema rejects.
-    const previousStream = this.runtime.stream
-    const previousDispatch = this.runtime.dispatchRpc
+    // Keep the receiver: the local dispatcher is an object method that reads its own fields, and calling
+    // it unbound failed with a missing invokeRpc on an undefined receiver - which broke every local call
+    // whenever this switch forwarded instead of answering itself.
+    const previousStream = this.runtime.stream?.bind(this.runtime)
+    const previousDispatch = this.runtime.dispatchRpc?.bind(this.runtime)
     const previousOpen = this.runtime.openWireStream
     // Forwarding is for a window whose data plane belongs to another carrier while the peer is up. With
     // no reachable peer the shell must work locally - forwarding there reached a carrier that cannot
