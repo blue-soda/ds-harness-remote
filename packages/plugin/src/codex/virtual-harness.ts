@@ -358,7 +358,6 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   async dispatch(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult> {
-    if (endpoint.startsWith('workspaceFiles')) console.warn('[dsh-remote] workspace probe', { where: 'virtual-harness.dispatch', endpoint })
     try {
       if (isHostWorkspaceEndpoint(endpoint)) {
         if (this.hostCarrier === undefined) return fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)

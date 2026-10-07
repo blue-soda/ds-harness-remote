@@ -122,7 +122,6 @@ export class RemoteHarnessApiProxy {
   }
 
   private async call(method: string, request: NativeRequest, signal?: AbortSignal): Promise<NativeResponse> {
-    if (method.startsWith('workspaceFiles')) console.warn('[dsh-remote] workspace probe', { where: 'apiproxy.call', endpoint: method })
     const params: HarnessApiCallParams = {
       method,
       rpcId: String(request.rpcId),

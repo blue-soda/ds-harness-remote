@@ -257,6 +257,29 @@ function commandList(): Parameters<TypertGatewayLike['invoke']>[0] {
   return { namespace: 'commands', method: 'list', args: { agentId: 's1' } }
 }
 
+describe('TypertGatewaySwitch carrier chain', () => {
+  it('forwards data endpoints to the carrier it was installed in front of when it owns only commands', async () => {
+    const localShell = vi.fn(async () => ({ ok: true as const, value: 'local-shell' }))
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localShell } as unknown as TypertGatewayLike
+    const target = new TypertGatewaySwitch(gateway)
+
+    // The rc.2 window installs the ApiProxy carrier first and then grants this switch the command namespace.
+    const previousCarrier = vi.fn(async () => ({ ok: true as const, value: 'api-proxy' }))
+    ;(gateway as unknown as { dispatchRpc: unknown }).dispatchRpc = previousCarrier
+    target.install()
+    target.selectRemote(async () => 'command', { execute: true, list: true })
+
+    const dispatch = (endpoint: string): Promise<unknown> => (
+      gateway as unknown as { dispatchRpc(endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> }
+    ).dispatchRpc(endpoint, {}, new AbortController().signal)
+
+    // Answering this here reached the local shell and the native schema rejected the result.
+    await expect(dispatch('workspaceFiles/readBytes')).resolves.toMatchObject({ value: 'api-proxy' })
+    expect(previousCarrier).toHaveBeenCalledOnce()
+    expect(localShell).not.toHaveBeenCalled()
+  })
+})
+
 describe('TypertGatewaySwitch byte results', () => {
   it('restores bytes the CodeX projection answers as base64', async () => {
     const localDispatch = vi.fn(async () => ({ ok: true as const, value: 'local' }))

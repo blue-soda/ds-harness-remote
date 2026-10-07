@@ -15003,7 +15003,6 @@ var RemoteHarnessApiProxy = class {
   legacyWelcomeAcknowledged = false;
   settingsDescribeValue;
   async call(method, request, signal) {
-    if (method.startsWith("workspaceFiles")) console.warn("[dsh-remote] workspace probe", { where: "apiproxy.call", endpoint: method });
     const params = {
       method,
       rpcId: String(request.rpcId),
@@ -16223,7 +16222,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     });
   }
   async dispatch(endpoint, payload, signal) {
-    if (endpoint.startsWith("workspaceFiles")) console.warn("[dsh-remote] workspace probe", { where: "virtual-harness.dispatch", endpoint });
     try {
       if (isHostWorkspaceEndpoint(endpoint)) {
         if (this.hostCarrier === void 0) return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
@@ -19309,37 +19307,32 @@ var TypertGatewaySwitch = class {
   install() {
     if (this.installed) return;
     this.runtime.invoke = (request) => this.selectInvoke(request);
-    if (this.originalStream !== void 0) {
-      this.runtime.stream = (request) => !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.withLocalFallback(
+    const previousStream = this.runtime.stream;
+    const previousDispatch = this.runtime.dispatchRpc;
+    const previousOpen = this.runtime.openWireStream;
+    const forwards = (endpoint) => this.remoteTarget === void 0 && !isLocalOnlyEndpoint(endpoint);
+    if (previousStream !== void 0) {
+      this.runtime.stream = (request) => forwards(endpointOf(request)) ? previousStream(request) : !this.routesToRemote(endpointOf(request)) ? this.localStream(request) : this.withLocalFallback(
         endpointOf(request),
         () => this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal),
         () => this.localStream(request)
       );
     }
-    if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => {
-        const routes = this.routesToRemote(endpoint);
-        logWorkspaceProbe("dispatch", endpoint, {
-          routes,
-          hasTarget: this.remoteTarget !== void 0,
-          available: this.remoteAvailability(),
-          localOnly: isLocalOnlyEndpoint(endpoint)
-        });
-        if (!routes) {
-          return Promise.resolve(this.localDispatch(endpoint, payload, signal)).then((result) => (logWorkspaceProbe("local.exit", endpoint, describeProbeValue(result)), result));
-        }
-        return this.withLocalFallback(
-          endpoint,
-          () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
-          () => this.localDispatch(endpoint, payload, signal)
-        ).then((result) => normalizeByteResult3(endpoint, result));
-      };
+    if (previousDispatch !== void 0) {
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint) ? previousDispatch(endpoint, payload, signal) : !this.routesToRemote(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.withLocalFallback(
+        endpoint,
+        () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
+        () => this.localDispatch(endpoint, payload, signal)
+      ).then((result) => normalizeByteResult3(endpoint, result));
     }
-    if (this.originalOpen !== void 0) {
-      const open = this.originalOpen;
+    if (previousOpen !== void 0) {
+      const open = previousOpen;
       const rc1 = usesRc1Arity(open);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
+        if (forwards(endpoint)) {
+          return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+        }
         if (!this.routesToRemote(endpoint)) {
           return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
@@ -19408,7 +19401,6 @@ var TypertGatewaySwitch = class {
     return this.remoteTarget !== void 0 && !isLocalOnlyEndpoint(endpoint) && this.remoteAvailability();
   }
   selectInvoke(request) {
-    logWorkspaceProbe("invoke", endpointOf(request));
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
     if (this.remoteTarget !== void 0 && this.remoteAvailability()) {
       return this.remoteTarget.invoke(request).then((result) => normalizeByteResult3(endpointOf(request), result)).catch((error) => {
@@ -19558,22 +19550,6 @@ function normalizeByteResult3(endpoint, result) {
   });
   if (bytes === void 0) return result;
   return { ...result, value: { ...value, data: bytes } };
-}
-function logWorkspaceProbe(where, endpoint, detail) {
-  if (!endpoint.startsWith("workspaceFiles")) return;
-  console.warn("[dsh-remote] workspace probe", { where, endpoint, ...detail ?? {} });
-}
-function describeProbeValue(result) {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) return { resultType: typeof result };
-  const value = result.value;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return { resultType: "envelope", valueType: typeof value };
-  const data2 = value.data;
-  return {
-    ok: result.ok === true,
-    dataType: typeof data2,
-    dataIsBytes: data2 instanceof Uint8Array,
-    dataKeys: typeof data2 === "object" && data2 !== null ? Object.keys(data2).length : 0
-  };
 }
 
 // src/werift-rtc.ts

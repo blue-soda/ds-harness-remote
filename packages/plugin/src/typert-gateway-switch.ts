@@ -134,40 +134,46 @@ export class TypertGatewaySwitch {
   install(): void {
     if (this.installed) return
     this.runtime.invoke = request => this.selectInvoke(request)
-    if (this.originalStream !== undefined) {
-      this.runtime.stream = request => !this.routesToRemote(endpointOf(request))
-        ? this.localStream!(request)
-        : this.withLocalFallback(
-          endpointOf(request),
-          () => this.remoteTarget!.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal),
-          () => this.localStream!(request),
-        )
+    // The carriers this switch was installed in front of. A target that owns only part of the endpoint
+    // space - the command namespace in an rc.2 window, where the ApiProxy switch owns the data plane - must
+    // pass every other endpoint down to them. Answering one here sends it to the local shell instead of the
+    // peer: that is how workspaceFiles/readBytes came back in a shape the native schema rejects.
+    const previousStream = this.runtime.stream
+    const previousDispatch = this.runtime.dispatchRpc
+    const previousOpen = this.runtime.openWireStream
+    const forwards = (endpoint: string): boolean => this.remoteTarget === undefined && !isLocalOnlyEndpoint(endpoint)
+    if (previousStream !== undefined) {
+      this.runtime.stream = request => forwards(endpointOf(request))
+        ? previousStream(request)
+        : !this.routesToRemote(endpointOf(request))
+          ? this.localStream!(request)
+          : this.withLocalFallback(
+            endpointOf(request),
+            () => this.remoteTarget!.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal),
+            () => this.localStream!(request),
+          )
     }
-    if (this.originalDispatch !== undefined) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => {
-        const routes = this.routesToRemote(endpoint)
-        logWorkspaceProbe('dispatch', endpoint, {
-          routes,
-          hasTarget: this.remoteTarget !== undefined,
-          available: this.remoteAvailability(),
-          localOnly: isLocalOnlyEndpoint(endpoint),
-        })
-        if (!routes) {
-          return Promise.resolve(this.localDispatch!(endpoint, payload, signal))
-            .then(result => (logWorkspaceProbe('local.exit', endpoint, describeProbeValue(result)), result))
-        }
-        return this.withLocalFallback(
-          endpoint,
-          () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
-          () => this.localDispatch!(endpoint, payload, signal),
-        ).then(result => normalizeByteResult(endpoint, result) as typeof result)
-      }
+    if (previousDispatch !== undefined) {
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint)
+        ? previousDispatch(endpoint, payload, signal)
+        : !this.routesToRemote(endpoint)
+          ? this.localDispatch!(endpoint, payload, signal)
+          : this.withLocalFallback(
+            endpoint,
+            () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
+            () => this.localDispatch!(endpoint, payload, signal),
+          ).then(result => normalizeByteResult(endpoint, result) as typeof result)
     }
-    if (this.originalOpen !== undefined) {
-      const open = this.originalOpen
+    if (previousOpen !== undefined) {
+      const open = previousOpen
       const rc1 = usesRc1Arity(open)
       this.runtime.openWireStream = (...callArgs: unknown[]) => {
         const endpoint = callArgs[0] as string
+        if (forwards(endpoint)) {
+          return rc1
+            ? Reflect.apply(open, this.runtime, callArgs) as Promise<AsyncIterable<unknown>>
+            : (open as CarrierOpen).call(this.runtime, endpoint, callArgs[1], callArgs[2] as AbortSignal)
+        }
         if (!this.routesToRemote(endpoint)) {
           return rc1
             ? Reflect.apply(open, this.runtime, callArgs) as Promise<AsyncIterable<unknown>>
@@ -249,7 +255,6 @@ export class TypertGatewaySwitch {
   }
 
   private selectInvoke(request: TypertGatewayRequest): Promise<unknown> {
-    logWorkspaceProbe('invoke', endpointOf(request))
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request)
     if (this.remoteTarget !== undefined && this.remoteAvailability()) {
       // A remote-mode boot still issues RPCs only the local shell can answer: the
@@ -476,22 +481,4 @@ function normalizeByteResult(endpoint: string, result: unknown): unknown {
   return { ...(result as Record<string, unknown>), value: { ...(value as Record<string, unknown>), data: bytes } }
 }
 
-/** Temporary diagnosis: report every workspaceFiles call a carrier receives. */
-function logWorkspaceProbe(where: string, endpoint: string, detail?: Record<string, unknown>): void {
-  if (!endpoint.startsWith('workspaceFiles')) return
-  console.warn('[dsh-remote] workspace probe', { where, endpoint, ...(detail ?? {}) })
-}
 
-/** Shapes only: what the value's byte field looks like after a carrier answered. */
-function describeProbeValue(result: unknown): Record<string, unknown> {
-  if (typeof result !== 'object' || result === null || Array.isArray(result)) return { resultType: typeof result }
-  const value = (result as { value?: unknown }).value
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { resultType: 'envelope', valueType: typeof value }
-  const data = (value as { data?: unknown }).data
-  return {
-    ok: (result as { ok?: unknown }).ok === true,
-    dataType: typeof data,
-    dataIsBytes: data instanceof Uint8Array,
-    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-  }
-}
