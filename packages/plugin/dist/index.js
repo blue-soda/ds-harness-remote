@@ -16206,7 +16206,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     try {
       if (isHostWorkspaceEndpoint(endpoint)) {
         if (this.hostCarrier === void 0) return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
-        return await this.hostCarrier.dispatch(endpoint, payload, signal);
+        return normalizeByteResult(endpoint, await this.hostCarrier.dispatch(endpoint, payload, signal));
       }
       const args = carrierArgs(payload);
       switch (endpoint) {
@@ -18445,6 +18445,22 @@ var AsyncValueQueue2 = class {
     }
   }
 };
+function normalizeByteResult(endpoint, result) {
+  if (endpoint !== "workspaceFiles/readBytes" || !result.ok) return result;
+  const value = result.value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return result;
+  const data2 = value.data;
+  if (data2 instanceof Uint8Array) return result;
+  const bytes = decodeByteValue(data2);
+  if (bytes !== void 0) {
+    return { ...result, value: { ...value, data: bytes } };
+  }
+  console.warn("[dsh-remote] workspaceFiles/readBytes arrived without usable bytes", {
+    dataType: typeof data2,
+    dataKeys: typeof data2 === "object" && data2 !== null && !Array.isArray(data2) ? Object.keys(data2).length : 0
+  });
+  return result;
+}
 
 // src/server-api.ts
 import { platform } from "node:os";
@@ -19284,7 +19300,7 @@ var TypertGatewaySwitch = class {
         endpoint,
         () => Promise.resolve(this.remoteTarget.dispatch(endpoint, payload, signal)),
         () => this.localDispatch(endpoint, payload, signal)
-      ).then((result) => normalizeByteResult(endpoint, result));
+      ).then((result) => normalizeByteResult2(endpoint, result));
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -19361,7 +19377,7 @@ var TypertGatewaySwitch = class {
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
     if (this.remoteTarget !== void 0 && this.remoteAvailability()) {
-      return this.remoteTarget.invoke(request).then((result) => normalizeByteResult(endpointOf(request), result)).catch((error) => {
+      return this.remoteTarget.invoke(request).then((result) => normalizeByteResult2(endpointOf(request), result)).catch((error) => {
         if (!localFallbackAllowed(endpointOf(request), error)) throw error;
         console.warn(`[dsh-remote] serving ${endpointOf(request)} locally: the peer did not answer it`, error);
         return this.localInvoke(request);
@@ -19491,7 +19507,7 @@ var UNANSWERED_BY_PEER_CODES = /* @__PURE__ */ new Set([
 function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function normalizeByteResult(endpoint, result) {
+function normalizeByteResult2(endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes") return result;
   if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
   const value = result.value;
