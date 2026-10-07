@@ -20587,6 +20587,14 @@ var ClientModeRuntime = class {
   remoteReconnectRun = 0;
   pendingWorkspaceSelection;
   /**
+   * Transport a running fast reconnect is replacing.
+   *
+   * The rebuild opens its own control connection and the Server closes the older one for the same
+   * device, so that close belongs to our own replacement. Reading it as a lost peer is what made the
+   * fast level escalate itself into the fallback before it could ever succeed.
+   */
+  supersededClient;
+  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -20896,7 +20904,7 @@ var ClientModeRuntime = class {
         return;
       }
       if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
-        this.handleRemoteTransportLost(connected.client, connected.target.deviceId);
+        this.handleRemoteTransportLost(connected.client, connected.target.deviceId, "unanswered-twice");
       }
     } finally {
       this.livenessInFlight = false;
@@ -20927,10 +20935,12 @@ var ClientModeRuntime = class {
    * @returns true when a new session is in place.
    */
   async reestablish(targetDeviceId) {
+    const previous = this.connected;
+    this.supersededClient = previous?.client;
     try {
       const next = await this.connect(targetDeviceId);
-      const previous = this.connected;
       if (previous === void 0) {
+        this.supersededClient = void 0;
         await next.client.close().catch(() => void 0);
         return false;
       }
@@ -20940,9 +20950,11 @@ var ClientModeRuntime = class {
       this.selectRemoteTarget(next);
       await this.closeCodexStreams(previous.client);
       await previous.client.close().catch(() => void 0);
+      this.supersededClient = void 0;
       this.finishReconnect("link re-established");
       return true;
     } catch (error) {
+      this.supersededClient = void 0;
       this.logger.warn("fast reconnect attempt failed", {
         targetDeviceId: shortId(targetDeviceId),
         code: safeErrorCode(error)
@@ -21013,8 +21025,9 @@ var ClientModeRuntime = class {
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */
-  handleRemoteTransportLost(client, targetDeviceId) {
+  handleRemoteTransportLost(client, targetDeviceId, reason) {
     if (this.connected?.client !== client) return;
+    this.supersededClient = void 0;
     const targetName = this.connected.target.name;
     this.stopLivenessWatch();
     void this.closePreview();
@@ -21028,7 +21041,8 @@ var ClientModeRuntime = class {
     this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fallback" };
     void client.close().catch(() => void 0);
     this.logger.warn("remote Harness transport lost; reconnecting", {
-      targetDeviceId: shortId(targetDeviceId)
+      targetDeviceId: shortId(targetDeviceId),
+      reason
     });
     void this.reconnectRemoteSession(targetDeviceId);
   }
@@ -21561,7 +21575,13 @@ var ClientModeRuntime = class {
         connectedPreference === void 0 ? void 0 : [connectedPreference]
       );
       connectedClient.onClose(() => {
-        this.handleRemoteTransportLost(connectedClient, target2.deviceId);
+        if (this.supersededClient === connectedClient) {
+          this.logger.info("ignoring the close of the transport a reconnect is replacing", {
+            targetDeviceId: shortId(target2.deviceId)
+          });
+          return;
+        }
+        this.handleRemoteTransportLost(connectedClient, target2.deviceId, "transport-closed");
       });
       this.armLivenessWatch(LIVENESS_INTERVAL_MS);
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);

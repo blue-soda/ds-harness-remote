@@ -266,6 +266,14 @@ export class ClientModeRuntime {
   private remoteReconnectRun = 0
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
   /**
+   * Transport a running fast reconnect is replacing.
+   *
+   * The rebuild opens its own control connection and the Server closes the older one for the same
+   * device, so that close belongs to our own replacement. Reading it as a lost peer is what made the
+   * fast level escalate itself into the fallback before it could ever succeed.
+   */
+  private supersededClient?: RemoteClientCore
+  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -642,7 +650,7 @@ export class ClientModeRuntime {
         return
       }
       if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
-        this.handleRemoteTransportLost(connected.client, connected.target.deviceId)
+        this.handleRemoteTransportLost(connected.client, connected.target.deviceId, 'unanswered-twice')
       }
     } finally {
       this.livenessInFlight = false
@@ -676,11 +684,14 @@ export class ClientModeRuntime {
    * @returns true when a new session is in place.
    */
   private async reestablish(targetDeviceId: string): Promise<boolean> {
+    const previous = this.connected
+    // From here until the new session is in place, a close of the old transport is our own doing.
+    this.supersededClient = previous?.client
     try {
       const next = await this.connect(targetDeviceId)
-      const previous = this.connected
       if (previous === undefined) {
         // The user asked for local while this attempt was running.
+        this.supersededClient = undefined
         await next.client.close().catch(() => undefined)
         return false
       }
@@ -690,9 +701,11 @@ export class ClientModeRuntime {
       this.selectRemoteTarget(next)
       await this.closeCodexStreams(previous.client)
       await previous.client.close().catch(() => undefined)
+      this.supersededClient = undefined
       this.finishReconnect('link re-established')
       return true
     } catch (error: unknown) {
+      this.supersededClient = undefined
       this.logger.warn('fast reconnect attempt failed', {
         targetDeviceId: shortId(targetDeviceId),
         code: safeErrorCode(error),
@@ -770,8 +783,13 @@ export class ClientModeRuntime {
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */
-  private handleRemoteTransportLost(client: RemoteClientCore, targetDeviceId: string): void {
+  private handleRemoteTransportLost(
+    client: RemoteClientCore,
+    targetDeviceId: string,
+    reason: 'transport-closed' | 'unanswered-twice',
+  ): void {
     if (this.connected?.client !== client) return
+    this.supersededClient = undefined
     const targetName = this.connected.target.name
     // A closed transport is the disaster fallback: the session is gone and the retry loop takes over.
     // Only an unanswered liveness check rebuilds in place first, so a peer that merely went quiet
@@ -789,6 +807,7 @@ export class ClientModeRuntime {
     void client.close().catch(() => undefined)
     this.logger.warn('remote Harness transport lost; reconnecting', {
       targetDeviceId: shortId(targetDeviceId),
+      reason,
     })
     void this.reconnectRemoteSession(targetDeviceId)
   }
@@ -1400,10 +1419,16 @@ export class ClientModeRuntime {
         connectedPreference === undefined ? undefined : [connectedPreference],
       )
       connectedClient.onClose(() => {
+        if (this.supersededClient === connectedClient) {
+          this.logger.info('ignoring the close of the transport a reconnect is replacing', {
+            targetDeviceId: shortId(target.deviceId),
+          })
+          return
+        }
         // The UI keeps whatever the remote session rendered and offers no exit route once the mode
         // reads 'local' again, so remember that the session dropped: the card uses this to keep a
         // way back to the local shell.
-        this.handleRemoteTransportLost(connectedClient, target.deviceId)
+        this.handleRemoteTransportLost(connectedClient, target.deviceId, 'transport-closed')
       })
       // A live session proves itself on a cadence: a close event is not guaranteed to arrive.
       this.armLivenessWatch(LIVENESS_INTERVAL_MS)
