@@ -24005,7 +24005,7 @@ function concatChunks(chunks, totalBytes) {
 // src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
-var CODEX_START_BUDGET_MS = 5e3;
+var CODEX_START_BUDGET_MS = 2e4;
 var CODEX_PAGE_LIMIT2 = 100;
 var MAX_CODEX_PAGES2 = 32;
 var CODEX_HISTORY_PAGE_LIMIT = 25;

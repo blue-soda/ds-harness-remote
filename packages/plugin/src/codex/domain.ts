@@ -35,8 +35,15 @@ const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
  * cost that timeout several times over. One budget for all candidates keeps the domain's own
  * status honest ('unavailable' in seconds, not tens of seconds) while the existing restart
  * backoff keeps trying in the background.
+ *
+ * It has to stay above the per-attempt timeout in `app-server.ts` (15s), otherwise the budget
+ * expires while the first candidate is still legitimately starting and *every* installation
+ * reports CODEX_START_TIMEOUT. That is not hypothetical: the Codex desktop app ships a ~319 MB
+ * `codex.exe` whose cold start plus handshake measured 5.3s on the development machine, so the
+ * old 5s budget made the whole Codex domain permanently unavailable - no Codex settings, no
+ * Codex workspaces - on a machine where the binary was present and healthy.
  */
-const CODEX_START_BUDGET_MS = 5_000
+const CODEX_START_BUDGET_MS = 20_000
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
 const CODEX_HISTORY_PAGE_LIMIT = 25
