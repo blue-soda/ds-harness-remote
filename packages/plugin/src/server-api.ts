@@ -401,7 +401,7 @@ export class HostServerApi {
     return {
       deviceId: identity.deviceId,
       name: identity.name,
-      role: this.role,
+      role: 'host' as const,
       platform: platform(),
       identityKey: identity.publicKey,
       clientVersion: PLUGIN_VERSION,

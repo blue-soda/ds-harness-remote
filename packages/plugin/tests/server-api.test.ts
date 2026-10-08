@@ -136,10 +136,10 @@ describe('HostServerApi', () => {
 
     expect(recoverIdentity).toHaveBeenCalledTimes(1)
     expect(JSON.parse(String(calls[2]?.init?.body))).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'client', identityKey: identity.publicKey },
+      device: { deviceId: identity.deviceId, role: 'host', identityKey: identity.publicKey },
     })
     expect(JSON.parse(String(calls[3]?.init?.body))).toMatchObject({
-      device: { deviceId: recoveredIdentity.deviceId, role: 'client', identityKey: recoveredIdentity.publicKey },
+      device: { deviceId: recoveredIdentity.deviceId, role: 'host', identityKey: recoveredIdentity.publicKey },
     })
     expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
     expect(calls[3]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
@@ -258,7 +258,7 @@ describe('HostServerApi', () => {
     })
     const registeredDevice = JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))
     expect(registeredDevice).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'client' },
+      device: { deviceId: identity.deviceId, role: 'host' },
     })
     expect(registeredDevice.device).not.toHaveProperty('harnessVersion')
     await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
@@ -433,7 +433,7 @@ describe('HostServerApi', () => {
     await api.authorizeWithAccount(identity, 'client@example.com', 'correct horse battery staple')
 
     expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[1]?.[1]?.body))).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'client' },
+      device: { deviceId: identity.deviceId, role: 'host' },
     })
     expect(vi.mocked(fetchMock).mock.calls[1]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
   })

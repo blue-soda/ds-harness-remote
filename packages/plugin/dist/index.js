@@ -13760,7 +13760,7 @@ var HostServerApi = class {
     return {
       deviceId: identity.deviceId,
       name: identity.name,
-      role: this.role,
+      role: "host",
       platform: platform(),
       identityKey: identity.publicKey,
       clientVersion: PLUGIN_VERSION,
@@ -23159,12 +23159,13 @@ var ClientTargetStore = class {
 
 // src/control-runtime.ts
 import { hostname as hostname2 } from "node:os";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync4 } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
+import { existsSync as existsSync2 } from "node:fs";
 import { createHash } from "node:crypto";
-import { chmod as chmod3, mkdir as mkdir3, readFile as readFile4, rm as rm3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
+import { chmod as chmod3, cp, mkdir as mkdir3, readFile as readFile4, rm as rm3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname as dirname4, join as join6 } from "node:path";
 var identitySchema = external_exports.object({
@@ -23297,6 +23298,19 @@ function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
   const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
   return join6(root, "servers", scope, role);
+}
+async function ensureDeviceDirectory(root, serverUrl) {
+  const directory = serverStorageDirectory(root, serverUrl, "device");
+  if (existsSync2(directory)) return directory;
+  await mkdir3(dirname4(directory), { recursive: true, mode: 448 });
+  for (const legacy of ["host", "client"]) {
+    const from = serverStorageDirectory(root, serverUrl, legacy);
+    if (!existsSync2(from)) continue;
+    await cp(from, directory, { recursive: true });
+    return directory;
+  }
+  await mkdir3(directory, { recursive: true, mode: 448 });
+  return directory;
 }
 function fingerprint(publicKey) {
   const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -23484,7 +23498,7 @@ var ControlStatusStream = class {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { accessSync, constants, existsSync as existsSync2, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
+import { accessSync, constants, existsSync as existsSync3, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { basename as basename2, isAbsolute as isAbsolute2, join as join7, posix, relative, resolve } from "node:path";
@@ -24864,7 +24878,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
         return [];
       }
       const candidate = posix.join(codexCli, manifest.entrypoint);
-      if (!existsSync2(candidate)) return [];
+      if (!existsSync3(candidate)) return [];
       accessSync(candidate, constants.X_OK);
       return [candidate];
     } catch {
@@ -24881,7 +24895,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
 function bundledWindowsCodex(userHome) {
   const bin = join7(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
   try {
-    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join7(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync2(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
+    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join7(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync3(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
     const candidate = newest[0]?.candidate;
     return candidate === void 0 ? [] : [candidate];
   } catch {
@@ -25514,7 +25528,7 @@ function commandAvailable(command) {
 }
 function discoveredCodexBinary(configured) {
   for (const candidate of codexBinaryCandidates(configured)) {
-    if (candidate !== configured && existsSync3(candidate)) return candidate;
+    if (candidate !== configured && existsSync4(candidate)) return candidate;
   }
   return void 0;
 }
@@ -29316,9 +29330,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       console.error(message);
     }
   }, config.logLevel);
-  const hostIdentities = new IdentityStore({
-    directory: config.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, "host")
-  });
+  const deviceDirectory = config.serverUrl === void 0 ? defaultIdentityDirectory : await ensureDeviceDirectory(defaultIdentityDirectory, config.serverUrl);
+  const hostIdentities = new IdentityStore({ directory: deviceDirectory });
   const apiProxy = ctx.get("apiProxy");
   const nativeTypertGateway = ctx.get("typertGateway");
   const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local();
@@ -29359,9 +29372,7 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   let clientRuntime;
   const hostControl = runtime;
   if (config.serverUrl !== void 0 && connection !== void 0) {
-    const clientIdentities = new IdentityStore({
-      directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, "client")
-    });
+    const clientIdentities = hostIdentities;
     clientRuntime = new ClientModeRuntime(
       config,
       clientIdentities,

@@ -195,7 +195,7 @@ describe('PluginControlRuntime settings setup', () => {
     expect(calls).toHaveLength(3)
     expect(calls[2]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
     expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
-    expect(JSON.parse(String(calls[2]?.init?.body))).toMatchObject({ device: { role: 'client' } })
+    expect(JSON.parse(String(calls[2]?.init?.body))).toMatchObject({ device: { role: 'host' } })
     const hostDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'host')
     const clientDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'client')
     await expect(readFile(join(hostDirectory, 'server-credentials.json'), 'utf8')).resolves.toContain('host@example.com')
@@ -249,7 +249,7 @@ describe('PluginControlRuntime settings setup', () => {
         settings: { association: { method: 'account', account: 'client@example.com' } },
       },
     })
-    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'client' } })
+    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'host' } })
     const clientDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'client')
     const stored = await readFile(join(clientDirectory, 'server-credentials.json'), 'utf8')
     expect(stored).toContain('client@example.com')
@@ -299,7 +299,7 @@ describe('PluginControlRuntime settings setup', () => {
     expect(calls[1]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
     expect(calls[1]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
     expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({
-      device: { name: hostname(), role: 'client' },
+      device: { name: hostname(), role: 'host' },
     })
   })
 })

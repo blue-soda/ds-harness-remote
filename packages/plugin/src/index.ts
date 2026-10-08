@@ -15,7 +15,7 @@ import {
 } from './config.js'
 import { PluginControlRuntime, type DeepSeekSessionSource, type PluginSettingsBinding } from './control-runtime.js'
 import type { HostWebServerLike } from './control-route.js'
-import { IdentityStore, serverStorageDirectory } from './identity-store.js'
+import { IdentityStore, ensureDeviceDirectory, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
 import { ClientServerApi } from './server-api.js'
@@ -227,11 +227,12 @@ async function activate(
     warn: message => { ctx.logger.warn(message); console.warn(message) },
     error: message => { ctx.logger.error(message); console.error(message) },
   }, config.logLevel)
-  const hostIdentities = new IdentityStore({
-    directory: config.serverUrl === undefined
-      ? defaultIdentityDirectory
-      : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'host'),
-  })
+  // One identity for this installation, shared by both halves: a device that accepts control and one
+  // that controls others present the same id. Legacy per-role directories are migrated on first run.
+  const deviceDirectory = config.serverUrl === undefined
+    ? defaultIdentityDirectory
+    : await ensureDeviceDirectory(defaultIdentityDirectory, config.serverUrl)
+  const hostIdentities = new IdentityStore({ directory: deviceDirectory })
   const apiProxy = ctx.get('apiProxy') as ApiProxy | undefined
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
@@ -291,9 +292,9 @@ async function activate(
   let clientRuntime: ClientModeRuntime | undefined
   const hostControl = runtime
   if (config.serverUrl !== undefined && connection !== undefined) {
-    const clientIdentities = new IdentityStore({
-      directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'client'),
-    })
+    // The client half shares the device identity and its credentials instead of registering a second
+    // device for the same machine.
+    const clientIdentities = hostIdentities
     clientRuntime = new ClientModeRuntime(
       config,
       clientIdentities,

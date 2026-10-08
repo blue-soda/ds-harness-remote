@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
@@ -54,7 +55,8 @@ export interface IdentityStoreOptions {
   homeDirectory?: string
 }
 
-export type RemoteDeviceRole = 'host' | 'client'
+/** Directory flavour: one device identity, or a legacy per-role directory. */
+export type RemoteDeviceRole = 'device' | 'host' | 'client'
 
 export class IdentityInvalidError extends Error {
   readonly code = 'IDENTITY_INVALID'
@@ -181,6 +183,32 @@ export function serverStorageDirectory(root: string, serverUrl: string, role: Re
   const origin = new URL(serverUrl).origin
   const scope = createHash('sha256').update(origin).digest('hex').slice(0, 24)
   return join(root, 'servers', scope, role)
+}
+
+/**
+ * Directory holding this installation's single device identity.
+ *
+ * One device has one identity, whatever it is used for: the role belongs to a connection, not to the
+ * device, so a machine that both accepts control and controls others presents the same id in both cases.
+ * Older layouts kept one directory per role; the first run copies one of them here - the host one, whose
+ * row the Server already knows, or the client one when that is all there is - and leaves the originals
+ * untouched as a backup rather than deleting anything.
+ * @param root - the plugin's identity root.
+ * @param serverUrl - the Server this identity belongs to.
+ * @returns the device directory, created when it did not exist yet.
+ */
+export async function ensureDeviceDirectory(root: string, serverUrl: string): Promise<string> {
+  const directory = serverStorageDirectory(root, serverUrl, 'device')
+  if (existsSync(directory)) return directory
+  await mkdir(dirname(directory), { recursive: true, mode: 0o700 })
+  for (const legacy of ['host', 'client'] as const) {
+    const from = serverStorageDirectory(root, serverUrl, legacy)
+    if (!existsSync(from)) continue
+    await cp(from, directory, { recursive: true })
+    return directory
+  }
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  return directory
 }
 
 export function fingerprint(publicKey: string): string {
