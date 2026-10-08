@@ -21,12 +21,39 @@ function modernHost(version: string): boolean {
   return major! > 0 || (minor! > 2 || (minor === 2 && patch! >= 15))
 }
 
+/**
+ * How often the Server pings every peer, and how long a peer may stay silent before it is dropped.
+ *
+ * The grace period must span more than one tick or every peer would be dropped on the next check: a
+ * peer that answers each ping ages at most one interval, so a threshold below two intervals leaves no
+ * room for a single late answer. The constructor enforces that relation.
+ */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000
+const DEFAULT_PEER_TIMEOUT_MS = 45_000
+
 export class Gateway {
   readonly peers = new Map<string, Peer>()
   private links = new Map<string, Link>()
   private wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false })
   private heartbeat: ReturnType<typeof setInterval>
-  constructor(server: Server, private store: Store, origin: string, private readonly log?: ServerLog) {
+  private readonly intervalMs: number
+  private readonly peerTimeoutMs: number
+  constructor(
+    server: Server,
+    private store: Store,
+    origin: string,
+    private readonly log?: ServerLog,
+    heartbeat: { intervalMs?: number; peerTimeoutMs?: number } = {},
+  ) {
+    this.intervalMs = heartbeat.intervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+    this.peerTimeoutMs = heartbeat.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS
+    if (this.peerTimeoutMs < this.intervalMs * 2) {
+      throw new Error(
+        `DSH_SERVER_PEER_TIMEOUT_MS (${this.peerTimeoutMs}) must be at least twice `
+        + `DSH_SERVER_HEARTBEAT_INTERVAL_MS (${this.intervalMs}): the check runs once per interval, so a `
+        + 'shorter grace period drops every peer on the very next check.',
+      )
+    }
     store.onInvalidate = (id, account) => this.disconnect(peerKey(account, id), 'AUTH_INVALID')
     server.on('upgrade', (req, socket, head) => {
       if (req.url !== '/ws/v1/connect' || (req.headers.origin && req.headers.origin !== origin) || this.wss.clients.size >= 256) {
@@ -36,7 +63,7 @@ export class Gateway {
     })
     this.heartbeat = setInterval(() => {
       for (const peer of this.peers.values()) {
-        if (Date.now() - peer.lastPong > 75_000) {
+        if (Date.now() - peer.lastPong > this.peerTimeoutMs) {
           // The Server is the only party that can see a client stop answering, so the reason is
           // recorded here rather than left implicit in the close code.
           this.disconnect(peerKey(peer.account, peer.id), 'CONNECTION_FAILED', 'heartbeat-timeout')
@@ -46,7 +73,7 @@ export class Gateway {
         this.send(peer, createControlFrame('ping', { nonce: peer.nonce }))
       }
       for (const link of this.links.values()) if (link.stage !== 'ready' && Date.now() - link.created > 30_000) this.drop(link, 'CONNECTION_FAILED')
-    }, 25_000)
+    }, this.intervalMs)
     this.heartbeat.unref()
   }
   private send(peer: Peer, frame: ControlFrame): void {
@@ -124,7 +151,7 @@ export class Gateway {
           })
           clearTimeout(deadline)
           this.store.touch(peer.id, p.clientVersion, p.harnessVersion)
-          this.send(peer, createControlFrame('hello.ack', { protocol: 1, serverVersion: 'self-hosted/0.1.0', connectionSessionId: randomUUID(), heartbeatIntervalMs: 25000, maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES, maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES, capabilities: p.capabilities.includes('transport.relay') ? ['transport.relay'] : [], webrtcEnabled: false, webrtcFallbackTimeoutMs: 1 }))
+          this.send(peer, createControlFrame('hello.ack', { protocol: 1, serverVersion: 'self-hosted/0.1.0', connectionSessionId: randomUUID(), heartbeatIntervalMs: this.intervalMs, maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES, maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES, capabilities: p.capabilities.includes('transport.relay') ? ['transport.relay'] : [], webrtcEnabled: false, webrtcFallbackTimeoutMs: 1 }))
           return
         }
         if (this.peers.get(peerKey(peer.account, peer.id)) !== peer) throw new ApiError('AUTH_INVALID')

@@ -34,6 +34,10 @@ const dataFile = resolve(process.env.DSH_SERVER_DATA_FILE ?? 'data/state.json')
 const logFile = process.env.DSH_SERVER_LOG_FILE?.trim()
 const logMaxBytes = optionalPositiveInteger('DSH_SERVER_LOG_MAX_BYTES')
 const logMaxFiles = optionalPositiveInteger('DSH_SERVER_LOG_FILES')
+// Heartbeat cadence and the silence it tolerates. The Gateway rejects a pair whose grace period does
+// not span at least two intervals, so a mistake here fails the boot instead of dropping every peer.
+const heartbeatIntervalMs = optionalPositiveInteger('DSH_SERVER_HEARTBEAT_INTERVAL_MS')
+const peerTimeoutMs = optionalPositiveInteger('DSH_SERVER_PEER_TIMEOUT_MS')
 const app = createRemoteServer({
   account: process.env.DSH_SERVER_ACCOUNT ?? '',
   password: process.env.DSH_SERVER_PASSWORD ?? '',
@@ -53,6 +57,10 @@ const app = createRemoteServer({
     file: logFile === undefined || logFile === '' ? join(dirname(dataFile), 'logs', 'server.log') : resolve(logFile),
     ...(logMaxBytes === undefined ? {} : { maxBytes: logMaxBytes }),
     ...(logMaxFiles === undefined ? {} : { maxFiles: logMaxFiles }),
+  },
+  heartbeat: {
+    ...(heartbeatIntervalMs === undefined ? {} : { intervalMs: heartbeatIntervalMs }),
+    ...(peerTimeoutMs === undefined ? {} : { peerTimeoutMs }),
   },
   // Scanning a code may create an account only when the operator opts in.
   oauthCreatesAccounts: process.env.DSH_SERVER_OAUTH_CREATES_ACCOUNTS === 'true',

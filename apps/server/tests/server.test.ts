@@ -16,13 +16,18 @@ async function request(path: string, method = 'GET', body?: unknown, token?: str
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
 }
-async function start(pass = password, options: { account?: string; registrationCode?: string } = {}) {
+async function start(pass = password, options: {
+  account?: string
+  registrationCode?: string
+  heartbeat?: { intervalMs?: number; peerTimeoutMs?: number }
+} = {}) {
   app = createRemoteServer({
     account: options.account ?? account,
     password: pass,
     dataFile: join(dir, 'state.json'),
     publicUrl: 'http://localhost:8080',
     ...(options.registrationCode === undefined ? {} : { registrationCode: options.registrationCode }),
+    ...(options.heartbeat === undefined ? {} : { heartbeat: options.heartbeat }),
   })
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening')
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
@@ -86,6 +91,29 @@ beforeEach(async () => {
   accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
 })
 afterEach(async () => { for (const ws of sockets.splice(0)) ws.terminate(); await app.close(); rmSync(dir, { recursive: true, force: true }) })
+
+describe('control heartbeat', () => {
+  it('rejects a grace period that does not span two intervals', () => {
+    // The check runs once per interval, so a shorter grace period drops every peer on the next check:
+    // that has to fail the boot instead of silently disconnecting everyone.
+    expect(() => createRemoteServer({
+      account,
+      password,
+      dataFile: join(dir, 'state.json'),
+      publicUrl: 'http://localhost:8080',
+      heartbeat: { intervalMs: 20_000, peerTimeoutMs: 25_000 },
+    })).toThrow(/at least twice/)
+  })
+
+  it('advertises the configured cadence to peers', async () => {
+    await app.close()
+    await start(password, { heartbeat: { intervalMs: 15_000, peerTimeoutMs: 40_000 } })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+    const h = await device('host')
+    const host = await socket(h)
+    expect(await host.next('hello.ack')).toMatchObject({ heartbeatIntervalMs: 15_000 })
+  })
+})
 
 describe('account and device authorization', () => {
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {

@@ -48,6 +48,8 @@ export interface Config {
    * rotation, so a long-running service cannot fill the disk with diagnostics.
    */
   log?: ServerLogOptions
+  /** Control-heartbeat cadence and the peer silence it tolerates; see the Gateway defaults. */
+  heartbeat?: { intervalMs?: number; peerTimeoutMs?: number }
 }
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
 /** A platform account grant, treated as an opaque bearer value. */
@@ -146,7 +148,7 @@ export function createRemoteServer(config: Config) {
     })
   })
   const log = config.log === undefined ? undefined : new ServerLog(config.log)
-  const gateway = new Gateway(server, store, url.origin, log)
+  const gateway = new Gateway(server, store, url.origin, log, config.heartbeat)
   function descriptor(d: ReturnType<Store['get']>) {
     return {
       ...d.descriptor,
