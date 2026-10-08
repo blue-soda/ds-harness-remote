@@ -273,6 +273,34 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
   **确认 `dist/main.js` 含 `DSH_SERVER_LOG_FILE`** ✓ 再 `systemctl restart` ✓（先构建后重启 ✓，构建失败就
   不影响线上 ✓）；回滚用旧提交重新构建即可 ✓。
 
+### 控制心跳：阈值必须 ≥ 2 × tick（2026-10-08 实测）
+
+服务端每条控制连接每 **一个 tick** 被 ping 一次 ✓，而"设备是否掉线"只看 **最后一次被接受的 pong**
+距今多久 ✓（迟到的 pong 不算 ✓：nonce 已被下一轮替换 ✓）：
+
+```ts
+if (Date.now() - peer.lastPong > peerTimeoutMs) disconnect(…, 'heartbeat-timeout')   // 判定只在 tick 上发生
+else { peer.nonce = randomUUID(); send(ping) }
+```
+
+因此 **丢弃窗口 = [阈值, 阈值 + tick]** ✓，容忍的漏答次数 ≈ 阈值 ÷ tick ✓ —— 于是有一条硬约束 ✗：
+
+> **阈值 < tick ⇒ 每次检查时它必然超时 ⇒ 每一轮都会把所有设备踢下线** ✗。
+
+**实测校准** ✓：旧值 `tick 25 s / 阈值 75 s` 对应窗口 **75–100 秒** ✓ —— 冻结 Desktop 实测 **85 秒**
+被判离线 ✓（与代码吻合 ✓）。注意"25–50 秒"这个说法 ✗ 是错的 ✓：那是把通告值 `heartbeatIntervalMs`
+当成了阈值 ✗ —— 通告的是 **ping 周期** ✓，不是容忍时间 ✓。
+
+现取值 **tick 20 s / 阈值 45 s** ✓（窗口 40–65 秒 ✓），并且**参数化 + 启动校验** ✓：
+
+- `DSH_SERVER_HEARTBEAT_INTERVAL_MS` ✓（默认 20000 ✓，同时作为 `hello.ack` 通告值 ✓）；
+- `DSH_SERVER_PEER_TIMEOUT_MS` ✓（默认 45000 ✓）；
+- 构造 Gateway 时校验 `阈值 ≥ 2 × tick` ✓，不满足**直接启动失败** ✓（而不是悄悄把所有人踢掉 ✓）；
+- 判定用的是**传输层**的 pong ✓（不经过业务层 ✓）—— 所以"Host 正在推大历史、业务很忙"**不会**被误判 ✓
+  （实测：历史再慢，服务端从未判它离线 ✓✓）；只有真被冻住/挂起/网络黑洞才不 pong ✓。
+
+回归用例：`apps/server/tests/server.test.ts` 的 `control heartbeat` 两条 ✓（错误组合被拒 ✓ + 通告值同步 ✓）。
+
 ## Native sidebar and development preview (2026-09-20)
 
 开发依赖升级到 Harness `0.2.0-rc.1`（同时兼容 `0.1.7-rc.1`），运行时按能力检测同时支持 ≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径（`typeof settings.register === 'function'` 分流）。终端与 loopback 设置只能在 Host 本地修改，`settings/update|replace|mutate` 禁止远程修改 `ds-harness-remote` 和 `dsh-remote`。终端默认开启；loopback 默认无端口。「远程终端」开关切换即保存并立即更新运行时拦截，「保存访问设置」按钮只提交 Loopback 端口（位于端口输入框右侧）；两者都无需重启 Host。预览入口位于 Remote Header「预览服务」，第一版限 Desktop / 连接本机 Harness 的浏览器；不把本机预览 URL 作为远程 Web 或 Android 可用地址。跨机、Windows 和真实网络热更新回归仍需另行验证。
