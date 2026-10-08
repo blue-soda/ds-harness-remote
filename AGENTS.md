@@ -194,7 +194,7 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 - `docs/server.md`：完整 Server 项目的产品/功能设计，并说明本仓库自部署版本的范围。
 - `docs/plugin-integration.md`：Host Plugin 对接 Server 的账号认证、设备认证与凭证状态机，以及最小自部署版本支持的子集。
 - `docs/protocol.md`：跨仓库协议规范。
-- `docs/config-and-role.md`：`role` 语义、配置写回路径与发行版 seed 默认值的契约（按需阅读，勿写入本文件）。
+- `docs/config-and-role.md`：设备身份契约（一台设备一份身份、deviceId 终身不变、迁移与吊销即删行、控制开关语义）与配置写回路径（按需阅读，勿写入本文件）。
 - `docs/incidents/`：按需阅读的排查记录（叙事与验收过程；其中的**当前约束**已摘要进本文件）。
 - `docs/release.md`、`docs/validation-history.md`：发版清单与实测复盘、按日期追加的验证历史（按需阅读）。
 - `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
@@ -220,14 +220,23 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 锁不按时间强行抢占；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。
 核心测试覆盖多进程刷新互斥与鉴权恢复状态机，Windows 双实例实机验证仍待完成。
 
-**登出保留设备身份**：`clearClientAuthorization()` / `clearHostAuthorization()` / CLI `logout`
-只清理本地凭证，**不吊销设备、不轮换身份**，所以再次登录会**复用同一设备行**（`register` 会作废
-该设备旧令牌）。原因：每账号设备数上限 **256**，且**只在新 `deviceId` 注册时判定**（已有设备复用
-同一行、不占名额）；早期"登出即吊销+轮换"每次消耗一个名额，**约 128 次登出即把账号用满**
-（`RATE_LIMITED`）。代价（有意接受）：登出后设备仍留在账号中（离线可见），其旧令牌在下次登录前
-仍然有效（access 1h / refresh 30d），所以**登出不等于立即断权**。`revokeCurrentDevice()` 与
-`DELETE /api/v1/devices/self` 予以保留但登出不再调用；要彻底移除设备须由运维在服务停止后改
-`state.json`（运行期间编辑会被内存状态覆盖）。详见 `docs/plugin-integration.md` §6.1。
+**一台设备一份身份；吊销即删行**：设备身份只有一份（`ensureDeviceDirectory()` 把旧的角色目录
+`.../<origin>/host|client` 迁到 `.../<origin>/device`，旧目录留作备份、不删用户数据）✓；deviceId 由客户端
+生成并持久保存 ✓，**登出/登录不轮换身份**（`clearClientAuthorization()` / `clearHostAuthorization()` / CLI
+`logout` 只清本地凭证 ✓）。面板的「注销本设备」走 `DELETE /api/v1/devices/self` → `store.revoke()` **删除设备行
+连同它的全部令牌** ✓ → 立即断权 ✓，并**释放每账号 256 的设备额度** ✓；重新登录即可回来，而且**复用同一个
+deviceId**（注册需要账号会话或注册码 ✓，从不只凭设备令牌 ✓）。代价（有意接受）✗：服务端不再保留"曾被吊销"
+的记录 ✓，因此被吊销的设备在重新登录前得到 `AUTH_INVALID` 而非 `DEVICE_REVOKED` ✓。此前那套"标记式吊销 +
+客户端轮换身份"是设备行翻倍的根源 ✓（一台手机曾留下**四对**身份 ✓），已整体删除 ✓。
+
+**`role` 不再是配置项** ✗：一台设备的 host / client 只是**连接**属性 ✓（peer 键为
+`account + deviceId + role` ✓，同一身份可同时持有两条连接 ✓）；注册描述符固定声明 `host` ✓，"能否被控制"
+由**控制开关**决定 ✓。开关语义（用户选定 A ✓）：关闭 = 向服务端登记标志 ✓ + **立即断开 host 连接** ✓ +
+服务端**拒绝**其新的 `role=host` hello（`CONTROL_DISABLED` ✓），**不清授权、不轮换身份、不影响它作为客户端
+去控制别人** ✓；重新打开即恢复 ✓、无需重新登录 ✓。标志存在服务端设备行上 ✓（旧状态文件按 `true` 读取 ✓，
+重新登录不会悄悄打开 ✓），设备描述符带 `hostControl` ✓ 供列表展示 ✓。契约见
+[`docs/config-and-role.md`](docs/config-and-role.md) ✓；§6.1 的旧登出语义见
+[`docs/plugin-integration.md`](docs/plugin-integration.md) ✓。
 
 ### 清理设备行：client 行可能从不刷新 lastSeenAt（2026-10-08 实测）
 

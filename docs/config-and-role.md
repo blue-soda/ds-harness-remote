@@ -1,60 +1,70 @@
-# 配置与 `role` 契约
+# 配置与设备身份契约
 
 面向两类读者：把本插件内置进发行版、在 profile 的 `cordis.patch.yml` 里 seed 条目的**集成者**，
-以及排查"我 seed 的默认值去哪了 / `role` 为什么变了"的**维护者**。按需阅读，不必每次会话都加载。
+以及排查"这台设备为什么是这个 ID / 为什么它不接受控制"的**维护者**。按需阅读，不必每次会话都加载。
 
 每条结论都给了代码位置，便于复现而不是重新推理。
 
 ## 一句话结论
 
-`role` **不是运行时开关**：Host 与 Client 两个半边始终都会启动。**"同时注册 host + client"**
-由**登录完成后的自动补授权**完成，而不是由 `role` 完成。因此发行版 seed 的默认值在**功能上安全**；
-唯一会被改写的时机是**有人点了远程卡片里的 DeepSeek 登录** —— 该路径会把 `role` 写成 `client`，
-并把整节"可编辑配置"重写一遍。
+**一台设备只有一份身份，`role` 不再是配置项。** 设备能否被远程控制，由"允许控制当前设备"这个
+**开关**决定（标志存在服务端、跨重启保留），与身份无关；`host` / `client` 只是**连接**的属性，
+同一份身份可以同时持有两种连接。
 
-## `role` 的真实作用
+## 设备身份
 
-- **不决定哪个运行时启动**。Host 运行时无条件创建，`ClientModeRuntime` 的创建条件只有
-  `config.serverUrl !== undefined && connection !== undefined`（`index.ts:290-309`）→ `host` /
-  `client` / `both` 三种取值下**两个半边都启动**。插件自带 patch 用 `role: host`
-  （`packages/plugin/cordis.patch.yml:13,28`）。
-- **不影响双角色注册**。客户端登录完成后 `control-runtime.ts:281-283` 调
-  `client.authorizeHostByDefault()` → `client-runtime.ts:276-293` 在 Host 尚未授权时用当前凭据执行
-  `authorizeHostAsOwned(accessToken, account)`，把 Host 角色作为同账号"自有设备"注册。
-- **`role: both` 是惰性值**。schema 接受它（`config.ts:121`），但所有决策点都写成
-  `role === 'client' ? 'client' : 'host'`（`control-runtime.ts:316` 与 `:491`）；穷举搜索 `'both'`
-  只命中 schema → **行为上 ≡ `host`**，既不会因此掉功能，也拿不到额外能力。
-- `role` 真正影响的只有三处：
-  1. 面板把哪侧关联当**主**（`control-runtime.ts:491`）—— 只是显示，`associations` 里 host 与
-     client 两份都在；
-  2. 登录用哪套**设备身份/凭据目录**（`:234`，凭据按角色分目录，`logout` 也清两份 `:441`）；
-  3. 会话中切换角色时的**对侧补授权**（`:317-319`）。
+- **一份身份**：`<DSH_HOME>/remote/servers/<sha256(origin)[0:24]>/device/`，内含 `device.json`
+  （deviceId、名称、公钥）、`device.key` 与 `server-credentials.json`（`identity-store.ts` 的
+  `ensureDeviceDirectory()`）。
+- **deviceId 由客户端生成并持久保存**（ULID），服务端只照收、不派生、不改写；一条设备行由
+  **deviceId 唯一确定**。
+- **ID 终身不变**：登出/登录不轮换身份，被吊销后重新登录也**复用同一个 ID**（`store.register()`
+  按 deviceId 写回同一行）。只有用户显式重置身份才会产生新 ID。
+- **迁移**：旧布局是**按角色**的两份身份（`.../host`、`.../client`）。首次运行会把 `host` 那份
+  （服务端已有对应设备行、凭据一并带上）整目录复制到 `device/`，没有 `host` 时退回 `client`；
+  **旧目录原样保留**作为备份，不删任何用户数据。
+- **可观测性**：设备行只存 `lastSeenAt` 与 `revoked`。要判断身份年龄可解码 deviceId 的 ULID 前缀
+  （前 10 个字符即创建毫秒）；`lastSeenAt` 对 client 行可能长期为 0，**不能**只按它判断在线。
+
+## `role` 的现状
+
+- **不再是配置项**：`Config` / `ResolvedConfig` / 两套 schema（含曾经的死值 `both`）里都已移除；
+  `settings.role.set` 端点已删除，面板不再提供角色选择。
+- **只是连接的属性**：`hello` 里声明的角色决定这条连接是 host 还是 client（`gateway.ts` 的 peer 键为
+  `account + deviceId + role`）。同一份身份可以同时持有 host 与 client 两条连接，互不顶替；
+  存储角色与 hello 角色不再要求相等（只校验 deviceId 与凭据匹配）。
+- **注册描述符固定声明 `host`**：设备列表里它就是"可被控制的设备"，是否真的接受控制由下面的开关决定。
+- **`authorizeHostAsOwned` / `register-owned-role` 保留但通常不再触发**：单一身份下，登录注册出的行
+  本身就是 host 行；`authorizeHostByDefault()` 只在尚未授权时补齐。
+
+## 允许控制设备（语义 A）
+
+- **开**：设备向服务端登记标志并**恢复 host 连接**；账号登录、身份、client 半边始终不动。
+- **关**：设备向服务端登记标志、**立即断开当前 host 连接**，服务端此后**拒绝**该设备的 `role=host`
+  hello（错误码 `CONTROL_DISABLED`）；**不会**清除授权、**不会**轮换身份、**不会**影响它作为客户端
+  去控制别的设备。
+- **跨重启保留**：标志存在服务端设备行上（`store.setHostControl()`；旧状态文件按 `true` 读取）；
+  重新登录**不会**悄悄打开它（`store.register()` 保留既有值）。
+- **可见**：设备描述符带 `hostControl`；`online` 只反映实际连接，因此关掉控制后该设备显示为离线。
+- 端点：`POST /api/v1/devices/self/control`，body `{ enabled: boolean }`。
+
+## 注销设备（吊销）
+
+- **删行**，不是标记：`DELETE /api/v1/devices/self` → `store.revoke()` 删除设备行**连同它的全部令牌**
+  → 立即断权（不必等下次登录），并且**释放 256 设备额度**。
+- **重新登录即可回来，且是同一个 ID**：注册需要账号会话或注册码，从不只凭设备令牌；由于 deviceId 由
+  客户端提供，重新注册写回同一行（不同身份密钥冒用同一 ID 仍被拒绝）。
+- 代价（有意接受）：服务端**不再保留"曾被吊销"的记录**，所以被吊销的设备在重新登录前会得到
+  `AUTH_INVALID` 而非 `DEVICE_REVOKED`；客户端把前者当作"凭据失效 → 重新登录"。
 
 ## 写回行为
 
-- **只在控制端点里写**，**没有启动期写入**：`settings.replace(...)` 全部位于 `control-runtime.ts`
-  的端点处理器中；激活路径只有读（`index.ts:391-414`）。
-- **唯一强制写具体角色的路径**是远程卡片的 DeepSeek 登录：`client.ts:2128-2129` **硬编码
-  `role: 'client'`** → `settings.configure` → `control-runtime.ts:284` 用 `editableConfig(next)`
-  **整节写回**。发行版看到的"patch 被展开成完整配置"就来自这里。
-- **其余控制写入都保留 `current.role`**：`server.set`（`:303`）、`development.set`（`:336`）、
-  `codex.set`（`:391`）、`acp.*`（`:377/401`）都是 `{ ...current, 只改自己那几个字段 }`。
-- **CLI 完全不写 `role`**（`cli.ts` / `tui-command.ts` 无相关写入）。
-- **没有 `DSH_HOME` 之外的存储**：角色只来自 profile 配置；状态全在 `DSH_HOME` 下
-  （`identity-store.ts:70` + `serverStorageDirectory()`，凭据按角色分目录）。同机多份 home
-  互不影响；外部输入只有 `DSH_REMOTE_SERVER`（`config.ts:140`）。
+- **只在控制端点里写**，没有启动期写入：`settings.replace(...)` 全部位于 `control-runtime.ts` 的端点
+  处理器中；激活路径只有读。
+- **`settings.configure` 不再写 `role`**：它只写 `serverUrl` 与 `editableConfig()` 归一化的其余字段。
+  授权走哪条 API 由"是否提供了注册码"决定（有注册码 → `HostServerApi`，否则 `ClientServerApi`）。
+- **没有 `DSH_HOME` 之外的存储**：状态全在 `DSH_HOME` 下；外部输入只有 `DSH_REMOTE_SERVER`
+  （`config.ts`）。同机多份 home 互不影响。
 - 写入粒度是**整节**而非差异，但每次写入前都先 `resolveConfig(settings.get())` 读回当前值，
   所以**手工编辑的字段会被保留**，除了这次调用明确要设的字段。
-
-## 给发行版的三种做法
-
-| 做法 | 说明 |
-| --- | --- |
-| ① 只求稳定默认值 | seed 用 `role: host`（与插件自带 patch 一致），任何 UI 路径都不会改它。 |
-| ② 保持 `role: both` | 功能上安全，但该值本身没有语义；**只要初次配置不走卡片登录**（用例行走 CLI/API）它就不会被改写。 |
-| ③ 断言配置的脚本 | 断言 `role` 时接受 `host\|client\|both`，否则用户点过登录后会不一致（不是运行故障，只是断言失败）。 |
-
-## 待办
-
-让 `both` 有一等语义、以及"发行版钉住默认 `role`"的改动，见 [TODO.md](../TODO.md) 的
-"发行版默认配置与 role"条目。
+- 发行版 seed 的默认值现在更安全：不再有"点一次登录就被改写"的 `role`。
