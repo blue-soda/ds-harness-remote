@@ -203,26 +203,25 @@ export type ControlFrameType = typeof controlFrameTypes[number]
 export type RpcMethod = typeof rpcMethods[number]
 export type RemoteEventName = typeof remoteEvents[number]
 
-export interface HostDeviceDescriptor {
+/**
+ * One descriptor for every device.
+ *
+ * A device has a single identity and may hold a host connection and a client connection at once, so there is
+ * nothing left for a role field to say. Whether a device accepts control is the Server-side switch's business.
+ */
+export interface AccountDeviceDescriptor {
   deviceId: string
   name: string
-  role: 'host'
   platform: string
   identityKey: string
   clientVersion: string
   harnessVersion?: string
 }
 
-export interface ClientDeviceDescriptor {
-  deviceId: string
-  name: string
-  role: 'client'
-  platform: string
-  identityKey: string
-  clientVersion: string
-}
-
-export type AccountDeviceDescriptor = HostDeviceDescriptor | ClientDeviceDescriptor
+/** @deprecated One descriptor covers every device; kept so existing imports keep compiling. */
+export type HostDeviceDescriptor = AccountDeviceDescriptor
+/** @deprecated One descriptor covers every device; kept so existing imports keep compiling. */
+export type ClientDeviceDescriptor = AccountDeviceDescriptor
 
 export interface DeviceRegistrationRequest {
   v: typeof PROTOCOL_VERSION
@@ -699,29 +698,26 @@ const deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH)
 const authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH)
 const expiresAtSchema = z.number().int().positive().safe()
 
-export const hostDeviceDescriptorSchema: z.ZodType<HostDeviceDescriptor> = z.object({
+/**
+ * The descriptor every device registers with.
+ *
+ * Deliberately not strict: installations that predate the identity rework still send a `role`, and ignoring
+ * it keeps them able to register. What they cannot do is read a role back from the device list, which is the
+ * incompatibility this change accepts.
+ */
+export const accountDeviceDescriptorSchema: z.ZodType<AccountDeviceDescriptor> = z.object({
   deviceId: deviceIdSchema,
   name: deviceNameSchema,
-  role: z.literal('host'),
   platform: devicePlatformSchema,
   identityKey: identityKeySchema,
   clientVersion: deviceVersionSchema,
   harnessVersion: deviceVersionSchema.optional(),
-}).strict()
+})
 
-export const clientDeviceDescriptorSchema: z.ZodType<ClientDeviceDescriptor> = z.object({
-  deviceId: deviceIdSchema,
-  name: deviceNameSchema,
-  role: z.literal('client'),
-  platform: devicePlatformSchema,
-  identityKey: identityKeySchema,
-  clientVersion: deviceVersionSchema,
-}).strict()
-
-export const accountDeviceDescriptorSchema: z.ZodType<AccountDeviceDescriptor> = z.union([
-  hostDeviceDescriptorSchema,
-  clientDeviceDescriptorSchema,
-])
+/** @deprecated One descriptor covers every device. */
+export const hostDeviceDescriptorSchema = accountDeviceDescriptorSchema
+/** @deprecated One descriptor covers every device. */
+export const clientDeviceDescriptorSchema = accountDeviceDescriptorSchema
 
 export const deviceRegistrationRequestSchema: z.ZodType<DeviceRegistrationRequest> = z.object({
   v: z.literal(PROTOCOL_VERSION),

@@ -4249,27 +4249,15 @@ var identityKeySchema = external_exports.string().regex(/^[A-Za-z0-9_-]{42}[AEIM
 var deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH);
 var authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH);
 var expiresAtSchema = external_exports.number().int().positive().safe();
-var hostDeviceDescriptorSchema = external_exports.object({
+var accountDeviceDescriptorSchema = external_exports.object({
   deviceId: deviceIdSchema,
   name: deviceNameSchema,
-  role: external_exports.literal("host"),
   platform: devicePlatformSchema,
   identityKey: identityKeySchema,
   clientVersion: deviceVersionSchema,
   harnessVersion: deviceVersionSchema.optional()
-}).strict();
-var clientDeviceDescriptorSchema = external_exports.object({
-  deviceId: deviceIdSchema,
-  name: deviceNameSchema,
-  role: external_exports.literal("client"),
-  platform: devicePlatformSchema,
-  identityKey: identityKeySchema,
-  clientVersion: deviceVersionSchema
-}).strict();
-var accountDeviceDescriptorSchema = external_exports.union([
-  hostDeviceDescriptorSchema,
-  clientDeviceDescriptorSchema
-]);
+});
+var hostDeviceDescriptorSchema = accountDeviceDescriptorSchema;
 var deviceRegistrationRequestSchema = external_exports.object({
   v: external_exports.literal(PROTOCOL_VERSION),
   device: accountDeviceDescriptorSchema
@@ -13482,10 +13470,9 @@ function oauthProviderName(provider) {
 }
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 var HostServerApi = class {
-  constructor(serverUrl, store, fetchImplementation = fetch, role = "host") {
+  constructor(serverUrl, store, fetchImplementation = fetch) {
     this.store = store;
     this.fetchImplementation = fetchImplementation;
-    this.role = role;
     this.baseUrl = normalizeServerUrl(serverUrl);
   }
   baseUrl;
@@ -13648,9 +13635,6 @@ var HostServerApi = class {
     };
   }
   async authorizeHostWithCode(identity, code) {
-    if (this.role !== "host") {
-      throw new ServerApiError("METHOD_NOT_ALLOWED", "Host registration codes can only authorize a Host device.", false);
-    }
     const registrationCode = code.trim().toUpperCase();
     if (registrationCode.length === 0) {
       throw new ServerApiError("INVALID_MESSAGE", "A Host registration code is required.", false);
@@ -13664,21 +13648,6 @@ var HostServerApi = class {
       authorizationMethod: "host_registration_code"
     });
     return { method: "host_registration_code" };
-  }
-  async authorizeOwnedRole(identity, authorizingAccessToken, account) {
-    this.bindIdentity(identity);
-    const tokens = await this.publicRequest("/api/v1/devices/register-owned-role", {
-      method: "POST",
-      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity) })
-    }, authorizingAccessToken);
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
-      authorizationMethod: "owned_device",
-      ...account === void 0 ? {} : { account }
-    });
-    return {
-      method: "owned_device",
-      ...account === void 0 ? {} : { account }
-    };
   }
   async authenticate(identity = this.requireIdentity()) {
     this.bindIdentity(identity);
@@ -13785,11 +13754,10 @@ var HostServerApi = class {
     return {
       deviceId: identity.deviceId,
       name: identity.name,
-      role: "host",
       platform: platform(),
       identityKey: identity.publicKey,
       clientVersion: PLUGIN_VERSION,
-      ...this.role === "host" && this.harnessVersion !== void 0 ? { harnessVersion: this.harnessVersion } : {}
+      ...this.harnessVersion === void 0 ? {} : { harnessVersion: this.harnessVersion }
     };
   }
   saveTokens(identity, tokens, authorization) {
@@ -13857,7 +13825,7 @@ function normalizeOAuthScanUrl(value, baseUrl) {
 }
 var ClientServerApi = class extends HostServerApi {
   constructor(serverUrl, store, fetchImplementation = fetch) {
-    super(serverUrl, store, fetchImplementation, "client");
+    super(serverUrl, store, fetchImplementation);
   }
 };
 var ServerApiError = class extends Error {
@@ -13907,7 +13875,7 @@ function mapStatus(status2) {
 }
 function parseHostDevice(value) {
   const item = requireRecord(value, "host device");
-  if (item.role !== "host" || typeof item.deviceId !== "string" || typeof item.name !== "string" || typeof item.platform !== "string" || typeof item.membershipId !== "string" || item.membershipId.length === 0) {
+  if (typeof item.deviceId !== "string" || typeof item.name !== "string" || typeof item.platform !== "string" || typeof item.membershipId !== "string" || item.membershipId.length === 0) {
     throw new ServerApiError("INVALID_MESSAGE", "The Server returned invalid host device data.", false);
   }
   return {
@@ -13923,13 +13891,12 @@ function parseHostDevice(value) {
 }
 function parseAuthorizedPeer(value) {
   const item = requireRecord(value, "authorized peer");
-  if (item.role !== "host" && item.role !== "client" || typeof item.deviceId !== "string" || item.deviceId.length === 0 || typeof item.name !== "string" || item.name.length === 0 || typeof item.platform !== "string" || item.platform.length === 0 || typeof item.identityKey !== "string" || !isIdentityKey(item.identityKey) || typeof item.membershipId !== "string" || item.membershipId.length === 0) {
+  if (typeof item.deviceId !== "string" || item.deviceId.length === 0 || typeof item.name !== "string" || item.name.length === 0 || typeof item.platform !== "string" || item.platform.length === 0 || typeof item.identityKey !== "string" || !isIdentityKey(item.identityKey) || typeof item.membershipId !== "string" || item.membershipId.length === 0) {
     throw new ServerApiError("INVALID_MESSAGE", "The Server returned invalid authorized peer data.", false);
   }
   return {
     deviceId: item.deviceId,
     name: item.name,
-    role: item.role,
     platform: item.platform,
     identityKey: item.identityKey,
     membershipId: item.membershipId,
@@ -14273,7 +14240,7 @@ var HostServerConnection = class {
       });
       return;
     }
-    if (descriptor.role !== "client" || descriptor.deviceId !== payload.clientDeviceId || descriptor.identityKey !== payload.clientIdentityKey) {
+    if (descriptor.deviceId !== payload.clientDeviceId || descriptor.identityKey !== payload.clientIdentityKey) {
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by peer identity validation", {
         clientDeviceId: shortId(payload.clientDeviceId)
@@ -21724,7 +21691,7 @@ var ClientModeRuntime = class {
     if (this.config.hostControl?.enabled !== false && this.host !== void 0 && this.server.hasStoredAuthorization !== void 0) {
       try {
         if (await this.server.hasStoredAuthorization() && (this.host.hasStoredAuthorization === void 0 || !await this.host.hasStoredAuthorization())) {
-          await this.authorizeHostByDefault();
+          this.logger.info("Host credentials are present; the Host connection starts on its own");
         }
       } catch (error) {
         this.logger.warn("automatic Host authorization failed", { code: safeErrorCode(error) });
@@ -21741,20 +21708,6 @@ var ClientModeRuntime = class {
    */
   async hasStoredAuthorization() {
     return this.server.hasStoredAuthorization === void 0 ? false : await this.server.hasStoredAuthorization();
-  }
-  async authorizeHostByDefault() {
-    try {
-      if (this.host === void 0) return;
-      if (this.config.hostControl?.enabled === false) return;
-      const status2 = this.host.hostStatus();
-      if (status2.authorized) return;
-      const rejected = status2.error !== void 0 && HOST_AUTHORIZATION_ERRORS.has(status2.error);
-      if (!rejected && this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
-      const credentials = await this.server.authenticate(this.requireIdentity());
-      await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
-    } catch (error) {
-      this.logger.warn("automatic Host authorization failed", { code: safeErrorCode(error) });
-    }
   }
   registerControl(connection, webServer) {
     return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer);
@@ -21838,10 +21791,7 @@ var ClientModeRuntime = class {
    */
   async recoverHostAuthorization() {
     const status2 = this.host?.hostStatus();
-    if (status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error)) return true;
-    await this.authorizeHostByDefault();
-    const after = this.host?.hostStatus();
-    return after === void 0 || after.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(after.error);
+    return status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error);
   }
   async authorizeClientWithAccount(email, password) {
     let authorization;
@@ -21853,7 +21803,6 @@ var ClientModeRuntime = class {
       this.server.bindIdentity(identity);
       authorization = await this.server.authorizeWithAccount(identity, email, password);
     }
-    await this.authorizeHostByDefault();
     this.logger.info("Client account authorized");
     return authorization;
   }
@@ -21867,7 +21816,6 @@ var ClientModeRuntime = class {
       return identity;
     });
     if (result.status === "complete") this.logger.info("Client account authorized with QR login");
-    if (result.status === "complete") await this.authorizeHostByDefault();
     return result;
   }
   /**
@@ -22923,7 +22871,7 @@ var ClientModeError = class extends Error {
   }
 };
 function assertAuthorizedHost(listed, descriptor) {
-  if (descriptor.role !== "host" || descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
+  if (descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
     throw new ClientModeError("PEER_IDENTITY_MISMATCH", "Server Host details do not match the authorized device list.");
   }
 }
@@ -25426,18 +25374,6 @@ var PluginControlRuntime = class {
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id4);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));
     return this.settingsView();
-  }
-  async authorizeOwnedRole(serverUrl, sourceRole, targetRole) {
-    const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
-    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname2());
-    const sourceStore = new ServerCredentialStore(sourceDirectory);
-    if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === void 0) return;
-    const sourceApi = sourceRole === "host" ? new HostServerApi(serverUrl, sourceStore) : new ClientServerApi(serverUrl, sourceStore);
-    const sourceCredentials = await sourceApi.authenticate(sourceIdentity);
-    const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole);
-    const targetIdentity = await new IdentityStore({ directory: targetDirectory }).loadOrCreate(hostname2());
-    const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory)) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory));
-    await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account);
   }
   async logout() {
     if (this.settings === void 0) {
@@ -28393,15 +28329,6 @@ var HostPluginRuntime = class {
       this.serverConnection = this.createServerConnection(this.identity);
     }
     this.logger.info("Host authorization cleared");
-  }
-  async authorizeHostAsOwned(accessToken, account) {
-    if (this.serverApi === void 0) {
-      throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before enabling Host access.", false);
-    }
-    const result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account);
-    if (!this.paused) this.serverConnection?.resume();
-    this.logger.info("Host authorized as an owned device");
-    return result;
   }
   async authorizeHostWithAccount(email, password) {
     if (this.serverApi === void 0) {

@@ -351,22 +351,6 @@ export class HostPluginRuntime {
     this.logger.info('Host authorization cleared')
   }
 
-  async authorizeHostAsOwned(accessToken: string, account?: string): Promise<DeviceAuthorization> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before enabling Host access.', false)
-    }
-    // A revoked device keeps its identity. The Server deletes the row on revocation, so signing in again
-    // recreates it under the same id; the rotation that used to live here consumed another device slot and
-    // made one installation look like several. A refusal therefore propagates, and the panel asks for a
-    // sign-in rather than a new identity.
-    const result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account)
-    // An authorization does not lift an explicit pause: the UI shows the paused
-    // state with its own resume action, so the user's choice stays in force.
-    if (!this.paused) this.serverConnection?.resume()
-    this.logger.info('Host authorized as an owned device')
-    return result
-  }
-
   async authorizeHostWithAccount(email: string, password: string): Promise<DeviceAuthorization> {
     if (this.serverApi === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before signing in.', false)

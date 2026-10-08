@@ -346,17 +346,12 @@ export function createRemoteServer(config: Config) {
       const accountName = sessionAccount(req)
       json(res, 200, { items: store.devicesFor(accountName).map(descriptor), serverUrl: url.origin, transport: 'relay' }); return
     }
-    if (method === 'POST' && (path === '/api/v1/devices/register' || path === '/api/v1/devices/register-owned-role')) {
-      const source = path.endsWith('register-owned-role') ? deviceAuth(req) : undefined
-      const accountName = source === undefined ? sessionAccount(req) : source.account
+    if (method === 'POST' && path === '/api/v1/devices/register') {
+      // Registering is a sign-in: an account session (or a registration code, on its own route) is what proves
+      // the account. There used to be a second route for "registering an owned role", which existed only to let
+      // a client credential mint a second device row - one identity per device makes it dead weight.
+      const accountName = sessionAccount(req)
       const { device } = deviceRegistrationRequestSchema.parse(await body(req))
-      // A device may register itself: with one identity per installation the client and host halves present the
-      // same id and role, so the old "same id or same role" refusal rejected every sign-in. A device registering
-      // its own id falls through to `store.register`, which still pins the identity key; a *different* device
-      // claiming this role stays refused.
-      if (source && source.descriptor.deviceId !== device.deviceId && source.descriptor.role === device.role) {
-        throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
-      }
       json(res, 200, store.register(accountName, device)); return
     }
     if (method === 'POST' && path === '/api/v1/auth/refresh') {
@@ -380,9 +375,10 @@ export function createRemoteServer(config: Config) {
     if (method === 'GET' && path === '/api/v1/me') { json(res, 200, descriptor(deviceAuth(req))); return }
     if (method === 'GET' && path === '/api/v1/devices') {
       const source = deviceAuth(req)
-      // Discovery is account-scoped: any signed-in device sees its own account's hosts. The stored role used to
-      // have to be 'client', which locked out unified devices - their row is registered as a host.
-      const items = store.devicesFor(source.account).filter(d => d.descriptor.role === 'host').map(d => {
+      // Discovery is account-scoped: any signed-in device sees its own account's devices. Each item carries
+      // `online` (from the live connection) and `hostControl` (from the switch), so a device that has control
+      // switched off stays listed and is shown as unavailable instead of disappearing.
+      const items = store.devicesFor(source.account).map(d => {
         const { identityKey: _key, ...item } = descriptor(d)
         return item
       })

@@ -393,27 +393,6 @@ export class PluginControlRuntime {
     return this.settingsView()
   }
 
-  private async authorizeOwnedRole(
-    serverUrl: string,
-    sourceRole: 'host' | 'client',
-    targetRole: 'host' | 'client',
-  ): Promise<void> {
-    const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole)
-    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname())
-    const sourceStore = new ServerCredentialStore(sourceDirectory)
-    if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === undefined) return
-    const sourceApi = sourceRole === 'host'
-      ? new HostServerApi(serverUrl, sourceStore)
-      : new ClientServerApi(serverUrl, sourceStore)
-    const sourceCredentials = await sourceApi.authenticate(sourceIdentity)
-
-    const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole)
-    const targetIdentity = await new IdentityStore({ directory: targetDirectory }).loadOrCreate(hostname())
-    const targetApi = targetRole === 'host'
-      ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
-      : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
-    await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account)
-  }
 
   private async logout(): Promise<PluginSettingsView & { deepseekSignedOut: boolean }> {
     if (this.settings === undefined) {

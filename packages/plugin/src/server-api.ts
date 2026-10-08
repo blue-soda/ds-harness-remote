@@ -75,7 +75,6 @@ export interface ServerHostDevice {
 }
 
 export interface AuthorizedPeerDevice extends ServerHostDevice {
-  role: 'host' | 'client'
   identityKey: string
 }
 
@@ -90,7 +89,6 @@ export class HostServerApi {
     serverUrl: string,
     private readonly store: ServerCredentialStore,
     private readonly fetchImplementation: FetchImplementation = fetch,
-    private readonly role: 'host' | 'client' = 'host',
   ) {
     this.baseUrl = normalizeServerUrl(serverUrl)
   }
@@ -265,9 +263,6 @@ export class HostServerApi {
   }
 
   async authorizeHostWithCode(identity: HostIdentity, code: string): Promise<DeviceAuthorization> {
-    if (this.role !== 'host') {
-      throw new ServerApiError('METHOD_NOT_ALLOWED', 'Host registration codes can only authorize a Host device.', false)
-    }
     const registrationCode = code.trim().toUpperCase()
     if (registrationCode.length === 0) {
       throw new ServerApiError('INVALID_MESSAGE', 'A Host registration code is required.', false)
@@ -281,26 +276,6 @@ export class HostServerApi {
       authorizationMethod: 'host_registration_code',
     })
     return { method: 'host_registration_code' }
-  }
-
-  async authorizeOwnedRole(
-    identity: HostIdentity,
-    authorizingAccessToken: string,
-    account?: string,
-  ): Promise<DeviceAuthorization> {
-    this.bindIdentity(identity)
-    const tokens = await this.publicRequest<TokenPair>('/api/v1/devices/register-owned-role', {
-      method: 'POST',
-      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity) }),
-    }, authorizingAccessToken)
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
-      authorizationMethod: 'owned_device',
-      ...(account === undefined ? {} : { account }),
-    })
-    return {
-      method: 'owned_device',
-      ...(account === undefined ? {} : { account }),
-    }
   }
 
   async authenticate(identity = this.requireIdentity()): Promise<ServerCredentials> {
@@ -425,11 +400,10 @@ export class HostServerApi {
     return {
       deviceId: identity.deviceId,
       name: identity.name,
-      role: 'host' as const,
       platform: platform(),
       identityKey: identity.publicKey,
       clientVersion: PLUGIN_VERSION,
-      ...(this.role === 'host' && this.harnessVersion !== undefined ? { harnessVersion: this.harnessVersion } : {}),
+      ...(this.harnessVersion === undefined ? {} : { harnessVersion: this.harnessVersion }),
     }
   }
 
@@ -516,7 +490,7 @@ function normalizeOAuthScanUrl(value: unknown, baseUrl: string): string | undefi
 
 export class ClientServerApi extends HostServerApi {
   constructor(serverUrl: string, store: ServerCredentialStore, fetchImplementation: FetchImplementation = fetch) {
-    super(serverUrl, store, fetchImplementation, 'client')
+    super(serverUrl, store, fetchImplementation)
   }
 }
 
@@ -575,7 +549,7 @@ function mapStatus(status: number): string {
 
 function parseHostDevice(value: unknown): ServerHostDevice {
   const item = requireRecord(value, 'host device')
-  if (item.role !== 'host' || typeof item.deviceId !== 'string' || typeof item.name !== 'string'
+  if (typeof item.deviceId !== 'string' || typeof item.name !== 'string'
     || typeof item.platform !== 'string' || typeof item.membershipId !== 'string' || item.membershipId.length === 0) {
     throw new ServerApiError('INVALID_MESSAGE', 'The Server returned invalid host device data.', false)
   }
@@ -593,8 +567,7 @@ function parseHostDevice(value: unknown): ServerHostDevice {
 
 function parseAuthorizedPeer(value: unknown): AuthorizedPeerDevice {
   const item = requireRecord(value, 'authorized peer')
-  if ((item.role !== 'host' && item.role !== 'client')
-    || typeof item.deviceId !== 'string' || item.deviceId.length === 0
+  if (typeof item.deviceId !== 'string' || item.deviceId.length === 0
     || typeof item.name !== 'string' || item.name.length === 0
     || typeof item.platform !== 'string' || item.platform.length === 0
     || typeof item.identityKey !== 'string' || !isIdentityKey(item.identityKey)
@@ -604,7 +577,6 @@ function parseAuthorizedPeer(value: unknown): AuthorizedPeerDevice {
   return {
     deviceId: item.deviceId,
     name: item.name,
-    role: item.role,
     platform: item.platform,
     identityKey: item.identityKey,
     membershipId: item.membershipId,

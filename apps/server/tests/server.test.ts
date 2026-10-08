@@ -137,9 +137,11 @@ describe('account and device authorization', () => {
     expect((await request(`/devices/${h.deviceId}`, 'GET', undefined, c.accessToken)).data.identityKey).toBe(h.identityKey)
     // A device may read its own row: one identity covers both halves, so the two roles no longer have to differ.
     expect((await request(`/devices/${c.deviceId}`, 'GET', undefined, c.accessToken)).status).toBe(200)
-    const descriptor = { ...changed, deviceId: randomUUID() }
-    expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, h.accessToken)).status).toBe(409)
-    expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, c.accessToken)).status).toBe(200)
+    // Registering an owned role is gone with the two-identity model. What remains is that a device may
+    // re-register itself - the ordinary sign-in path - and that its row keeps the same id.
+    const own = { ...changed, identityKey: h.identityKey }
+    expect((await request('/devices/register', 'POST', { v: 1, device: own }, accountToken)).status).toBe(200)
+    expect((await request(`/devices/${h.deviceId}`, 'GET', undefined, c.accessToken)).data.deviceId).toBe(h.deviceId)
   })
   it('persists credentials as digests, rotates refresh tokens and revokes a reused family', async () => {
     const d = await device()
@@ -224,7 +226,11 @@ describe('multi-account isolation', () => {
     const clientA = await device('client')
     const listed = await request('/devices', 'GET', undefined, clientA.accessToken)
     expect(listed.status).toBe(200)
-    expect(listed.data.items.map((item: { deviceId: string }) => item.deviceId)).toEqual([hostA.deviceId])
+    // Every device of the account is listed now - the row's role no longer decides - and each item carries
+    // online and hostControl, so a panel marks an unavailable device instead of hiding it.
+    const listedIds = listed.data.items.map((item: { deviceId: string }) => item.deviceId)
+    expect(listedIds).toContain(hostA.deviceId)
+    expect(listedIds).not.toContain(hostB.deviceId)
 
     // The second account's host is invisible to the first account, by id too.
     expect((await request(`/devices/${hostB.deviceId}`, 'GET', undefined, clientA.accessToken)).status).toBe(404)
@@ -233,7 +239,7 @@ describe('multi-account isolation', () => {
     // Device ids are namespaced per account: the same uuid can exist on both.
     const id = randomUUID()
     const keys = generateKeyPair()
-    const descriptor = { deviceId: id, identityKey: keys.publicKey, name: 'shared-id', role: 'client' as const, platform: 'linux', clientVersion: '0.4.15' }
+    const descriptor = { deviceId: id, identityKey: keys.publicKey, name: 'shared-id', platform: 'linux', clientVersion: '0.4.15' }
     expect((await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)).status).toBe(200)
     expect((await request('/devices/register', 'POST', { v: 1, device: descriptor }, tokenB)).status).toBe(200)
   })
@@ -332,5 +338,17 @@ describe('unified device identity', () => {
     const listed = await request('/devices', 'GET', undefined, h.accessToken)
     expect(listed.status).toBe(200)
     expect(listed.data.items.map(item => item.deviceId)).toContain(h.deviceId)
+  })
+})
+
+describe('host control switch', () => {
+  it('lists a device with control off, marked unavailable instead of hidden', async () => {
+    const h = await device('host')
+    // Switching control off records the flag, drops the host connection and refuses a new one (covered below).
+    expect((await request('/devices/self/control', 'POST', { enabled: false }, h.accessToken)).status).toBe(200)
+    // The device stays in the account's list; a panel shows it as unavailable rather than losing sight of it.
+    const listed = await request('/devices', 'GET', undefined, h.accessToken)
+    const item = listed.data.items.find((entry: { deviceId: string }) => entry.deviceId === h.deviceId)
+    expect(item).toMatchObject({ hostControl: false, online: false })
   })
 })

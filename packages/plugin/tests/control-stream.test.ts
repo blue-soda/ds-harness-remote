@@ -289,7 +289,6 @@ function hostControl(): HostAuthorizationControl {
     }),
     reconnectHost: () => undefined,
     clearHostAuthorization: async () => undefined,
-    authorizeHostAsOwned: async () => undefined,
     authorizeHostWithAccount: async () => undefined,
     authorizeHostWithCode: async () => undefined,
   }

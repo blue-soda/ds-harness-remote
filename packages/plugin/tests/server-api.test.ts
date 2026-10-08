@@ -136,10 +136,10 @@ describe('HostServerApi', () => {
 
     expect(recoverIdentity).toHaveBeenCalledTimes(1)
     expect(JSON.parse(String(calls[2]?.init?.body))).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'host', identityKey: identity.publicKey },
+      device: { deviceId: identity.deviceId, identityKey: identity.publicKey },
     })
     expect(JSON.parse(String(calls[3]?.init?.body))).toMatchObject({
-      device: { deviceId: recoveredIdentity.deviceId, role: 'host', identityKey: recoveredIdentity.publicKey },
+      device: { deviceId: recoveredIdentity.deviceId, identityKey: recoveredIdentity.publicKey },
     })
     expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
     expect(calls[3]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
@@ -168,7 +168,6 @@ describe('HostServerApi', () => {
       if (url.endsWith('/devices/client-1')) return json({
         deviceId: 'client-1',
         name: 'Browser',
-        role: 'client',
         platform: 'web',
         identityKey: generateKeyPair(new Uint8Array(32).fill(4)).publicKey,
         membershipId: 'membership-1',
@@ -192,7 +191,7 @@ describe('HostServerApi', () => {
     const registeredDevice = JSON.parse(String(calls[1]?.init?.body))
     expect(registeredDevice).toMatchObject({
       v: 1,
-      device: { deviceId: identity.deviceId, role: 'host', identityKey: identity.publicKey },
+      device: { deviceId: identity.deviceId, identityKey: identity.publicKey },
     })
     expect(registeredDevice.device).toHaveProperty('harnessVersion', '0.1.0-rc.8')
     expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
@@ -228,7 +227,6 @@ describe('HostServerApi', () => {
       code: 'ABCD-EFGH',
       device: {
         deviceId: identity.deviceId,
-        role: 'host',
         identityKey: identity.publicKey,
         harnessVersion: '0.1.0-rc.8',
       },
@@ -238,34 +236,6 @@ describe('HostServerApi', () => {
     })
   })
 
-  it('authorizes the opposite role from an already owned device credential', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-owned-role-'))
-    directories.push(directory)
-    const fetchMock = vi.fn(async () => json(tokens())) as unknown as typeof fetch
-    const store = new ServerCredentialStore(directory)
-    const api = new ClientServerApi('https://dsh.r2049.cn', store, fetchMock)
-    api.setHarnessVersion('0.1.0-rc.8')
-    const identity = hostIdentity()
-
-    await expect(api.authorizeOwnedRole(identity, 'authorizing-device-token', 'owner@example.com')).resolves.toEqual({
-      method: 'owned_device',
-      account: 'owner@example.com',
-    })
-
-    expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
-    expect(vi.mocked(fetchMock).mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer authorizing-device-token',
-    })
-    const registeredDevice = JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))
-    expect(registeredDevice).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'host' },
-    })
-    expect(registeredDevice.device).not.toHaveProperty('harnessVersion')
-    await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
-      authorizationMethod: 'owned_device',
-      account: 'owner@example.com',
-    })
-  })
 
   it('revokes the current Server device before clearing local credentials', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-sign-out-'))
@@ -433,7 +403,7 @@ describe('HostServerApi', () => {
     await api.authorizeWithAccount(identity, 'client@example.com', 'correct horse battery staple')
 
     expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[1]?.[1]?.body))).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'host' },
+      device: { deviceId: identity.deviceId },
     })
     expect(vi.mocked(fetchMock).mock.calls[1]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
   })

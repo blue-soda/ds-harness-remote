@@ -177,7 +177,6 @@ export interface HostAuthorizationControl {
   resumeHostConnection?(): Promise<void>
   clearHostAuthorization(): Promise<void>
   localHarnessVersion?(): string | undefined
-  authorizeHostAsOwned(accessToken: string, account?: string): Promise<unknown>
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>
   authorizeHostWithCode(code: string): Promise<unknown>
   codexStatus?(): { available: boolean }
@@ -327,7 +326,9 @@ export class ClientModeRuntime {
       try {
         if (await this.server.hasStoredAuthorization()
           && (this.host.hasStoredAuthorization === undefined || !await this.host.hasStoredAuthorization())) {
-          await this.authorizeHostByDefault()
+          // One identity, one registration: signing in registers this device as a host too, so there is no
+          // separate "owned role" to authorize here. The Host connection starts on its own unless paused.
+          this.logger.info('Host credentials are present; the Host connection starts on its own')
         }
       } catch (error) {
         this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
@@ -347,25 +348,6 @@ export class ClientModeRuntime {
     return this.server.hasStoredAuthorization === undefined
       ? false
       : await this.server.hasStoredAuthorization()
-  }
-
-  async authorizeHostByDefault(): Promise<void> {
-    try {
-      if (this.host === undefined) return
-      if (this.config.hostControl?.enabled === false) return
-      const status = this.host.hostStatus()
-      if (status.authorized) return
-      // Stored credentials the Server has already rejected must not block
-      // re-authorization. A credential left over from another account — for
-      // example after a Server state migration — would otherwise keep the Host
-      // unregistered while the UI keeps telling the user to authorize again.
-      const rejected = status.error !== undefined && HOST_AUTHORIZATION_ERRORS.has(status.error)
-      if (!rejected && this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
-      const credentials = await this.server.authenticate(this.requireIdentity())
-      await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
-    } catch (error) {
-      this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
-    }
   }
 
   registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -464,10 +446,7 @@ export class ClientModeRuntime {
    */
   private async recoverHostAuthorization(): Promise<boolean> {
     const status = this.host?.hostStatus()
-    if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return true
-    await this.authorizeHostByDefault()
-    const after = this.host?.hostStatus()
-    return after === undefined || after.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(after.error)
+    return status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)
   }
 
   async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {
@@ -481,7 +460,6 @@ export class ClientModeRuntime {
       this.server.bindIdentity(identity)
       authorization = await this.server.authorizeWithAccount(identity, email, password)
     }
-    await this.authorizeHostByDefault()
     this.logger.info('Client account authorized')
     return authorization
   }
@@ -499,7 +477,6 @@ export class ClientModeRuntime {
       return identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
-    if (result.status === 'complete') await this.authorizeHostByDefault()
     return result
   }
 
@@ -1705,8 +1682,7 @@ export class ClientModeError extends Error {
 }
 
 function assertAuthorizedHost(listed: ServerHostDevice, descriptor: AuthorizedPeerDevice): void {
-  if (descriptor.role !== 'host' || descriptor.deviceId !== listed.deviceId
-    || descriptor.membershipId !== listed.membershipId) {
+  if (descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
     throw new ClientModeError('PEER_IDENTITY_MISMATCH', 'Server Host details do not match the authorized device list.')
   }
 }

@@ -190,8 +190,8 @@ export class Store {
     // proves it is the same installation asking to come back; a different key claiming the id is
     // refused, so ids can never be taken over.
     if (old?.revoked && old.descriptor.identityKey !== descriptor.identityKey) throw new ApiError('DEVICE_REVOKED', 403)
-    // The identity key decides ownership; the role no longer pins a device, because one identity may act
-    // as host and as client. A different key claiming the same id is still refused.
+    // The identity key decides ownership: a different key claiming the same id is refused, which is what keeps
+    // an id from being taken over now that no role pins a device.
     if (old && old.descriptor.identityKey !== descriptor.identityKey) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
     if (!old && Object.values(account.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
     account.devices[descriptor.deviceId] = {
@@ -291,7 +291,7 @@ export class Store {
     const d = this.get(id)
     d.lastSeenAt = Date.now()
     if (clientVersion) d.descriptor.clientVersion = clientVersion.slice(0, 64)
-    if (d.descriptor.role === 'host' && harnessVersion) d.descriptor.harnessVersion = harnessVersion.slice(0, 64)
+    if (harnessVersion) d.descriptor.harnessVersion = harnessVersion.slice(0, 64)
     this.save()
   }
 }

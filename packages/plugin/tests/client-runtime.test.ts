@@ -790,7 +790,6 @@ describe('ClientModeRuntime Host account control', () => {
       pauseHostConnection: vi.fn(),
       resumeHostConnection: vi.fn(),
       clearHostAuthorization: vi.fn(),
-      authorizeHostAsOwned: vi.fn(),
       authorizeHostWithAccount: vi.fn(async (email: string) => ({ account: email, expiresAt: Date.now() + 60_000, isAdmin: false })),
       authorizeHostWithCode: vi.fn(async () => ({ method: 'host_registration_code' })),
     } satisfies HostAuthorizationControl
@@ -839,7 +838,6 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(handler?.('host.authorization.set', { enabled: false }, signal)).resolves.toMatchObject({ ok: true })
     expect(host.setHostControl).toHaveBeenLastCalledWith(false)
     expect(host.pauseHostConnection).toHaveBeenCalledOnce()
-    expect(host.authorizeHostAsOwned).not.toHaveBeenCalled()
     expect(host.clearHostAuthorization).not.toHaveBeenCalled()
 
     await dispose()

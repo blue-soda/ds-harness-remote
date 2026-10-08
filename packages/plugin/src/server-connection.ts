@@ -388,7 +388,7 @@ export class HostServerConnection {
       })
       return
     }
-    if (descriptor.role !== 'client' || descriptor.deviceId !== payload.clientDeviceId
+    if (descriptor.deviceId !== payload.clientDeviceId
       || descriptor.identityKey !== payload.clientIdentityKey) {
       this.sendControl('connect.rejected', { connectionId: payload.connectionId })
       this.logger.warn('connection rejected by peer identity validation', {

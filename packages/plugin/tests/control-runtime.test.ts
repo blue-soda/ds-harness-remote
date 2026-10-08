@@ -112,8 +112,7 @@ describe('PluginControlRuntime settings setup', () => {
       })),
       reconnectHost,
       clearHostAuthorization: vi.fn(),
-      authorizeHostAsOwned: vi.fn(),
-      authorizeHostWithAccount: vi.fn(),
+        authorizeHostWithAccount: vi.fn(),
       authorizeHostWithCode: vi.fn(),
     } satisfies HostAuthorizationControl
     const handler = register(new PluginControlRuntime(
@@ -174,11 +173,10 @@ describe('PluginControlRuntime settings setup', () => {
     })
     expect(settings.get()).toMatchObject({ serverUrl: 'https://dsh.r2049.cn' })
     expect(settings.get()).not.toHaveProperty('deviceName')
-    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'host' } })
+    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname() } })
     expect(JSON.stringify(settings.get())).not.toContain('correct horse battery staple')
 
     // One identity means there is no role to switch, and the credential lives in the device directory.
-    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false })
     expect(calls).toHaveLength(2)
     const deviceDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'device')
     await expect(readFile(join(deviceDirectory, 'server-credentials.json'), 'utf8')).resolves.toContain('host@example.com')
@@ -224,7 +222,7 @@ describe('PluginControlRuntime settings setup', () => {
         settings: { association: { method: 'account', account: 'client@example.com' } },
       },
     })
-    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'host' } })
+    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname() } })
     const deviceDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'device')
     const stored = await readFile(join(deviceDirectory, 'server-credentials.json'), 'utf8')
     expect(stored).toContain('client@example.com')
@@ -259,11 +257,10 @@ describe('PluginControlRuntime settings setup', () => {
     expect(calls[0]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register-with-code')
     expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
       code: 'ABCD-EFGH',
-      device: { name: hostname(), role: 'host' },
+      device: { name: hostname() },
     })
 
     // A device no longer has a role to switch: the registration above is the device's whole identity.
-    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false })
     expect(calls).toHaveLength(1)
   })
 })
@@ -429,7 +426,7 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
       resolveConfig(settings.get()), directory, settings, undefined, undefined,
       { read: async () => ({ token: 'platform-grant-value' }), startSignIn: async () => ({}), signOut: async () => true },
     ))
-    const payload = { role: 'client', serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }
+    const payload = { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }
 
     await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
     const afterFirst = calls.length
