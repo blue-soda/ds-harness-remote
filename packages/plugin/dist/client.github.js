@@ -2020,6 +2020,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "No devices are currently connected to this Host.",
     unknownDevice: "Unknown device",
     exitRemoteAccount: "Sign out",
+    revokeThisDevice: "Remove this device",
+    revokeDeviceImpact: "Removes this device from the account. Signing in again brings it back with the same device id.",
     cancel: "Cancel",
     signOutImpact: "Signing out disconnects this plugin and also signs DSH out of your DeepSeek account.",
     wechatLogin: "WeChat QR",
@@ -2276,6 +2278,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noConnectedClients: "\u76EE\u524D\u6CA1\u6709\u8BBE\u5907\u8FDE\u63A5\u5230\u8FD9\u53F0\u4E3B\u673A\u3002",
     unknownDevice: "\u672A\u77E5\u8BBE\u5907",
     exitRemoteAccount: "\u9000\u51FA\u8D26\u53F7",
+    revokeThisDevice: "\u6CE8\u9500\u672C\u8BBE\u5907",
+    revokeDeviceImpact: "\u5C06\u4ECE\u8D26\u53F7\u4E2D\u79FB\u9664\u672C\u8BBE\u5907\uFF1B\u91CD\u65B0\u767B\u5F55\u4F1A\u4EE5\u540C\u4E00\u4E2A\u8BBE\u5907 ID \u56DE\u6765\u3002",
     cancel: "\u53D6\u6D88",
     signOutImpact: "\u9000\u51FA\u540E\u4F1A\u65AD\u5F00\u672C\u63D2\u4EF6\u7684\u8FDE\u63A5\uFF0C\u5E76\u4E14\u4F1A\u4E00\u5E76\u9000\u51FA DSH \u7684 DeepSeek \u8D26\u53F7\u767B\u5F55\u3002",
     wechatLogin: "\u5FAE\u4FE1\u626B\u7801",
@@ -2992,7 +2996,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       function RemoteWorkspaceAction(props) {
         let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [authorizationResolved, setAuthorizationResolved] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState(DEFAULT_REMOTE_SERVER_URL), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(!1), [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState(void 0), [loginMethod, setLoginMethod] = React.useState(
           isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider
-        ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [confirmingSignOut, setConfirmingSignOut] = React.useState(!1), [error, setError] = React.useState(void 0);
+        ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [confirmingSignOut, setConfirmingSignOut] = React.useState(!1), [confirmingRevoke, setConfirmingRevoke] = React.useState(!1), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
           open || setDevicesOpen(!1);
         }, [open]), React.useEffect(() => {
@@ -3240,6 +3244,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setError(messageOf(reason));
           } finally {
             setBusy(!1);
+          }
+        }, revokeRemote = async () => {
+          setBusy(!0), setError(void 0), setNotice(void 0);
+          try {
+            await props.control("client.device.revoke"), setDevices([]), setNeedsAuthorization(!0), setStatus(await props.control("status"));
+          } catch (reason) {
+            setError(messageOf(reason));
+          } finally {
+            setConfirmingRevoke(!1), setBusy(!1);
           }
         }, logoutRemote = async () => {
           setBusy(!0), setError(void 0), setNotice(void 0);
@@ -3531,7 +3544,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     React.createElement(
                       "p",
                       { className: "dshRemoteHint" },
-                      t(confirmingSignOut ? "signOutImpact" : "selectHostHint")
+                      t(confirmingRevoke ? "revokeDeviceImpact" : confirmingSignOut ? "signOutImpact" : "selectHostHint")
                     ),
                     React.createElement(
                       "footer",
@@ -3555,6 +3568,27 @@ Minimum version required to store current data is: ` + bestVersion + `.
                         React.Fragment,
                         null,
                         React.createElement("span", null, status?.host?.account ?? t("account")),
+                        confirmingRevoke ? React.createElement(
+                          React.Fragment,
+                          null,
+                          React.createElement("button", {
+                            type: "button",
+                            className: "dshRemoteDiscard",
+                            disabled: busy,
+                            onClick: () => setConfirmingRevoke(!1)
+                          }, t("cancel")),
+                          React.createElement("button", {
+                            type: "button",
+                            className: "dshRemoteAccountExit",
+                            disabled: busy,
+                            onClick: () => void revokeRemote()
+                          }, t("revokeThisDevice"))
+                        ) : React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteAccountExit",
+                          disabled: busy,
+                          onClick: () => setConfirmingRevoke(!0)
+                        }, t("revokeThisDevice")),
                         React.createElement("button", {
                           type: "button",
                           className: "dshRemoteAccountExit",

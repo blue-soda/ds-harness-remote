@@ -21821,9 +21821,9 @@ var ClientModeRuntime = class {
       authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password);
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== "DEVICE_REVOKED") throw error;
-      this.identity = await this.identities.reset(this.config.deviceName);
-      this.server.bindIdentity(this.identity);
-      authorization = await this.server.authorizeWithAccount(this.identity, email, password);
+      const identity = this.requireIdentity();
+      this.server.bindIdentity(identity);
+      authorization = await this.server.authorizeWithAccount(identity, email, password);
     }
     await this.authorizeHostByDefault();
     this.logger.info("Client account authorized");
@@ -21834,10 +21834,9 @@ var ClientModeRuntime = class {
   }
   async pollClientOAuthQrLogin(qrId) {
     const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
-      this.identity = await this.identities.reset(this.config.deviceName);
-      this.server.bindIdentity(this.identity);
-      this.logger.info("Rotated revoked Client identity before QR authorization retry");
-      return this.identity;
+      const identity = this.requireIdentity();
+      this.server.bindIdentity(identity);
+      return identity;
     });
     if (result.status === "complete") this.logger.info("Client account authorized with QR login");
     if (result.status === "complete") await this.authorizeHostByDefault();
@@ -21871,6 +21870,21 @@ var ClientModeRuntime = class {
     await previous?.client.close().catch(() => void 0);
     this.remoteReconnectRun += 1;
     await this.server.clearAuthorization();
+  }
+  /**
+   * Revoke this device on the Server, then drop the local authorization.
+   *
+   * Used by the Remote panel's removal action. The device deliberately keeps its identity: signing in
+   * again re-registers the same installation instead of adding another device row, which is what stops
+   * one machine from looking like several over time.
+   */
+  async revokeCurrentDevice() {
+    await this.server.revokeCurrentDevice();
+    this.connected = void 0;
+    this.connectionProgress = void 0;
+    this.reconnecting = void 0;
+    this.fellBackToLocal = false;
+    this.remoteReconnectRun += 1;
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -22685,6 +22699,10 @@ var ClientModeRuntime = class {
     try {
       if (endpoint === "status") return ok2(await this.detailedStatus());
       if (endpoint === "client.connection.verify") return ok2(await this.verifyRemoteConnection());
+      if (endpoint === "client.device.revoke") {
+        await this.revokeCurrentDevice();
+        return ok2(this.status());
+      }
       if (endpoint === "devices") return ok2(await this.devices());
       if (endpoint === "client.account.login") {
         const value = record4(payload);

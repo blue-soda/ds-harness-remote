@@ -467,9 +467,10 @@ export class ClientModeRuntime {
       authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password)
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.server.bindIdentity(this.identity)
-      authorization = await this.server.authorizeWithAccount(this.identity, email, password)
+      // (no identity rotation: the device id must stay stable for the life of the installation)
+      const identity = this.requireIdentity()
+      this.server.bindIdentity(identity)
+      authorization = await this.server.authorizeWithAccount(identity, email, password)
     }
     await this.authorizeHostByDefault()
     this.logger.info('Client account authorized')
@@ -482,10 +483,11 @@ export class ClientModeRuntime {
 
   async pollClientOAuthQrLogin(qrId: string): Promise<unknown> {
     const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.server.bindIdentity(this.identity)
-      this.logger.info('Rotated revoked Client identity before QR authorization retry')
-      return this.identity
+      // (no identity rotation: the device id must stay stable for the life of the installation)
+      const identity = this.requireIdentity()
+      this.server.bindIdentity(identity)
+      // Same identity: a revoked device comes back as itself once its key proves ownership.
+      return identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
     if (result.status === 'complete') await this.authorizeHostByDefault()
@@ -526,6 +528,23 @@ export class ClientModeRuntime {
     // authorized — which stops the Host from re-authorizing and leaves the
     // connection retrying tokens the Server no longer accepts.
     await this.server.clearAuthorization()
+  }
+
+  /**
+   * Revoke this device on the Server, then drop the local authorization.
+   *
+   * Used by the Remote panel's removal action. The device deliberately keeps its identity: signing in
+   * again re-registers the same installation instead of adding another device row, which is what stops
+   * one machine from looking like several over time.
+   */
+  async revokeCurrentDevice(): Promise<void> {
+    await this.server.revokeCurrentDevice()
+    // The Server has already torn the connection down with the row, so only local session state is left.
+    this.connected = undefined
+    this.connectionProgress = undefined
+    this.reconnecting = undefined
+    this.fellBackToLocal = false
+    this.remoteReconnectRun += 1
   }
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
@@ -1474,6 +1493,10 @@ export class ClientModeRuntime {
       // reacts only to a session it already knows is gone, because the Server's link-dropped notice and
       // a failed write are what actually prove a link ended.
       if (endpoint === 'client.connection.verify') return ok(await this.verifyRemoteConnection())
+      if (endpoint === 'client.device.revoke') {
+        await this.revokeCurrentDevice()
+        return ok(this.status())
+      }
       if (endpoint === 'devices') return ok(await this.devices())
       if (endpoint === 'client.account.login') {
         const value = record(payload)

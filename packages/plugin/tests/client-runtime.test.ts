@@ -964,3 +964,32 @@ function gatewayWithCarrier() {
     },
   }
 }
+describe('device revocation from the panel', () => {
+  it('revokes on the server and clears the local session, keeping the identity', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-revoke-'))
+    directories.push(directory)
+    const revokeCurrentDevice = vi.fn(async () => undefined)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn(), revokeCurrentDevice } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+    const identityBefore = (runtime as unknown as { identity: { deviceId: string } }).identity.deviceId
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client: { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) },
+      target: { deviceId: 'host-1', name: 'Host' },
+      features: remoteHostFeatures(),
+    }
+    await runtime.revokeCurrentDevice()
+    expect(revokeCurrentDevice).toHaveBeenCalledTimes(1)
+    expect(runtime.status().connected).not.toBe(true)
+    // The whole point of the model: removal must not rotate the identity, or the same installation
+    // would come back as a second device.
+    expect((runtime as unknown as { identity: { deviceId: string } }).identity.deviceId).toBe(identityBefore)
+    await runtime.close()
+  }, 20_000)
+})

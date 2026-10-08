@@ -266,3 +266,22 @@ describe('health and readiness endpoints', () => {
     }
   })
 })
+describe('device revocation', () => {
+  it('removes the device and lets the same installation register again with the same id', async () => {
+    const d = await device('client')
+    // The row and its tokens go together, so the cut-off is immediate rather than on next login.
+    const revoked = await request('/devices/self', 'DELETE', undefined, d.accessToken)
+    expect(revoked.status).toBe(200)
+    // Row and token go together: the device is cut off immediately rather than on its next login.
+    expect((await request('/me', 'GET', undefined, d.accessToken)).status).toBe(401)
+    // Signing in again registers the same installation, and the id it presents comes back unchanged:
+    // this is what keeps one device from looking like several over time.
+    const descriptor = {
+      deviceId: d.deviceId, identityKey: d.identityKey, name: d.name,
+      role: d.role, platform: d.platform, clientVersion: d.clientVersion,
+    }
+    const again = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(again.status).toBe(200)
+    expect((await request('/me', 'GET', undefined, again.data.accessToken)).status).toBe(200)
+  })
+})

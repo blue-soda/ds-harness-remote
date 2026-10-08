@@ -543,6 +543,8 @@ const en = {
   noConnectedClients: 'No devices are currently connected to this Host.',
   unknownDevice: 'Unknown device',
   exitRemoteAccount: 'Sign out',
+  revokeThisDevice: 'Remove this device',
+  revokeDeviceImpact: 'Removes this device from the account. Signing in again brings it back with the same device id.',
   cancel: 'Cancel',
   signOutImpact: 'Signing out disconnects this plugin and also signs DSH out of your DeepSeek account.',
   wechatLogin: 'WeChat QR',
@@ -802,6 +804,8 @@ const zh: Record<keyof typeof en, string> = {
   noConnectedClients: '目前没有设备连接到这台主机。',
   unknownDevice: '未知设备',
   exitRemoteAccount: '退出账号',
+  revokeThisDevice: '注销本设备',
+  revokeDeviceImpact: '将从账号中移除本设备；重新登录会以同一个设备 ID 回来。',
   cancel: '取消',
   signOutImpact: '退出后会断开本插件的连接，并且会一并退出 DSH 的 DeepSeek 账号登录。',
   wechatLogin: '微信扫码',
@@ -1749,6 +1753,7 @@ window.__ModuleLoader__.load({
        * notice explaining it afterwards.
        */
       const [confirmingSignOut, setConfirmingSignOut] = React.useState(false)
+  const [confirmingRevoke, setConfirmingRevoke] = React.useState(false)
       const [error, setError] = React.useState<string | undefined>(undefined)
 
       React.useEffect(() => {
@@ -2249,6 +2254,25 @@ window.__ModuleLoader__.load({
         }
       }
 
+  const revokeRemote = async (): Promise<void> => {
+    setBusy(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      await props.control('client.device.revoke')
+      // The device is gone from the account, so the panel goes back to asking for authorization.
+      setDevices([])
+      setNeedsAuthorization(true)
+      setStatus(await props.control<RemoteStatus>('status'))
+    } catch (reason) {
+      setError(messageOf(reason))
+    } finally {
+      // The confirmation is a one-shot step: the outcome speaks for itself.
+      setConfirmingRevoke(false)
+      setBusy(false)
+    }
+  }
+
       const logoutRemote = async (): Promise<void> => {
         setBusy(true)
         setError(undefined)
@@ -2506,7 +2530,7 @@ window.__ModuleLoader__.load({
                 selectedHost === undefined
                   ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
                     React.createElement('p', { className: 'dshRemoteHint' },
-                      t(confirmingSignOut ? 'signOutImpact' : 'selectHostHint')),
+                      t(confirmingRevoke ? 'revokeDeviceImpact' : confirmingSignOut ? 'signOutImpact' : 'selectHostHint')),
                     React.createElement('footer', { className: 'dshRemoteAccountFooter' },
                       confirmingSignOut
                         ? React.createElement(React.Fragment, null,
@@ -2520,6 +2544,20 @@ window.__ModuleLoader__.load({
                           }, t('exitRemoteAccount')))
                         : React.createElement(React.Fragment, null,
                           React.createElement('span', null, status?.host?.account ?? t('account')),
+                          confirmingRevoke
+                            ? React.createElement(React.Fragment, null,
+                              React.createElement('button', {
+                                type: 'button', className: 'dshRemoteDiscard', disabled: busy,
+                                onClick: () => setConfirmingRevoke(false),
+                              }, t('cancel')),
+                              React.createElement('button', {
+                                type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                                onClick: () => void revokeRemote(),
+                              }, t('revokeThisDevice')))
+                            : React.createElement('button', {
+                              type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                              onClick: () => setConfirmingRevoke(true),
+                            }, t('revokeThisDevice')),
                           React.createElement('button', {
                             type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
                             onClick: () => setConfirmingSignOut(true),

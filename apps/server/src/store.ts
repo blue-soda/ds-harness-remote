@@ -183,7 +183,10 @@ export class Store {
     const account = this.account(accountName)
     if (account === undefined) throw new ApiError('AUTH_INVALID', 401)
     const old = account.devices[descriptor.deviceId]
-    if (old?.revoked) throw new ApiError('DEVICE_REVOKED', 403)
+    // A revoked row left behind by an older server build stays unusable unless the same identity key
+    // proves it is the same installation asking to come back; a different key claiming the id is
+    // refused, so ids can never be taken over.
+    if (old?.revoked && old.descriptor.identityKey !== descriptor.identityKey) throw new ApiError('DEVICE_REVOKED', 403)
     if (old && (old.descriptor.identityKey !== descriptor.identityKey || old.descriptor.role !== descriptor.role)) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
     if (!old && Object.values(account.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
     account.devices[descriptor.deviceId] = {
@@ -252,9 +255,21 @@ export class Store {
     this.save()
   }
 
+  /**
+   * Remove a device from its account for good.
+   *
+   * The row is deleted rather than marked, which is what makes a device identity stable: the device
+   * keeps its own id, so registering again after a fresh login recreates *this* device instead of
+   * forcing a new identity - the rotation the client used to perform, which burned an account's 256
+   * device slots and made one installation look like several. Deleting the row also drops every token
+   * it held, so the cut-off is immediate rather than "on next login".
+   *
+   * A device is only eligible to return by signing in again: registration requires an account session
+   * or a registration code, never just a device token.
+   */
   revoke(id: string): void {
     const device = this.get(id)
-    device.revoked = true
+    delete this.account(device.account)!.devices[id]
     this.invalidate(id, device.account)
   }
 
