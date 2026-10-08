@@ -3261,16 +3261,16 @@ window.__ModuleLoader__.load({
         wasReconnecting = false
         if (current.connected !== true) return
         void ctx.sessions.refresh().catch(() => undefined)
-        // Reconnect the renderer's baseline, whatever the reconnect was called.
+        // A page that reloaded into the local shell during the fallback holds local Workspaces, and the
+        // store cannot be re-read from here, so the remote Workspace it should show after recovery is not
+        // in it - which is why the sessions come back ungrouped. Landing on the remote carriers again is
+        // the only way to a Workspace store that has them.
         //
-        // A reconnect replaces the client's control connection, and the Server closes the replaced peer's
-        // links with it, so the Workspace and Session baseline this page loaded is stale even when the
-        // fast reconnect reports success: measured on a link that reconnected every minute, the header
-        // said the session was connected while every Session sat ungrouped, because the renderer still
-        // held the previous Workspace store. Refreshing the Session list alone cannot fix that (the store
-        // has no refresh), so landing on the remote carriers again is the only way back - the same reload
-        // the fallback path needs.
-        if (Date.now() - lastRecoveryReloadAt > 20_000) {
+        // Only a page that actually went local needs this: a quick reconnect keeps the remote store, so it
+        // refreshes the Session list instead of reloading. Reloading on every reconnect re-issued the
+        // slowest request of the session immediately after the link came back and turned a busy Host into
+        // a reconnect loop (measured against a Desktop Host loading a large history).
+        if ((!sawRemoteViewBefore || sawFallback) && Date.now() - lastRecoveryReloadAt > 5_000) {
           lastRecoveryReloadAt = Date.now()
           window.location.reload()
         }
