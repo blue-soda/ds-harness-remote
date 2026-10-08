@@ -358,7 +358,6 @@ function config(): ResolvedConfig {
     terminal: { enabled: false },
     loopback: { ports: [] },
     enabled: true,
-    role: 'host',
     serverUrl: undefined,
     deviceName: 'Host',
     forceRelay: true,

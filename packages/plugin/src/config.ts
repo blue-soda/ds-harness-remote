@@ -7,7 +7,6 @@ export { DEFAULT_REMOTE_SERVER_URL } from './defaults.js'
 
 export interface Config {
   enabled?: boolean
-  role?: 'host' | 'client' | 'both'
   serverUrl?: string
   deviceName?: string
   terminal?: { enabled?: boolean }
@@ -35,7 +34,6 @@ export interface ResolvedCodexConfig {
 
 export interface ResolvedConfig {
   enabled: boolean
-  role: 'host' | 'client' | 'both'
   serverUrl?: string
   deviceName: string
   forceRelay: boolean
@@ -69,7 +67,6 @@ export type ConfigInput = Config | VolatileSnapshot<Config>
  */
 const entryConfigSchema = s.object({
   enabled: s.boolean(),
-  role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -118,7 +115,6 @@ const reconnectSchema = z.union([
 
 const configSchema = z.object({
   enabled: z.boolean().optional(),
-  role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
@@ -146,7 +142,6 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   }
   return {
     enabled: parsed.enabled ?? true,
-    role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
     deviceName: parsed.deviceName ?? hostname(),
     // `paused` keeps this machine unreachable without releasing its credentials:

@@ -9,7 +9,7 @@ import {
   type HostConnectionHandle,
   type HostAuthorizationControl,
 } from './client-runtime.js'
-import { IdentityStore, serverStorageDirectory } from './identity-store.js'
+import { IdentityStore, ensureDeviceDirectory, serverStorageDirectory } from './identity-store.js'
 import { ClientServerApi, HostServerApi, type DeviceAuthorization } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
@@ -147,7 +147,6 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.get') return ok(await this.settingsView())
       if (endpoint === 'settings.configure') return ok(await this.configure(payload))
       if (endpoint === 'settings.server.set') return ok(await this.setServer(payload))
-      if (endpoint === 'settings.role.set') return ok(await this.setRole(payload))
       if (endpoint === 'settings.codex.set') return ok(await this.setCodex(payload))
       if (endpoint === 'settings.acp.set') return ok(await this.setAcp(payload))
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
@@ -210,7 +209,7 @@ export class PluginControlRuntime {
         return ok(await this.host.authorizeHostWithCode(value.code))
       }
       if (endpoint === 'mode.set' && record(payload).mode === 'local') return ok(this.hostOnlyStatus())
-      throw new ClientModeError('METHOD_NOT_ALLOWED', 'Remote Client mode is disabled by the plugin role.')
+      throw new ClientModeError('METHOD_NOT_ALLOWED', 'Remote Client mode is unavailable in this profile.')
     } catch (error) {
       return fail(error)
     }
@@ -221,25 +220,25 @@ export class PluginControlRuntime {
       throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     }
     const value = record(payload)
-    if (value.role !== 'host' && value.role !== 'client') {
-      throw new ClientModeError('INVALID_MESSAGE', 'Role must be Host or Client.')
-    }
     if (typeof value.serverUrl !== 'string') {
       throw new ClientModeError('INVALID_MESSAGE', 'Server URL is required.')
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
-    const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl })
+    const next = resolveConfig({ ...current, serverUrl: value.serverUrl })
 
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl!, value.role),
-    })
+    // One identity per installation, whatever this device is used for.
+    const directory = await ensureDeviceDirectory(this.identityDirectory, next.serverUrl!)
+    const identities = new IdentityStore({ directory })
     const identity = await identities.loadOrCreate(hostname())
-    const api = value.role === 'host'
-      ? new HostServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
-      : new ClientServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
+    // Narrowed here so the authorization call below keeps its type: a boolean flag would lose it.
+    const registrationCode = typeof value.registrationCode === 'string' ? value.registrationCode.trim() : ''
+    const hasRegistrationCode = registrationCode !== ''
+    const api = hasRegistrationCode
+      ? new HostServerApi(next.serverUrl!, new ServerCredentialStore(directory))
+      : new ClientServerApi(next.serverUrl!, new ServerCredentialStore(directory))
     let authorization
-    if (value.role === 'host' && typeof value.registrationCode === 'string' && value.registrationCode.trim() !== '') {
-      authorization = await api.authorizeHostWithCode(identity, value.registrationCode)
+    if (hasRegistrationCode) {
+      authorization = await api.authorizeHostWithCode(identity, registrationCode)
     } else if (value.provider === 'deepseek') {
       // Sign in with the DeepSeek account DSH is already using. The Server
       // confirms the grant with the platform, so it never trusts this claim.
@@ -278,13 +277,9 @@ export class PluginControlRuntime {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password)
     }
-    if (value.role === 'client' && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
-      await this.client?.authorizeHostByDefault()
-    }
     await this.settings.replace(editableConfig(next))
     return {
       status: 'authorized',
-      role: value.role,
       ...(authorization.account === undefined ? {} : { account: authorization.account }),
       settings: await this.settingsView(),
     }
@@ -301,24 +296,6 @@ export class PluginControlRuntime {
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl })
     await this.settings.replace(editableConfig(next))
-    return this.settingsView()
-  }
-
-  private async setRole(payload: unknown): Promise<PluginSettingsView> {
-    if (this.settings === undefined) {
-      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
-    }
-    const role = record(payload).role
-    if (role !== 'host' && role !== 'client') {
-      throw new ClientModeError('INVALID_MESSAGE', 'Role must be Host or Client.')
-    }
-    const current = editableConfig(resolveConfig(this.settings.get()))
-    const currentRole = current.role === 'client' ? 'client' : 'host'
-    if (role !== currentRole && current.serverUrl !== undefined
-      && await this.association(current.serverUrl, role) === undefined) {
-      await this.authorizeOwnedRole(current.serverUrl, currentRole, role)
-    }
-    await this.settings.replace({ ...current, role })
     return this.settingsView()
   }
 
@@ -438,10 +415,9 @@ export class PluginControlRuntime {
         this.client?.clearClientAuthorization(),
         this.host?.clearHostAuthorization(),
       ])
-      await Promise.all((['host', 'client'] as const).map(async role => {
-        const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl!, role)
-        await new ServerCredentialStore(directory).clear()
-      }))
+      // One device, one credential store: signing out clears the single identity's credentials.
+      const directory = await ensureDeviceDirectory(this.identityDirectory, config.serverUrl!)
+      await new ServerCredentialStore(directory).clear()
     }
     // Signing in borrows DSH's own DeepSeek authorization, so signing out must
     // release it as well: otherwise the next sign-in silently reuses the same
@@ -488,8 +464,8 @@ export class PluginControlRuntime {
   private async settingsView(): Promise<PluginSettingsView> {
     const config = this.settings === undefined ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()))
     const associations = await this.associations(config)
-    const role = config.role === 'client' ? 'client' : 'host'
-    const association = associations[role]
+    // One identity means one association: the panel no longer has a role to pick.
+    const association = associations.host
     const discovered = discoveredCodexBinary(config.codex?.binary ?? 'codex')
     return {
       config,
@@ -505,19 +481,16 @@ export class PluginControlRuntime {
 
   private async associations(config: Config): Promise<PluginSettingsView['associations']> {
     if (config.serverUrl === undefined) return {}
-    const [host, client] = await Promise.all([
-      this.association(config.serverUrl, 'host'),
-      this.association(config.serverUrl, 'client'),
-    ])
-    return {
-      ...(host === undefined ? {} : { host }),
-      ...(client === undefined ? {} : { client }),
-    }
+    // One identity serves both halves, so there is a single association; it is reported under both keys
+    // only because older panels read them separately.
+    const association = await this.association(config.serverUrl)
+    if (association === undefined) return {}
+    return { host: association, client: association }
   }
 
-  private async association(serverUrl: string, role: 'host' | 'client'): Promise<PluginAssociation | undefined> {
+  private async association(serverUrl: string): Promise<PluginAssociation | undefined> {
     const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
+      directory: await ensureDeviceDirectory(this.identityDirectory, serverUrl),
     })
     const identity = await identities.loadOrCreate(hostname())
     const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
@@ -563,7 +536,6 @@ function discoveredCodexBinary(configured: string): string | undefined {
 function editableConfig(config: ResolvedConfig): Config {
   return {
     enabled: config.enabled,
-    role: config.role,
     ...(config.serverUrl === undefined ? {} : { serverUrl: config.serverUrl }),
     terminal: config.terminal,
     hostControl: config.hostControl ?? { enabled: true, paused: false },

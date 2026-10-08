@@ -242,7 +242,6 @@ describe('Cordis plugin lifecycle', () => {
     ctx.provide('connection', connection())
 
     const fiber = await ctx.plugin(remotePlugin, {
-      role: 'client',
       serverUrl: 'https://dsh.r2049.cn',
       deviceName: 'Former client',
     })

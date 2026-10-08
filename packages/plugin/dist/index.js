@@ -13357,7 +13357,6 @@ var DEFAULT_REMOTE_SERVER_URL = "https://sakakibara.ink:8443";
 // src/config.ts
 var entryConfigSchema = s.object({
   enabled: s.boolean(),
-  role: s.union(["host", "client", "both"]),
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -13394,7 +13393,6 @@ var reconnectSchema = external_exports.union([
 ]);
 var configSchema = external_exports.object({
   enabled: external_exports.boolean().optional(),
-  role: external_exports.enum(["host", "client", "both"]).optional(),
   serverUrl: external_exports.string().url().optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
@@ -13421,7 +13419,6 @@ function resolveConfig(input2 = {}, env = process.env) {
   }
   return {
     enabled: parsed.enabled ?? true,
-    role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
     deviceName: parsed.deviceName ?? hostname(),
     // `paused` keeps this machine unreachable without releasing its credentials:
@@ -25177,7 +25174,6 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.get") return ok3(await this.settingsView());
       if (endpoint === "settings.configure") return ok3(await this.configure(payload));
       if (endpoint === "settings.server.set") return ok3(await this.setServer(payload));
-      if (endpoint === "settings.role.set") return ok3(await this.setRole(payload));
       if (endpoint === "settings.codex.set") return ok3(await this.setCodex(payload));
       if (endpoint === "settings.acp.set") return ok3(await this.setAcp(payload));
       if (endpoint === "settings.acp.add") return ok3(await this.addAcp(payload));
@@ -25232,7 +25228,7 @@ var PluginControlRuntime = class {
         return ok3(await this.host.authorizeHostWithCode(value.code));
       }
       if (endpoint === "mode.set" && record5(payload).mode === "local") return ok3(this.hostOnlyStatus());
-      throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is disabled by the plugin role.");
+      throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is unavailable in this profile.");
     } catch (error) {
       return fail3(error);
     }
@@ -25242,22 +25238,20 @@ var PluginControlRuntime = class {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
     const value = record5(payload);
-    if (value.role !== "host" && value.role !== "client") {
-      throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
-    }
     if (typeof value.serverUrl !== "string") {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
     const current = editableConfig(resolveConfig(this.settings.get()));
-    const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl });
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role)
-    });
+    const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
+    const directory = await ensureDeviceDirectory(this.identityDirectory, next.serverUrl);
+    const identities = new IdentityStore({ directory });
     const identity = await identities.loadOrCreate(hostname2());
-    const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
+    const registrationCode = typeof value.registrationCode === "string" ? value.registrationCode.trim() : "";
+    const hasRegistrationCode = registrationCode !== "";
+    const api = hasRegistrationCode ? new HostServerApi(next.serverUrl, new ServerCredentialStore(directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(directory));
     let authorization;
-    if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
-      authorization = await api.authorizeHostWithCode(identity, value.registrationCode);
+    if (hasRegistrationCode) {
+      authorization = await api.authorizeHostWithCode(identity, registrationCode);
     } else if (value.provider === "deepseek") {
       if (this.deepseekSession === void 0) {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
@@ -25288,13 +25282,9 @@ var PluginControlRuntime = class {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password);
     }
-    if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
-      await this.client?.authorizeHostByDefault();
-    }
     await this.settings.replace(editableConfig(next));
     return {
       status: "authorized",
-      role: value.role,
       ...authorization.account === void 0 ? {} : { account: authorization.account },
       settings: await this.settingsView()
     };
@@ -25310,22 +25300,6 @@ var PluginControlRuntime = class {
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
-    return this.settingsView();
-  }
-  async setRole(payload) {
-    if (this.settings === void 0) {
-      throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    }
-    const role = record5(payload).role;
-    if (role !== "host" && role !== "client") {
-      throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
-    }
-    const current = editableConfig(resolveConfig(this.settings.get()));
-    const currentRole = current.role === "client" ? "client" : "host";
-    if (role !== currentRole && current.serverUrl !== void 0 && await this.association(current.serverUrl, role) === void 0) {
-      await this.authorizeOwnedRole(current.serverUrl, currentRole, role);
-    }
-    await this.settings.replace({ ...current, role });
     return this.settingsView();
   }
   async setDevelopment(payload) {
@@ -25428,10 +25402,8 @@ var PluginControlRuntime = class {
         this.client?.clearClientAuthorization(),
         this.host?.clearHostAuthorization()
       ]);
-      await Promise.all(["host", "client"].map(async (role) => {
-        const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl, role);
-        await new ServerCredentialStore(directory).clear();
-      }));
+      const directory = await ensureDeviceDirectory(this.identityDirectory, config.serverUrl);
+      await new ServerCredentialStore(directory).clear();
     }
     let deepseekSignedOut = false;
     if (this.deepseekSession !== void 0) {
@@ -25471,8 +25443,7 @@ var PluginControlRuntime = class {
   async settingsView() {
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
     const associations = await this.associations(config);
-    const role = config.role === "client" ? "client" : "host";
-    const association = associations[role];
+    const association = associations.host;
     const discovered = discoveredCodexBinary(config.codex?.binary ?? "codex");
     return {
       config,
@@ -25487,18 +25458,13 @@ var PluginControlRuntime = class {
   }
   async associations(config) {
     if (config.serverUrl === void 0) return {};
-    const [host, client] = await Promise.all([
-      this.association(config.serverUrl, "host"),
-      this.association(config.serverUrl, "client")
-    ]);
-    return {
-      ...host === void 0 ? {} : { host },
-      ...client === void 0 ? {} : { client }
-    };
+    const association = await this.association(config.serverUrl);
+    if (association === void 0) return {};
+    return { host: association, client: association };
   }
-  async association(serverUrl, role) {
+  async association(serverUrl) {
     const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role)
+      directory: await ensureDeviceDirectory(this.identityDirectory, serverUrl)
     });
     const identity = await identities.loadOrCreate(hostname2());
     const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId);
@@ -25535,7 +25501,6 @@ function discoveredCodexBinary(configured) {
 function editableConfig(config) {
   return {
     enabled: config.enabled,
-    role: config.role,
     ...config.serverUrl === void 0 ? {} : { serverUrl: config.serverUrl },
     terminal: config.terminal,
     hostControl: config.hostControl ?? { enabled: true, paused: false },

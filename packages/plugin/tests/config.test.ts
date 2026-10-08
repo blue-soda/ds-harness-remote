@@ -5,7 +5,7 @@ describe('plugin config', () => {
   it('applies safe defaults', () => {
     expect(resolveConfig({}, {})).toMatchObject({
       enabled: true,
-      role: 'host',
+
       hostControl: { enabled: true },
       terminal: { enabled: true },
       forceRelay: false,

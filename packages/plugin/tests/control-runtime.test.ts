@@ -67,7 +67,6 @@ describe('PluginControlRuntime settings setup', () => {
     const directory = await temporaryDirectory()
     const settings = settingsBinding({
       serverUrl: 'https://old.example.com',
-      role: 'client',
       codex: { enabled: true, binary: '/opt/codex' },
     })
     const handler = register(new PluginControlRuntime(
@@ -89,7 +88,6 @@ describe('PluginControlRuntime settings setup', () => {
     })
     expect(settings.get()).toMatchObject({
       serverUrl: 'https://remote.example.com',
-      role: 'client',
       codex: { enabled: true, binary: '/opt/codex' },
     })
 
@@ -135,9 +133,9 @@ describe('PluginControlRuntime settings setup', () => {
     expect(reconnectHost).toHaveBeenCalledOnce()
   })
 
-  it('authorizes a Host before saving its Server and role without persisting the password', async () => {
+  it('authorizes a Host before saving its Server without persisting the password', async () => {
     const directory = await temporaryDirectory()
-    const settings = settingsBinding({ serverUrl: 'https://old.example.com', role: 'client' })
+    const settings = settingsBinding({ serverUrl: 'https://old.example.com' })
     const calls: Array<{ url: string; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
@@ -161,7 +159,6 @@ describe('PluginControlRuntime settings setup', () => {
     ))
 
     const result = await handler('settings.configure', {
-      role: 'host',
       serverUrl: 'https://dsh.r2049.cn/',
       email: 'host@example.com',
       password: 'correct horse battery staple',
@@ -171,46 +168,26 @@ describe('PluginControlRuntime settings setup', () => {
       ok: true,
       value: {
         status: 'authorized',
-        role: 'host',
         account: 'host@example.com',
         settings: { association: { method: 'account', account: 'host@example.com' } },
       },
     })
-    expect(settings.get()).toMatchObject({ role: 'host', serverUrl: 'https://dsh.r2049.cn' })
+    expect(settings.get()).toMatchObject({ serverUrl: 'https://dsh.r2049.cn' })
     expect(settings.get()).not.toHaveProperty('deviceName')
     expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'host' } })
     expect(JSON.stringify(settings.get())).not.toContain('correct horse battery staple')
 
-    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({
-      ok: true,
-      value: {
-        config: { role: 'client' },
-        association: { method: 'owned_device', account: 'host@example.com' },
-        associations: {
-          host: { method: 'account', account: 'host@example.com' },
-          client: { method: 'owned_device', account: 'host@example.com' },
-        },
-      },
-    })
-    expect(calls).toHaveLength(3)
-    expect(calls[2]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
-    expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
-    expect(JSON.parse(String(calls[2]?.init?.body))).toMatchObject({ device: { role: 'host' } })
-    const hostDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'host')
-    const clientDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'client')
-    await expect(readFile(join(hostDirectory, 'server-credentials.json'), 'utf8')).resolves.toContain('host@example.com')
-    await expect(readFile(join(clientDirectory, 'server-credentials.json'), 'utf8')).resolves.toContain('owned_device')
-    await expect(handler('settings.role.set', { role: 'host' }, signal())).resolves.toMatchObject({
-      ok: true,
-      value: { association: { account: 'host@example.com' } },
-    })
-    expect(calls).toHaveLength(3)
+    // One identity means there is no role to switch, and the credential lives in the device directory.
+    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false })
+    expect(calls).toHaveLength(2)
+    const deviceDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'device')
+    await expect(readFile(join(deviceDirectory, 'server-credentials.json'), 'utf8')).resolves.toContain('host@example.com')
+
     await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({
       ok: true,
-      value: { config: { role: 'host' }, associations: {} },
+      value: { associations: {} },
     })
-    await expect(readFile(join(hostDirectory, 'server-credentials.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(readFile(join(clientDirectory, 'server-credentials.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(deviceDirectory, 'server-credentials.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('authorizes a Client with its site account and persists only device credentials', async () => {
@@ -235,7 +212,6 @@ describe('PluginControlRuntime settings setup', () => {
     ))
 
     const configured = await handler('settings.configure', {
-      role: 'client',
       serverUrl: 'https://dsh.r2049.cn',
       email: 'client@example.com',
       password: 'correct horse battery staple',
@@ -244,14 +220,13 @@ describe('PluginControlRuntime settings setup', () => {
       ok: true,
       value: {
         status: 'authorized',
-        role: 'client',
         account: 'client@example.com',
         settings: { association: { method: 'account', account: 'client@example.com' } },
       },
     })
     expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ device: { name: hostname(), role: 'host' } })
-    const clientDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'client')
-    const stored = await readFile(join(clientDirectory, 'server-credentials.json'), 'utf8')
+    const deviceDirectory = serverStorageDirectory(directory, 'https://dsh.r2049.cn', 'device')
+    const stored = await readFile(join(deviceDirectory, 'server-credentials.json'), 'utf8')
     expect(stored).toContain('client@example.com')
     expect(stored).not.toContain('correct horse battery staple')
     expect(stored).not.toContain('web-account-token-value')
@@ -270,7 +245,6 @@ describe('PluginControlRuntime settings setup', () => {
     ))
 
     const configured = await handler('settings.configure', {
-      role: 'host',
       serverUrl: 'https://dsh.r2049.cn',
       registrationCode: 'ABCD-EFGH',
     }, signal())
@@ -279,7 +253,6 @@ describe('PluginControlRuntime settings setup', () => {
       ok: true,
       value: {
         status: 'authorized',
-        role: 'host',
         settings: { association: { method: 'host_registration_code' } },
       },
     })
@@ -289,18 +262,9 @@ describe('PluginControlRuntime settings setup', () => {
       device: { name: hostname(), role: 'host' },
     })
 
-    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({
-      ok: true,
-      value: {
-        config: { role: 'client' },
-        association: { method: 'owned_device' },
-      },
-    })
-    expect(calls[1]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
-    expect(calls[1]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
-    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({
-      device: { name: hostname(), role: 'host' },
-    })
+    // A device no longer has a role to switch: the registration above is the device's whole identity.
+    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false })
+    expect(calls).toHaveLength(1)
   })
 })
 

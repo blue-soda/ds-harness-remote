@@ -654,7 +654,7 @@ function config(): ResolvedConfig {
     terminal: { enabled: false },
     loopback: { ports: [] },
     enabled: true,
-    role: 'host',
+
     serverUrl: 'https://dsh.r2049.cn',
     deviceName: 'Host',
     forceRelay: true,

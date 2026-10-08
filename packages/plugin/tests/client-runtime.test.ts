@@ -914,7 +914,6 @@ function config(): ResolvedConfig {
     terminal: { enabled: false },
     loopback: { ports: [] },
     enabled: true,
-    role: 'both',
     serverUrl: 'https://dsh.r2049.cn',
     deviceName: 'Local Harness',
     forceRelay: false,
