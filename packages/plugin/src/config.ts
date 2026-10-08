@@ -7,6 +7,11 @@ export { DEFAULT_REMOTE_SERVER_URL } from './defaults.js'
 
 export interface Config {
   enabled?: boolean
+  /**
+   * Accepted and ignored, for older seeds: a device has one identity now, and whether it accepts control is
+   * the control switch's business. Kept in the type so a typed seed written before the change still compiles.
+   */
+  role?: 'host' | 'client' | 'both'
   serverUrl?: string
   deviceName?: string
   terminal?: { enabled?: boolean }
@@ -67,6 +72,8 @@ export type ConfigInput = Config | VolatileSnapshot<Config>
  */
 const entryConfigSchema = s.object({
   enabled: s.boolean(),
+  // Accepted and ignored, for the same reason as in `configSchema`: an upgrade must not brick a profile.
+  role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -115,6 +122,10 @@ const reconnectSchema = z.union([
 
 const configSchema = z.object({
   enabled: z.boolean().optional(),
+  // Older patches - including the plugin's own shipped `cordis.patch.yml` - seed `role`. It means nothing
+  // now: a device has one identity and the control switch decides whether it accepts control. It must stay
+  // *accepted* all the same, or upgrading would fail to activate the plugin on every existing installation.
+  role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),

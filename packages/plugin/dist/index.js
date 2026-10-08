@@ -13357,6 +13357,8 @@ var DEFAULT_REMOTE_SERVER_URL = "https://sakakibara.ink:8443";
 // src/config.ts
 var entryConfigSchema = s.object({
   enabled: s.boolean(),
+  // Accepted and ignored, for the same reason as in `configSchema`: an upgrade must not brick a profile.
+  role: s.union(["host", "client", "both"]),
   serverUrl: s.string(),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -13393,6 +13395,10 @@ var reconnectSchema = external_exports.union([
 ]);
 var configSchema = external_exports.object({
   enabled: external_exports.boolean().optional(),
+  // Older patches - including the plugin's own shipped `cordis.patch.yml` - seed `role`. It means nothing
+  // now: a device has one identity and the control switch decides whether it accepts control. It must stay
+  // *accepted* all the same, or upgrading would fail to activate the plugin on every existing installation.
+  role: external_exports.enum(["host", "client", "both"]).optional(),
   serverUrl: external_exports.string().url().optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),

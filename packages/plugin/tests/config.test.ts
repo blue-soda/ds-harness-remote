@@ -56,3 +56,13 @@ describe('plugin config', () => {
     expect(withVolatileSchema(schema)).toBe(marked)
   })
 })
+describe('upgrade compatibility', () => {
+  it('accepts the role key older patches still seed, without carrying it into the resolved config', () => {
+    // Every installation that existed before the identity rework seeds this key. Rejecting it made the
+    // plugin fail to activate - the patch could not even be applied - so it is accepted and ignored.
+    const resolved = resolveConfig({ role: 'client', serverUrl: 'https://example.test' })
+    expect(resolved).not.toHaveProperty('role')
+    expect(resolveConfig({ role: 'host' }).serverUrl).toBeUndefined()
+    expect(resolveConfig({ role: 'both', serverUrl: 'https://example.test' }).serverUrl).toBe('https://example.test')
+  })
+})
