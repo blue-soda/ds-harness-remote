@@ -221,6 +221,17 @@ const FAST_RECONNECT_INTERVAL_MS = 5_000
 const LIVENESS_TIMEOUT_MS = 4_000
 /** Unanswered proofs before giving up: the first rebuilds the link, the second falls back. */
 const LIVENESS_TOLERATED_FAILURES = 2
+
+/**
+ * Event-loop lag above which a probe timeout says nothing about the peer.
+ *
+ * A remote Session list or a large history can occupy this process - the client half runs in the same
+ * process as the local shell - for longer than the probe budget. Counting that as "no answer" started a
+ * reconnect that re-opened the Workspace, which loaded again, which missed again: a self-sustaining
+ * loop measured on a Web session (liveness found no answer -> fast reconnect -> republish -> load ->
+ * no answer). A probe this process delayed is therefore inconclusive, not a failure.
+ */
+const LIVENESS_SELF_BUSY_MS = 1_000
 /** Codes the client core raises locally when an RPC never reached an answer. */
 const NO_ANSWER_CODES = new Set(['RPC_TIMEOUT', 'CLIENT_CLOSED', 'TRANSPORT_CLOSED', 'RPC_ABORTED'])
 
@@ -640,6 +651,11 @@ export class ClientModeRuntime {
     if (connected === undefined || this.livenessInFlight || this.fastRebuildInFlight) return
     this.livenessInFlight = true
     try {
+      const lagBefore = await this.eventLoopLag()
+      if (lagBefore > LIVENESS_SELF_BUSY_MS) {
+        this.logger.info('remote Harness liveness check inconclusive: this client was busy', { lagMs: lagBefore })
+        return
+      }
       await connected.client.rpc('harness.transport.describe', {}, undefined, { timeoutMs: LIVENESS_TIMEOUT_MS })
       this.livenessFailures = 0
       if (this.reconnecting?.phase === 'fast') this.finishReconnect('the link answered again')
@@ -647,6 +663,11 @@ export class ClientModeRuntime {
       if (!livenessProbeLost(error)) {
         // Any answer proves the peer is alive, including a refusal.
         this.livenessFailures = 0
+        return
+      }
+      const lagAfter = await this.eventLoopLag()
+      if (lagAfter > LIVENESS_SELF_BUSY_MS) {
+        this.logger.info('remote Harness liveness check inconclusive: this client was busy', { lagMs: lagAfter })
         return
       }
       this.livenessFailures += 1
@@ -673,6 +694,12 @@ export class ClientModeRuntime {
    * link that recovers does not cost the user the view they were working in.
    * @param targetDeviceId - the Host to rebuild the link to.
    */
+  /** How long a zero-delay timer waited: a direct measure of this process blocking its own loop. */
+  private eventLoopLag(): Promise<number> {
+    const scheduled = Date.now()
+    return new Promise(resolve => { setTimeout(() => resolve(Date.now() - scheduled), 0) })
+  }
+
   private async enterFastReconnect(targetDeviceId: string, targetName?: string): Promise<void> {
     if (this.reconnecting !== undefined) return
     this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fast' }

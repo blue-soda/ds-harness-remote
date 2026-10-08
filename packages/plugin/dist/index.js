@@ -20680,6 +20680,7 @@ var LIVENESS_INTERVAL_MS = 3e4;
 var FAST_RECONNECT_INTERVAL_MS = 5e3;
 var LIVENESS_TIMEOUT_MS = 4e3;
 var LIVENESS_TOLERATED_FAILURES = 2;
+var LIVENESS_SELF_BUSY_MS = 1e3;
 var NO_ANSWER_CODES = /* @__PURE__ */ new Set(["RPC_TIMEOUT", "CLIENT_CLOSED", "TRANSPORT_CLOSED", "RPC_ABORTED"]);
 function livenessProbeLost(error) {
   const code = typeof error === "object" && error !== null && "code" in error ? error.code : void 0;
@@ -21028,12 +21029,22 @@ var ClientModeRuntime = class {
     if (connected === void 0 || this.livenessInFlight || this.fastRebuildInFlight) return;
     this.livenessInFlight = true;
     try {
+      const lagBefore = await this.eventLoopLag();
+      if (lagBefore > LIVENESS_SELF_BUSY_MS) {
+        this.logger.info("remote Harness liveness check inconclusive: this client was busy", { lagMs: lagBefore });
+        return;
+      }
       await connected.client.rpc("harness.transport.describe", {}, void 0, { timeoutMs: LIVENESS_TIMEOUT_MS });
       this.livenessFailures = 0;
       if (this.reconnecting?.phase === "fast") this.finishReconnect("the link answered again");
     } catch (error) {
       if (!livenessProbeLost(error)) {
         this.livenessFailures = 0;
+        return;
+      }
+      const lagAfter = await this.eventLoopLag();
+      if (lagAfter > LIVENESS_SELF_BUSY_MS) {
+        this.logger.info("remote Harness liveness check inconclusive: this client was busy", { lagMs: lagAfter });
         return;
       }
       this.livenessFailures += 1;
@@ -21059,6 +21070,13 @@ var ClientModeRuntime = class {
    * link that recovers does not cost the user the view they were working in.
    * @param targetDeviceId - the Host to rebuild the link to.
    */
+  /** How long a zero-delay timer waited: a direct measure of this process blocking its own loop. */
+  eventLoopLag() {
+    const scheduled = Date.now();
+    return new Promise((resolve4) => {
+      setTimeout(() => resolve4(Date.now() - scheduled), 0);
+    });
+  }
   async enterFastReconnect(targetDeviceId, targetName) {
     if (this.reconnecting !== void 0) return;
     this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fast" };
