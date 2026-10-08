@@ -202,66 +202,26 @@ const CREDENTIAL_FAILURE_CODES = new Set([
   'MEMBERSHIP_REQUIRED',
 ])
 
-/**
- * How often an idle remote session proves its link is still there.
- *
- * A socket can end without either side being told: the peer is reaped, a NAT mapping expires, or a
- * network path black-holes the close. A client that never notices keeps rendering a remote session
- * that silently answers nothing, so it asks for one cheap answer on a fixed cadence.
- */
-const LIVENESS_INTERVAL_MS = 30_000
-/** Cadence while the link is being rebuilt, so the next verdict arrives in seconds. */
-const FAST_RECONNECT_INTERVAL_MS = 5_000
-/**
- * How long one proof may take before it counts as no answer at all.
- *
- * The check is a cheap read-only call over a link that is already established, so a healthy peer
- * answers in well under a second; a longer budget only postpones the verdict.
- */
-const LIVENESS_TIMEOUT_MS = 4_000
-/** Unanswered proofs before giving up: the first rebuilds the link, the second falls back. */
-/**
- * Consecutive unanswered probes before the link is rebuilt, and before the session falls back.
- *
- * One timeout is not evidence that the peer is gone: a Host serving a long history answers late rather
- * than never, and acting on the first miss rebuilt the link while the very request that made it busy was
- * still loading - a loop (measured: history load -> no answer -> fast reconnect -> reload -> no answer).
- */
-const LIVENESS_RECONNECT_FAILURES = 2
-const LIVENESS_TOLERATED_FAILURES = 3
 
 /**
- * Event-loop lag above which a probe timeout says nothing about the peer.
+ * One quick reconnect window: at most this many attempts inside this many milliseconds.
  *
- * A remote Session list or a large history can occupy this process - the client half runs in the same
- * process as the local shell - for longer than the probe budget. Counting that as "no answer" started a
- * reconnect that re-opened the Workspace, which loaded again, which missed again: a self-sustaining
- * loop measured on a Web session (liveness found no answer -> fast reconnect -> republish -> load ->
- * no answer). A probe this process delayed is therefore inconclusive, not a failure.
+ * Both triggers funnel here - the Server reporting that a link is gone, and discovering that our own
+ * connection died (a write that gets RST, about a second after the Server times us out). A Host that is
+ * merely busy answers late rather than never, so nothing outside this window is treated as a dead peer:
+ * the session keeps its view, its Workspace and its Session list while the link is rebuilt.
  */
-const LIVENESS_SELF_BUSY_MS = 1_000
-/** Codes the client core raises locally when an RPC never reached an answer. */
-const NO_ANSWER_CODES = new Set(['RPC_TIMEOUT', 'CLIENT_CLOSED', 'TRANSPORT_CLOSED', 'RPC_ABORTED'])
+const QUICK_RECONNECT_ATTEMPTS = 2
+const QUICK_RECONNECT_WINDOW_MS = 10_000
+const QUICK_RECONNECT_RETRY_DELAY_MS = 5_000
+/** The quick window skips the WebRTC ladder: relay is the only path measured under five seconds. */
+const QUICK_RECONNECT_FORCE_RELAY = true
+/** Steady retries at the end of the fallback schedule before the loop gives up and stays local. */
+const FALLBACK_STEADY_ATTEMPTS = 5
 
-/**
- * Whether a proof of life failed to reach the peer.
- *
- * The check asks for an answer, not for success, so the two outcomes are told apart by where the
- * error came from. An answer arrives as an error carrying the peer's own code (METHOD_NOT_FOUND,
- * FEATURE_NOT_SUPPORTED, ...). A local failure is either one of the core's own codes above or a raw
- * transport error with no code at all - a send that failed on a socket this process has not noticed
- * is closed. Counting that second kind as liveness would make the whole check useless exactly when
- * it matters.
- * @param error - the error the check rejected with.
- * @returns true when no answer arrived, so the transport must be treated as lost.
- */
-export function livenessProbeLost(error: unknown): boolean {
-  const code = typeof error === 'object' && error !== null && 'code' in error
-    ? (error as { code?: unknown }).code
-    : undefined
-  if (typeof code !== 'string') return true
-  return NO_ANSWER_CODES.has(code)
-}
+
+
+
 
 export class ClientModeRuntime {
   private preview?: LoopbackPreview
@@ -293,15 +253,6 @@ export class ClientModeRuntime {
    */
   private supersededClient?: RemoteClientCore
   /**
-   * True while a fast reconnect is rebuilding the link.
-   *
-   * The probe must not judge the link in the middle of its own replacement: the Server closes the
-   * older connection for the device, so a check that ran then would read our replacement's side effect
-   * as a second miss and escalate the level that is busy recovering. The rebuild's own outcome decides
-   * first; only once it has settled does the cadence resume judging.
-   */
-  private fastRebuildInFlight = false
-  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -331,9 +282,6 @@ export class ClientModeRuntime {
    */
   private reconnecting?: { targetDeviceId: string; targetName?: string; phase: 'restore' | 'fast' | 'fallback' }
   /** Periodic proof of life for the live remote session; absent while nothing is connected. */
-  private livenessTimer?: ReturnType<typeof setInterval>
-  private livenessInFlight = false
-  private livenessFailures = 0
   private closed = false
 
   constructor(
@@ -610,7 +558,6 @@ export class ClientModeRuntime {
       // reconnect too — the user asked for local, not for a retry.
       this.fellBackToLocal = false
       this.reconnecting = undefined
-      this.stopLivenessWatch()
       this.remoteReconnectRun += 1
       await this.rememberTarget({ mode: 'local' })
       this.logger.info('Harness target switched', { mode: 'local' })
@@ -644,89 +591,6 @@ export class ClientModeRuntime {
     return this.status()
   }
 
-  /**
-   * Prove the live remote link still answers, and act on the result.
-   *
-   * Only a missing answer counts as loss: the peer's own error (a refusal, an unknown method) came
-   * back over the same link and therefore proves it is there.
-   *
-   * The two recovery levels differ in what the user keeps. The first miss rebuilds the link in
-   * place, so the session, its workspace selection and the remote carriers all stay; the second
-   * gives up and returns to the local shell.
-   */
-  private async verifyRemoteLiveness(): Promise<void> {
-    const connected = this.connected
-    if (connected === undefined || this.livenessInFlight || this.fastRebuildInFlight) return
-    this.livenessInFlight = true
-    try {
-      const lagBefore = await this.eventLoopLag()
-      if (lagBefore > LIVENESS_SELF_BUSY_MS) {
-        this.logger.info('remote Harness liveness check inconclusive: this client was busy', { lagMs: lagBefore })
-        return
-      }
-      await connected.client.rpc('harness.transport.describe', {}, undefined, { timeoutMs: LIVENESS_TIMEOUT_MS })
-      this.livenessFailures = 0
-      if (this.reconnecting?.phase === 'fast') this.finishReconnect('the link answered again')
-    } catch (error: unknown) {
-      if (!livenessProbeLost(error)) {
-        // Any answer proves the peer is alive, including a refusal.
-        this.livenessFailures = 0
-        return
-      }
-      const lagAfter = await this.eventLoopLag()
-      if (lagAfter > LIVENESS_SELF_BUSY_MS) {
-        this.logger.info('remote Harness liveness check inconclusive: this client was busy', { lagMs: lagAfter })
-        return
-      }
-      this.livenessFailures += 1
-      this.logger.warn('remote Harness liveness check found no answer', {
-        targetDeviceId: shortId(connected.target.deviceId),
-        attempt: this.livenessFailures,
-      })
-      if (this.livenessFailures < LIVENESS_RECONNECT_FAILURES) {
-        // Probe again soon instead of rebuilding on a single late answer.
-        this.logger.warn('remote Harness liveness check found no answer; probing again before reconnecting', {
-          targetDeviceId: shortId(connected.target.deviceId),
-          attempt: this.livenessFailures,
-        })
-        this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS)
-        return
-      }
-      if (this.livenessFailures === LIVENESS_RECONNECT_FAILURES) {
-        await this.enterFastReconnect(connected.target.deviceId, connected.target.name)
-        return
-      }
-      if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
-        this.handleRemoteTransportLost(connected.client, connected.target.deviceId, 'unanswered-twice')
-      }
-    } finally {
-      this.livenessInFlight = false
-    }
-  }
-
-  /**
-   * Rebuild the link while the session stays on screen.
-   *
-   * This is what separates the two recovery levels: nothing is handed back to the local shell, so a
-   * link that recovers does not cost the user the view they were working in.
-   * @param targetDeviceId - the Host to rebuild the link to.
-   */
-  /** How long a zero-delay timer waited: a direct measure of this process blocking its own loop. */
-  private eventLoopLag(): Promise<number> {
-    const scheduled = Date.now()
-    return new Promise(resolve => { setTimeout(() => resolve(Date.now() - scheduled), 0) })
-  }
-
-  private async enterFastReconnect(targetDeviceId: string, targetName?: string): Promise<void> {
-    if (this.reconnecting !== undefined) return
-    this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fast' }
-    this.logger.warn('remote Harness link stopped answering; reconnecting in place', {
-      targetDeviceId: shortId(targetDeviceId),
-    })
-    // Faster probes while recovering: the next miss is what decides recovery against the fallback.
-    this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS)
-    await this.reestablish(targetDeviceId)
-  }
 
   /**
    * Build a new transport for the session already on screen.
@@ -736,14 +600,13 @@ export class ClientModeRuntime {
    * @param targetDeviceId - the Host to reconnect to.
    * @returns true when a new session is in place.
    */
-  private async reestablish(targetDeviceId: string): Promise<boolean> {
+  private async reestablish(targetDeviceId: string, forceRelay = false): Promise<boolean> {
     const previous = this.connected
-    // From here until the new session is in place, a close of the old transport is our own doing and
-    // the liveness cadence stops judging the link.
+    // From here until the new session is in place, a close of the old transport is our own doing:
+    // superseding it keeps that close from being read as an unrelated second failure.
     this.supersededClient = previous?.client
-    this.fastRebuildInFlight = true
     try {
-      const next = await this.connect(targetDeviceId)
+      const next = await this.connect(targetDeviceId, undefined, forceRelay)
       if (previous === undefined) {
         // The user asked for local while this attempt was running.
         this.supersededClient = undefined
@@ -766,8 +629,6 @@ export class ClientModeRuntime {
         code: safeErrorCode(error),
       })
       return false
-    } finally {
-      this.fastRebuildInFlight = false
     }
   }
 
@@ -797,8 +658,6 @@ export class ClientModeRuntime {
     const target = this.reconnecting?.targetDeviceId
     if (target === undefined) return
     this.reconnecting = undefined
-    this.livenessFailures = 0
-    this.armLivenessWatch(LIVENESS_INTERVAL_MS)
     this.restoreWorkspaceSelection(target)
     this.logger.info('remote Harness reconnect finished', { targetDeviceId: shortId(target), reason })
   }
@@ -811,24 +670,39 @@ export class ClientModeRuntime {
    * @returns the status after the check.
    */
   async verifyRemoteConnection(): Promise<Record<string, unknown>> {
-    await this.verifyRemoteLiveness()
+    // Nothing here probes the business path: that check queued behind a large history and mistook a busy
+    // Host for a dead one. Death arrives either as the Server's link-dropped notice or as a failed write,
+    // and both funnel through handleRemoteTransportLost into the quick reconnect window.
     return this.status()
   }
 
-  private armLivenessWatch(intervalMs: number): void {
-    if (this.livenessTimer !== undefined) clearInterval(this.livenessTimer)
-    // The tick reads the live session, so a reconnected client is checked without re-arming.
-    const timer = setInterval(() => { void this.verifyRemoteLiveness() }, intervalMs)
-    // A background check must never hold the process - or a test run - open.
-    timer.unref?.()
-    this.livenessTimer = timer
-  }
-
-  private stopLivenessWatch(): void {
-    if (this.livenessTimer !== undefined) clearInterval(this.livenessTimer)
-    this.livenessTimer = undefined
-    this.livenessFailures = 0
-    this.livenessInFlight = false
+  /**
+   * Rebuild the link inside one quick window, keeping the user's view.
+   *
+   * The session is left exactly as it is - same Workspace, same Session list, no reload - while the link
+   * is rebuilt over relay. Only the Session data is refreshed once it is back, and the caller falls back
+   * to the local shell when the window runs out.
+   * @param targetDeviceId - the Host to rebuild the link to.
+   * @returns whether a session is in place again.
+   */
+  private async quickReconnect(targetDeviceId: string): Promise<boolean> {
+    if (this.reconnecting !== undefined) return false
+    this.reconnecting = { targetDeviceId, phase: 'fast' }
+    this.logger.warn('remote Harness link needs rebuilding; trying a quick reconnect', {
+      targetDeviceId: shortId(targetDeviceId),
+      attempts: QUICK_RECONNECT_ATTEMPTS,
+      windowMs: QUICK_RECONNECT_WINDOW_MS,
+    })
+    const deadline = Date.now() + QUICK_RECONNECT_WINDOW_MS
+    for (let attempt = 1; attempt <= QUICK_RECONNECT_ATTEMPTS; attempt += 1) {
+      if (await this.reestablish(targetDeviceId, QUICK_RECONNECT_FORCE_RELAY)) return true
+      if (attempt === QUICK_RECONNECT_ATTEMPTS) break
+      const wait = Math.min(QUICK_RECONNECT_RETRY_DELAY_MS, Math.max(0, deadline - Date.now()))
+      if (wait === 0) break
+      await new Promise<void>(resolve => { setTimeout(resolve, wait) })
+    }
+    this.reconnecting = undefined
+    return false
   }
 
   /**
@@ -840,18 +714,24 @@ export class ClientModeRuntime {
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */
-  private handleRemoteTransportLost(
+  private async handleRemoteTransportLost(
     client: RemoteClientCore,
     targetDeviceId: string,
-    reason: 'transport-closed' | 'unanswered-twice',
-  ): void {
+    reason: 'transport-closed' | 'link-dropped',
+  ): Promise<void> {
     if (this.connected?.client !== client) return
     this.supersededClient = undefined
     const targetName = this.connected.target.name
-    // A closed transport is the disaster fallback: the session is gone and the retry loop takes over.
-    // Only an unanswered liveness check rebuilds in place first, so a peer that merely went quiet
-    // keeps the user's view while its link is re-established.
-    this.stopLivenessWatch()
+    // Every trigger tries the quick window first: the Server closes the replaced peer's links together
+    // with the connection, so the session needs a new link either way, and rebuilding in place keeps the
+    // user's view, Workspace and Session list. Only when that window runs out is the session handed back
+    // to the local shell and the retry loop.
+    if (this.reconnecting === undefined && await this.quickReconnect(targetDeviceId)) {
+      this.logger.info('remote Harness session kept its view through a quick reconnect', {
+        targetDeviceId: shortId(targetDeviceId),
+      })
+      return
+    }
     void this.closePreview()
     this.connected = undefined
     this.connectionProgress = undefined
@@ -886,11 +766,16 @@ export class ClientModeRuntime {
     // which is what makes a backgrounded phone reconnect on its own. Keeping the
     // loop alive matters for the other order too: attempts spent while the network
     // was down must not leave the session dead until the user acts.
-    const fastDelays = [1_000, 2_000, 4_000, 8_000, 15_000]
+    // One attempt straight away, then 5s, 5s, 10s and 20s, then a steady 30s. The steady rate stops after
+    // FALLBACK_STEADY_ATTEMPTS so a Host that stays away leaves the user in the local shell instead of
+    // retrying forever; the header's cancel button supersedes the loop at any point.
+    const delays = [0, 5_000, 5_000, 10_000, 20_000]
     let attempt = 0
     for (;;) {
-      const wait = fastDelays[attempt] ?? 30_000
-      await new Promise<void>(resolve => { setTimeout(resolve, wait) })
+      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) return
+      const wait = delays[attempt] ?? 30_000
+      if (wait > 0) await new Promise<void>(resolve => { setTimeout(resolve, wait) })
+      attempt += 1
       if (run !== this.remoteReconnectRun) return
       if (this.connected !== undefined) return
       try {
@@ -1124,7 +1009,6 @@ export class ClientModeRuntime {
     await this.closePreview()
     if (this.closed) return
     this.closed = true
-    this.stopLivenessWatch()
     this.proxySwitch?.selectLocal()
     await this.closePreview()
     this.gatewaySwitch.selectLocal()
@@ -1382,7 +1266,7 @@ export class ClientModeRuntime {
     )
   }
 
-  private async connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+  private async connect(targetDeviceId: string, signal?: AbortSignal, forceRelay = false): Promise<ConnectedRemote> {
     signal?.throwIfAborted()
     const progressRunId = this.connectionProgressRun + 1
     this.connectionProgressRun = progressRunId
@@ -1415,7 +1299,7 @@ export class ClientModeRuntime {
           deviceId: identity.deviceId,
           accessToken: credentials.accessToken,
           targetDeviceId,
-          forceRelay: this.config.forceRelay || attempt === 'relay',
+          forceRelay: forceRelay || this.config.forceRelay || attempt === 'relay',
           preferredTransports: preferredTransportsForAttempt(attempt),
           negotiateTimeoutMs: attempt === 'direct' ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : undefined,
           ...(rtcFactory === undefined || attempt === 'relay' ? {} : { rtcFactory }),
@@ -1487,8 +1371,6 @@ export class ClientModeRuntime {
         // way back to the local shell.
         this.handleRemoteTransportLost(connectedClient, target.deviceId, 'transport-closed')
       })
-      // A live session proves itself on a cadence: a close event is not guaranteed to arrive.
-      this.armLivenessWatch(LIVENESS_INTERVAL_MS)
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => undefined)
       this.logger.info('remote Harness transport ready', {
         targetDeviceId: shortId(target.deviceId),
@@ -1571,9 +1453,9 @@ export class ClientModeRuntime {
   async handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
     try {
       if (endpoint === 'status') return ok(await this.detailedStatus())
-      // A client that just came back to the foreground asks for an immediate check instead of
-      // waiting for the next interval: while it was suspended it answered nothing and may have
-      // missed the transport close entirely.
+      // A client that just came back to the foreground reports its view of the session; the runtime
+      // reacts only to a session it already knows is gone, because the Server's link-dropped notice and
+      // a failed write are what actually prove a link ended.
       if (endpoint === 'client.connection.verify') return ok(await this.verifyRemoteConnection())
       if (endpoint === 'devices') return ok(await this.devices())
       if (endpoint === 'client.account.login') {

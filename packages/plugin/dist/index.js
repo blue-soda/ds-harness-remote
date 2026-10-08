@@ -20676,18 +20676,11 @@ var CREDENTIAL_FAILURE_CODES = /* @__PURE__ */ new Set([
   "DEVICE_REVOKED",
   "MEMBERSHIP_REQUIRED"
 ]);
-var LIVENESS_INTERVAL_MS = 3e4;
-var FAST_RECONNECT_INTERVAL_MS = 5e3;
-var LIVENESS_TIMEOUT_MS = 4e3;
-var LIVENESS_RECONNECT_FAILURES = 2;
-var LIVENESS_TOLERATED_FAILURES = 3;
-var LIVENESS_SELF_BUSY_MS = 1e3;
-var NO_ANSWER_CODES = /* @__PURE__ */ new Set(["RPC_TIMEOUT", "CLIENT_CLOSED", "TRANSPORT_CLOSED", "RPC_ABORTED"]);
-function livenessProbeLost(error) {
-  const code = typeof error === "object" && error !== null && "code" in error ? error.code : void 0;
-  if (typeof code !== "string") return true;
-  return NO_ANSWER_CODES.has(code);
-}
+var QUICK_RECONNECT_ATTEMPTS = 2;
+var QUICK_RECONNECT_WINDOW_MS = 1e4;
+var QUICK_RECONNECT_RETRY_DELAY_MS = 5e3;
+var QUICK_RECONNECT_FORCE_RELAY = true;
+var FALLBACK_STEADY_ATTEMPTS = 5;
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
     this.config = config;
@@ -20730,15 +20723,6 @@ var ClientModeRuntime = class {
    */
   supersededClient;
   /**
-   * True while a fast reconnect is rebuilding the link.
-   *
-   * The probe must not judge the link in the middle of its own replacement: the Server closes the
-   * older connection for the device, so a check that ran then would read our replacement's side effect
-   * as a second miss and escalate the level that is busy recovering. The rebuild's own outcome decides
-   * first; only once it has settled does the cadence resume judging.
-   */
-  fastRebuildInFlight = false;
-  /**
    * The last workspace the user opened for a Host.
    *
    * Kept so a reconnect can republish it: re-selecting the workspace is what makes the native UI
@@ -20768,9 +20752,6 @@ var ClientModeRuntime = class {
    */
   reconnecting;
   /** Periodic proof of life for the live remote session; absent while nothing is connected. */
-  livenessTimer;
-  livenessInFlight = false;
-  livenessFailures = 0;
   closed = false;
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
@@ -20983,7 +20964,6 @@ var ClientModeRuntime = class {
       await previous2?.client.close().catch(() => void 0);
       this.fellBackToLocal = false;
       this.reconnecting = void 0;
-      this.stopLivenessWatch();
       this.remoteReconnectRun += 1;
       await this.rememberTarget({ mode: "local" });
       this.logger.info("Harness target switched", { mode: "local" });
@@ -21016,86 +20996,6 @@ var ClientModeRuntime = class {
     return this.status();
   }
   /**
-   * Prove the live remote link still answers, and act on the result.
-   *
-   * Only a missing answer counts as loss: the peer's own error (a refusal, an unknown method) came
-   * back over the same link and therefore proves it is there.
-   *
-   * The two recovery levels differ in what the user keeps. The first miss rebuilds the link in
-   * place, so the session, its workspace selection and the remote carriers all stay; the second
-   * gives up and returns to the local shell.
-   */
-  async verifyRemoteLiveness() {
-    const connected = this.connected;
-    if (connected === void 0 || this.livenessInFlight || this.fastRebuildInFlight) return;
-    this.livenessInFlight = true;
-    try {
-      const lagBefore = await this.eventLoopLag();
-      if (lagBefore > LIVENESS_SELF_BUSY_MS) {
-        this.logger.info("remote Harness liveness check inconclusive: this client was busy", { lagMs: lagBefore });
-        return;
-      }
-      await connected.client.rpc("harness.transport.describe", {}, void 0, { timeoutMs: LIVENESS_TIMEOUT_MS });
-      this.livenessFailures = 0;
-      if (this.reconnecting?.phase === "fast") this.finishReconnect("the link answered again");
-    } catch (error) {
-      if (!livenessProbeLost(error)) {
-        this.livenessFailures = 0;
-        return;
-      }
-      const lagAfter = await this.eventLoopLag();
-      if (lagAfter > LIVENESS_SELF_BUSY_MS) {
-        this.logger.info("remote Harness liveness check inconclusive: this client was busy", { lagMs: lagAfter });
-        return;
-      }
-      this.livenessFailures += 1;
-      this.logger.warn("remote Harness liveness check found no answer", {
-        targetDeviceId: shortId(connected.target.deviceId),
-        attempt: this.livenessFailures
-      });
-      if (this.livenessFailures < LIVENESS_RECONNECT_FAILURES) {
-        this.logger.warn("remote Harness liveness check found no answer; probing again before reconnecting", {
-          targetDeviceId: shortId(connected.target.deviceId),
-          attempt: this.livenessFailures
-        });
-        this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS);
-        return;
-      }
-      if (this.livenessFailures === LIVENESS_RECONNECT_FAILURES) {
-        await this.enterFastReconnect(connected.target.deviceId, connected.target.name);
-        return;
-      }
-      if (this.livenessFailures >= LIVENESS_TOLERATED_FAILURES) {
-        this.handleRemoteTransportLost(connected.client, connected.target.deviceId, "unanswered-twice");
-      }
-    } finally {
-      this.livenessInFlight = false;
-    }
-  }
-  /**
-   * Rebuild the link while the session stays on screen.
-   *
-   * This is what separates the two recovery levels: nothing is handed back to the local shell, so a
-   * link that recovers does not cost the user the view they were working in.
-   * @param targetDeviceId - the Host to rebuild the link to.
-   */
-  /** How long a zero-delay timer waited: a direct measure of this process blocking its own loop. */
-  eventLoopLag() {
-    const scheduled = Date.now();
-    return new Promise((resolve4) => {
-      setTimeout(() => resolve4(Date.now() - scheduled), 0);
-    });
-  }
-  async enterFastReconnect(targetDeviceId, targetName) {
-    if (this.reconnecting !== void 0) return;
-    this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fast" };
-    this.logger.warn("remote Harness link stopped answering; reconnecting in place", {
-      targetDeviceId: shortId(targetDeviceId)
-    });
-    this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS);
-    await this.reestablish(targetDeviceId);
-  }
-  /**
    * Build a new transport for the session already on screen.
    *
    * The carriers hold the previous client, so they are rebound to the new one before the old client
@@ -21103,12 +21003,11 @@ var ClientModeRuntime = class {
    * @param targetDeviceId - the Host to reconnect to.
    * @returns true when a new session is in place.
    */
-  async reestablish(targetDeviceId) {
+  async reestablish(targetDeviceId, forceRelay = false) {
     const previous = this.connected;
     this.supersededClient = previous?.client;
-    this.fastRebuildInFlight = true;
     try {
-      const next = await this.connect(targetDeviceId);
+      const next = await this.connect(targetDeviceId, void 0, forceRelay);
       if (previous === void 0) {
         this.supersededClient = void 0;
         await next.client.close().catch(() => void 0);
@@ -21130,8 +21029,6 @@ var ClientModeRuntime = class {
         code: safeErrorCode(error)
       });
       return false;
-    } finally {
-      this.fastRebuildInFlight = false;
     }
   }
   rememberWorkspaceSelection(selection) {
@@ -21158,8 +21055,6 @@ var ClientModeRuntime = class {
     const target2 = this.reconnecting?.targetDeviceId;
     if (target2 === void 0) return;
     this.reconnecting = void 0;
-    this.livenessFailures = 0;
-    this.armLivenessWatch(LIVENESS_INTERVAL_MS);
     this.restoreWorkspaceSelection(target2);
     this.logger.info("remote Harness reconnect finished", { targetDeviceId: shortId(target2), reason });
   }
@@ -21171,22 +21066,37 @@ var ClientModeRuntime = class {
    * @returns the status after the check.
    */
   async verifyRemoteConnection() {
-    await this.verifyRemoteLiveness();
     return this.status();
   }
-  armLivenessWatch(intervalMs) {
-    if (this.livenessTimer !== void 0) clearInterval(this.livenessTimer);
-    const timer = setInterval(() => {
-      void this.verifyRemoteLiveness();
-    }, intervalMs);
-    timer.unref?.();
-    this.livenessTimer = timer;
-  }
-  stopLivenessWatch() {
-    if (this.livenessTimer !== void 0) clearInterval(this.livenessTimer);
-    this.livenessTimer = void 0;
-    this.livenessFailures = 0;
-    this.livenessInFlight = false;
+  /**
+   * Rebuild the link inside one quick window, keeping the user's view.
+   *
+   * The session is left exactly as it is - same Workspace, same Session list, no reload - while the link
+   * is rebuilt over relay. Only the Session data is refreshed once it is back, and the caller falls back
+   * to the local shell when the window runs out.
+   * @param targetDeviceId - the Host to rebuild the link to.
+   * @returns whether a session is in place again.
+   */
+  async quickReconnect(targetDeviceId) {
+    if (this.reconnecting !== void 0) return false;
+    this.reconnecting = { targetDeviceId, phase: "fast" };
+    this.logger.warn("remote Harness link needs rebuilding; trying a quick reconnect", {
+      targetDeviceId: shortId(targetDeviceId),
+      attempts: QUICK_RECONNECT_ATTEMPTS,
+      windowMs: QUICK_RECONNECT_WINDOW_MS
+    });
+    const deadline = Date.now() + QUICK_RECONNECT_WINDOW_MS;
+    for (let attempt = 1; attempt <= QUICK_RECONNECT_ATTEMPTS; attempt += 1) {
+      if (await this.reestablish(targetDeviceId, QUICK_RECONNECT_FORCE_RELAY)) return true;
+      if (attempt === QUICK_RECONNECT_ATTEMPTS) break;
+      const wait2 = Math.min(QUICK_RECONNECT_RETRY_DELAY_MS, Math.max(0, deadline - Date.now()));
+      if (wait2 === 0) break;
+      await new Promise((resolve4) => {
+        setTimeout(resolve4, wait2);
+      });
+    }
+    this.reconnecting = void 0;
+    return false;
   }
   /**
    * Shared cleanup for a session whose transport is gone.
@@ -21197,11 +21107,16 @@ var ClientModeRuntime = class {
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */
-  handleRemoteTransportLost(client, targetDeviceId, reason) {
+  async handleRemoteTransportLost(client, targetDeviceId, reason) {
     if (this.connected?.client !== client) return;
     this.supersededClient = void 0;
     const targetName = this.connected.target.name;
-    this.stopLivenessWatch();
+    if (this.reconnecting === void 0 && await this.quickReconnect(targetDeviceId)) {
+      this.logger.info("remote Harness session kept its view through a quick reconnect", {
+        targetDeviceId: shortId(targetDeviceId)
+      });
+      return;
+    }
     void this.closePreview();
     this.connected = void 0;
     this.connectionProgress = void 0;
@@ -21230,13 +21145,15 @@ var ClientModeRuntime = class {
    */
   async reconnectRemoteSession(targetDeviceId) {
     const run = ++this.remoteReconnectRun;
-    const fastDelays = [1e3, 2e3, 4e3, 8e3, 15e3];
+    const delays = [0, 5e3, 5e3, 1e4, 2e4];
     let attempt = 0;
     for (; ; ) {
-      const wait2 = fastDelays[attempt] ?? 3e4;
-      await new Promise((resolve4) => {
+      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) return;
+      const wait2 = delays[attempt] ?? 3e4;
+      if (wait2 > 0) await new Promise((resolve4) => {
         setTimeout(resolve4, wait2);
       });
+      attempt += 1;
       if (run !== this.remoteReconnectRun) return;
       if (this.connected !== void 0) return;
       try {
@@ -21443,7 +21360,6 @@ var ClientModeRuntime = class {
     await this.closePreview();
     if (this.closed) return;
     this.closed = true;
-    this.stopLivenessWatch();
     this.proxySwitch?.selectLocal();
     await this.closePreview();
     this.gatewaySwitch.selectLocal();
@@ -21659,7 +21575,7 @@ var ClientModeRuntime = class {
       "This Client does not provide a compatible Harness carrier for the selected remote workspace."
     );
   }
-  async connect(targetDeviceId, signal) {
+  async connect(targetDeviceId, signal, forceRelay = false) {
     signal?.throwIfAborted();
     const progressRunId = this.connectionProgressRun + 1;
     this.connectionProgressRun = progressRunId;
@@ -21690,7 +21606,7 @@ var ClientModeRuntime = class {
           deviceId: identity.deviceId,
           accessToken: credentials.accessToken,
           targetDeviceId,
-          forceRelay: this.config.forceRelay || attempt === "relay",
+          forceRelay: forceRelay || this.config.forceRelay || attempt === "relay",
           preferredTransports: preferredTransportsForAttempt(attempt),
           negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
           ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
@@ -21755,7 +21671,6 @@ var ClientModeRuntime = class {
         }
         this.handleRemoteTransportLost(connectedClient, target2.deviceId, "transport-closed");
       });
-      this.armLivenessWatch(LIVENESS_INTERVAL_MS);
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
       this.logger.info("remote Harness transport ready", {
         targetDeviceId: shortId(target2.deviceId),

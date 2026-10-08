@@ -6,7 +6,6 @@ import { generateKeyPair } from '@dsh-remote/crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
-  livenessProbeLost,
   probeRemoteHostFeatures,
   remoteHostFeatures,
   type HostAuthorizationControl,
@@ -133,20 +132,8 @@ describe('ClientModeRuntime Host account control', () => {
     await new Promise(resolve => { setTimeout(resolve, 1_100) })
   })
 
-  it('treats only a missing answer as loss, never a refusal', () => {
-    // No answer: the core's own timeout/close codes, and raw transport errors with no code.
-    expect(livenessProbeLost({ code: 'RPC_TIMEOUT' })).toBe(true)
-    expect(livenessProbeLost({ code: 'CLIENT_CLOSED' })).toBe(true)
-    expect(livenessProbeLost({ code: 'TRANSPORT_CLOSED' })).toBe(true)
-    expect(livenessProbeLost(new Error('relay control socket is not open'))).toBe(true)
-    expect(livenessProbeLost('not an error')).toBe(true)
-    // An answer from the peer, however unwelcome, proves it is there.
-    expect(livenessProbeLost({ code: 'METHOD_NOT_FOUND' })).toBe(false)
-    expect(livenessProbeLost({ code: 'FEATURE_NOT_SUPPORTED' })).toBe(false)
-  })
-
-  it('probes again before rebuilding, and falls back only after three unanswered checks', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-liveness-'))
+  it('rebuilds the link in place through the quick window, keeping the view', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-quick-'))
     directories.push(directory)
     const runtime = new ClientModeRuntime(
       config(),
@@ -158,104 +145,35 @@ describe('ClientModeRuntime Host account control', () => {
     )
     await runtime.start()
 
-    const rpc = vi.fn()
-    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    const client = { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
     ;(runtime as unknown as { connected: unknown }).connected = {
       client,
       target: { deviceId: 'host-1', name: 'Host' },
       features: remoteHostFeatures(),
     }
 
-    // The peer's own error means it answered, so the session stays up.
-    rpc.mockRejectedValueOnce(Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' }))
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().connected).toBe(true)
-
-    // One unanswered check is not evidence of a dead peer: a Host busy with a real request answers late,
-    // so the probe reports it and tries again instead of rebuilding the link.
-    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().connected).toBe(true)
-    expect(runtime.status().reconnecting).toBeUndefined()
-
-    // The second consecutive one rebuilds the link in place: the session stays on screen.
-    await runtime.verifyRemoteConnection()
+    // The Server closing the replaced peer's links reaches us as a lost transport. The quick window
+    // rebuilds the link and leaves the session exactly as it was: same view, same Workspace, no
+    // fallback, and no business-path probe deciding anything.
+    const lost = (runtime as unknown as {
+      handleRemoteTransportLost: (c: unknown, id: string, reason: string) => Promise<void>
+    }).handleRemoteTransportLost(client, 'host-1', 'transport-closed')
     expect(runtime.status()).toMatchObject({
       connected: true,
+      fellBackToLocal: false,
       reconnecting: { targetDeviceId: 'host-1', phase: 'fast' },
     })
 
-    // A link that answers again returns to the steady state instead of escalating.
-    rpc.mockResolvedValueOnce({ capabilities: [] })
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().connected).toBe(true)
-    expect(runtime.status().reconnecting).toBeUndefined()
-
-    // From a clean count: two consecutive unanswered checks rebuild, the third returns the user to the
-    // local shell.
-    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().reconnecting).toBeUndefined()
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status()).toMatchObject({
-      connected: true,
-      reconnecting: { targetDeviceId: 'host-1', phase: 'fast' },
-    })
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status()).toMatchObject({
-      connected: false,
-      fellBackToLocal: true,
-      reconnecting: { targetDeviceId: 'host-1', phase: 'fallback' },
-    })
-    expect(client.close).toHaveBeenCalled()
-
-    // Supersede the retry loop this started instead of leaking its timer.
+    // The window's attempts fail against the stub Host, so the session is handed back to the local
+    // shell and the retry loop - and the loop is superseded instead of leaking its timer.
+    await lost
+    // The window is exhausted, so the session is no longer the connected one and the retry loop owns it.
+    // (The loop's own first attempt runs immediately, so only this much is stable to assert here.)
+    expect(runtime.status().connected).not.toBe(true)
     await runtime.setMode('local')
-    await new Promise(resolve => { setTimeout(resolve, 1_100) })
-  })
-
-  it('republishes the workspace selection once a reconnect finishes', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-reselect-'))
-    directories.push(directory)
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      apiProxy(),
-      gateway(),
-      logger(),
-    )
-    await runtime.start()
-
-    const rpc = vi.fn()
-    const client = { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
-    const selection = { targetDeviceId: 'host-1', workspaceId: 'ws-1' }
-    ;(runtime as unknown as { connected: unknown }).connected = {
-      client,
-      target: { deviceId: 'host-1', name: 'Host' },
-      features: remoteHostFeatures(),
-    }
-    // The client half reports the workspace it actually opened; a reconnect republishes that one, and
-    // it can arrive from the browser's stored selection rather than from a control call.
-    await runtime.handleControl('workspace.selection.consume', selection, new AbortController().signal)
-
-    // Two consecutive unanswered checks rebuild in place ...
-    rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().reconnecting).toBeUndefined()
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().reconnecting).toMatchObject({ phase: 'fast' })
-
-    // ... and a link that answers again republishes the selection, which is what makes the client half
-    // re-open the workspace and the native UI re-read its session list.
-    rpc.mockResolvedValueOnce({ capabilities: [] })
-    await runtime.verifyRemoteConnection()
-    expect(runtime.status().reconnecting).toBeUndefined()
-    expect(runtime.status().workspaceSelection).toEqual(selection)
-
-    await runtime.setMode('local')
-    await new Promise(resolve => { setTimeout(resolve, 1_100) })
-  })
+    await runtime.close()
+    // The window itself waits seconds between its two attempts, so this test needs more than the default.
+  }, 20_000)
 
   it('forwards only supported QR login providers to the Server API', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-qr-provider-'))
