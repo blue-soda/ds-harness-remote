@@ -15269,8 +15269,7 @@ function normalizeByteResult(method, response) {
     ...response,
     result: {
       ...result,
-      value: { ...value, data: null },
-      attachments: [{ path: ["data"], bytes: data2 }]
+      value: { ...value, data: encodeBase64(data2) }
     }
   };
 }

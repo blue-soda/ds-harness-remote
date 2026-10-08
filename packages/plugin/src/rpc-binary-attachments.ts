@@ -134,7 +134,8 @@ function replaceBytes(
   return clone
 }
 
-function encodeBase64(bytes: Uint8Array): string {
+/** Base64 for carriers whose protocol predates binary attachments (rc.2 ApiProxy). */
+export function encodeBase64(bytes: Uint8Array): string {
   let binary = ''
   for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
