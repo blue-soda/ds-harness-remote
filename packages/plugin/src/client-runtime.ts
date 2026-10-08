@@ -220,7 +220,15 @@ const FAST_RECONNECT_INTERVAL_MS = 5_000
  */
 const LIVENESS_TIMEOUT_MS = 4_000
 /** Unanswered proofs before giving up: the first rebuilds the link, the second falls back. */
-const LIVENESS_TOLERATED_FAILURES = 2
+/**
+ * Consecutive unanswered probes before the link is rebuilt, and before the session falls back.
+ *
+ * One timeout is not evidence that the peer is gone: a Host serving a long history answers late rather
+ * than never, and acting on the first miss rebuilt the link while the very request that made it busy was
+ * still loading - a loop (measured: history load -> no answer -> fast reconnect -> reload -> no answer).
+ */
+const LIVENESS_RECONNECT_FAILURES = 2
+const LIVENESS_TOLERATED_FAILURES = 3
 
 /**
  * Event-loop lag above which a probe timeout says nothing about the peer.
@@ -675,7 +683,16 @@ export class ClientModeRuntime {
         targetDeviceId: shortId(connected.target.deviceId),
         attempt: this.livenessFailures,
       })
-      if (this.livenessFailures === 1) {
+      if (this.livenessFailures < LIVENESS_RECONNECT_FAILURES) {
+        // Probe again soon instead of rebuilding on a single late answer.
+        this.logger.warn('remote Harness liveness check found no answer; probing again before reconnecting', {
+          targetDeviceId: shortId(connected.target.deviceId),
+          attempt: this.livenessFailures,
+        })
+        this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS)
+        return
+      }
+      if (this.livenessFailures === LIVENESS_RECONNECT_FAILURES) {
         await this.enterFastReconnect(connected.target.deviceId, connected.target.name)
         return
       }

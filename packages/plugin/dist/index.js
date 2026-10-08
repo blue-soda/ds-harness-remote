@@ -20679,7 +20679,8 @@ var CREDENTIAL_FAILURE_CODES = /* @__PURE__ */ new Set([
 var LIVENESS_INTERVAL_MS = 3e4;
 var FAST_RECONNECT_INTERVAL_MS = 5e3;
 var LIVENESS_TIMEOUT_MS = 4e3;
-var LIVENESS_TOLERATED_FAILURES = 2;
+var LIVENESS_RECONNECT_FAILURES = 2;
+var LIVENESS_TOLERATED_FAILURES = 3;
 var LIVENESS_SELF_BUSY_MS = 1e3;
 var NO_ANSWER_CODES = /* @__PURE__ */ new Set(["RPC_TIMEOUT", "CLIENT_CLOSED", "TRANSPORT_CLOSED", "RPC_ABORTED"]);
 function livenessProbeLost(error) {
@@ -21052,7 +21053,15 @@ var ClientModeRuntime = class {
         targetDeviceId: shortId(connected.target.deviceId),
         attempt: this.livenessFailures
       });
-      if (this.livenessFailures === 1) {
+      if (this.livenessFailures < LIVENESS_RECONNECT_FAILURES) {
+        this.logger.warn("remote Harness liveness check found no answer; probing again before reconnecting", {
+          targetDeviceId: shortId(connected.target.deviceId),
+          attempt: this.livenessFailures
+        });
+        this.armLivenessWatch(FAST_RECONNECT_INTERVAL_MS);
+        return;
+      }
+      if (this.livenessFailures === LIVENESS_RECONNECT_FAILURES) {
         await this.enterFastReconnect(connected.target.deviceId, connected.target.name);
         return;
       }

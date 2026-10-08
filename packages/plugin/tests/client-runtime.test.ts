@@ -145,7 +145,7 @@ describe('ClientModeRuntime Host account control', () => {
     expect(livenessProbeLost({ code: 'FEATURE_NOT_SUPPORTED' })).toBe(false)
   })
 
-  it('falls back to local only after two unanswered liveness checks', async () => {
+  it('probes again before rebuilding, and falls back only after three unanswered checks', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-liveness-'))
     directories.push(directory)
     const runtime = new ClientModeRuntime(
@@ -171,8 +171,14 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.verifyRemoteConnection()
     expect(runtime.status().connected).toBe(true)
 
-    // The first unanswered check rebuilds the link in place: the session stays on screen.
+    // One unanswered check is not evidence of a dead peer: a Host busy with a real request answers late,
+    // so the probe reports it and tries again instead of rebuilding the link.
     rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().connected).toBe(true)
+    expect(runtime.status().reconnecting).toBeUndefined()
+
+    // The second consecutive one rebuilds the link in place: the session stays on screen.
     await runtime.verifyRemoteConnection()
     expect(runtime.status()).toMatchObject({
       connected: true,
@@ -185,8 +191,11 @@ describe('ClientModeRuntime Host account control', () => {
     expect(runtime.status().connected).toBe(true)
     expect(runtime.status().reconnecting).toBeUndefined()
 
-    // The second unanswered check gives up and returns the user to the local shell.
+    // From a clean count: two consecutive unanswered checks rebuild, the third returns the user to the
+    // local shell.
     rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().reconnecting).toBeUndefined()
     await runtime.verifyRemoteConnection()
     expect(runtime.status()).toMatchObject({
       connected: true,
@@ -230,8 +239,10 @@ describe('ClientModeRuntime Host account control', () => {
     // it can arrive from the browser's stored selection rather than from a control call.
     await runtime.handleControl('workspace.selection.consume', selection, new AbortController().signal)
 
-    // The first unanswered check rebuilds in place ...
+    // Two consecutive unanswered checks rebuild in place ...
     rpc.mockRejectedValue(Object.assign(new Error('timed out'), { code: 'RPC_TIMEOUT' }))
+    await runtime.verifyRemoteConnection()
+    expect(runtime.status().reconnecting).toBeUndefined()
     await runtime.verifyRemoteConnection()
     expect(runtime.status().reconnecting).toMatchObject({ phase: 'fast' })
 
