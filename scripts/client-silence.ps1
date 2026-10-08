@@ -17,11 +17,13 @@
     relay - which keeps the user's view, Workspace and Session list in place. A window that runs out hands
     the session back to the local shell and the retry schedule takes over.
 
-    Timings:
-      -Seconds 30   the Server never declares it offline -> nothing should happen at all
-      -Seconds 90   the Server declares it offline, and the Host is up -> the quick window recovers it
-      -Seconds 400  the Host is gone too -> the window fails and the fallback schedule runs its course,
-                    ending with "reconnect gave up; staying in the local shell"
+    Timings (measured 2026-10-08: declarations landed at 48 s and 57 s, and the link was ready in the same
+    second the client resumed):
+      -Seconds 30   the Server never declares it offline -> nothing happens at all, and the link survives
+      -Seconds 90   declared offline; the Host is still up -> the quick window's first attempt recovers it
+      -Seconds 400  still the same outcome: freezing only the client never removes the Host, so the window
+                    recovers it whatever the duration. To see the fallback, the Host must be unreachable as
+                    well - freeze it too (desktop-silence.ps1) or stop the Desktop's Host runtime.
 
     Every suspended process is resumed, including on Ctrl-C or an error.
 
