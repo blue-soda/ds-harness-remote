@@ -167,9 +167,13 @@ export class HostServerConnection {
         const code = errorCode(error)
         if (code === 'CREDENTIALS_REFRESHED') continue
         this.terminalError = code
+        // A bare code cannot separate a DNS failure, a refused upgrade, a socket the Server closed and a
+        // stale credential lock - which is exactly what made a stuck reconnect loop undiagnosable. The
+        // detail below is the message and the underlying system code; no token, payload or header is logged.
         this.logger.warn('server control connection failed', {
           code, retryable: isRetryable(error),
           ...(error instanceof ServerApiError && error.phase !== undefined ? { phase: error.phase } : {}),
+          ...connectionFailureDetail(error),
         })
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === 'CONNECTION_REPLACED'
@@ -1041,6 +1045,33 @@ function rtcDiagnostics(rtc: RtcDataChannelTransport): RtcConnectionDiagnostics 
     return undefined
   }
 }
+/**
+ * Why a control connection attempt failed, for the log line that reports it.
+ *
+ * The retry loop only knows a code, and a code alone is not enough to tell a name-resolution failure from
+ * a refused upgrade or a socket the Server closed: every attempt looks alike and the loop keeps retrying
+ * with nothing to act on. The message and the underlying system code (ECONNREFUSED, ENOTFOUND, ...) are
+ * what identify the cause. Tokens, payloads and headers are never part of either.
+ * @param error - whatever the attempt rejected with.
+ * @returns log fields describing the failure.
+ */
+export function connectionFailureDetail(error: unknown): Record<string, unknown> {
+  const message = error instanceof Error ? error.message : String(error)
+  const cause = error instanceof Error ? error.cause : undefined
+  const causeCode = cause !== null && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+    ? cause.code
+    : undefined
+  const ownCode = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined
+  return {
+    message,
+    ...(error instanceof Error && error.name !== 'Error' ? { name: error.name } : {}),
+    ...(ownCode === undefined ? {} : { systemCode: ownCode }),
+    ...(causeCode === undefined ? {} : { causeCode }),
+  }
+}
+
 function errorCode(error: unknown): string { return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : 'CONNECTION_FAILED' }
 function isRetryable(error: unknown): boolean { return !TERMINAL_AUTH_ERRORS.has(errorCode(error)) && (!(error instanceof ServerApiError) || error.retryable) }
 function closeCode(code: number): string {

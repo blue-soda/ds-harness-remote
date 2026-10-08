@@ -6,7 +6,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { ServerApiError, type HostServerApi } from '../src/server-api.js'
-import { HostServerConnection } from '../src/server-connection.js'
+import { HostServerConnection, connectionFailureDetail } from '../src/server-connection.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import { PLUGIN_VERSION } from '../src/version.js'
 
@@ -338,7 +338,7 @@ describe('HostServerConnection', () => {
             scenario.startsWith('replaced') ? 'CONNECTION_REPLACED' : scenario.startsWith('revoked') ? 'DEVICE_REVOKED' : 'AUTH_INVALID',
           )
           if (scenario === 'refresh-rejected') expect(logs.warn).toHaveBeenCalledWith(
-            'server control connection failed', { code: 'AUTH_INVALID', retryable: false, phase: 'credential_refresh' },
+            'server control connection failed', expect.objectContaining({ code: 'AUTH_INVALID', retryable: false, phase: 'credential_refresh' }),
           )
         }
       } finally { await server.stop() }
@@ -673,3 +673,22 @@ function fromBase64UrlForTest(value: string): Uint8Array {
 }
 
 async function flush(): Promise<void> { await new Promise(resolve => setTimeout(resolve, 0)) }
+
+describe('connection failure diagnostics', () => {
+  it('names the cause of a failed control connection', () => {
+    // The retry loop logs a code and keeps retrying; the cause is what makes such a loop diagnosable.
+    // Measured need: a client-role connection retried with a bare CONNECTION_FAILED for twenty minutes
+    // and nothing in the log could say whether it was DNS, a refused upgrade, or a closed socket.
+    expect(connectionFailureDetail(new Error('socket hang up'))).toEqual({ message: 'socket hang up' })
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8443'), { code: 'ECONNREFUSED' })
+    expect(connectionFailureDetail(refused)).toMatchObject({ systemCode: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:8443' })
+    const wrapped = Object.assign(new Error('upgrade failed'), {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND sakakibara.ink'), { code: 'ENOTFOUND' }),
+    })
+    expect(connectionFailureDetail(wrapped)).toMatchObject({ message: 'upgrade failed', causeCode: 'ENOTFOUND' })
+    const typed = Object.assign(new Error('The Server closed this connection.'), { name: 'ControlConnectionError', code: 'CONNECTION_REPLACED' })
+    expect(connectionFailureDetail(typed)).toMatchObject({ name: 'ControlConnectionError', systemCode: 'CONNECTION_REPLACED' })
+    // Detail only: nothing that could carry a credential ever reaches the log.
+    expect(Object.keys(connectionFailureDetail(typed)).sort()).toEqual(['message', 'name', 'systemCode'])
+  })
+})

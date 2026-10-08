@@ -25339,7 +25339,8 @@ var HostServerConnection = class {
         this.logger.warn("server control connection failed", {
           code,
           retryable: isRetryable(error),
-          ...error instanceof ServerApiError && error.phase !== void 0 ? { phase: error.phase } : {}
+          ...error instanceof ServerApiError && error.phase !== void 0 ? { phase: error.phase } : {},
+          ...connectionFailureDetail(error)
         });
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
@@ -26125,6 +26126,18 @@ function rtcDiagnostics(rtc) {
   } catch {
     return void 0;
   }
+}
+function connectionFailureDetail(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = error instanceof Error ? error.cause : void 0;
+  const causeCode = cause !== null && typeof cause === "object" && "code" in cause && typeof cause.code === "string" ? cause.code : void 0;
+  const ownCode = error !== null && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : void 0;
+  return {
+    message,
+    ...error instanceof Error && error.name !== "Error" ? { name: error.name } : {},
+    ...ownCode === void 0 ? {} : { systemCode: ownCode },
+    ...causeCode === void 0 ? {} : { causeCode }
+  };
 }
 function errorCode4(error) {
   return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : "CONNECTION_FAILED";
