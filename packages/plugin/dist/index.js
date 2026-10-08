@@ -13458,7 +13458,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.33";
+var PLUGIN_VERSION = "0.4.34";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];

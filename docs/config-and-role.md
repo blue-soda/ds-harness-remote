@@ -28,14 +28,24 @@
 
 ## `role` 的现状
 
+**描述符与存储里都没有 role；唯一的角色是"连接角色"。**
+
 - **不再是配置项**：`Config` / `ResolvedConfig` / 两套 schema（含曾经的死值 `both`）里都已移除；
   `settings.role.set` 端点已删除，面板不再提供角色选择。
-- **只是连接的属性**：`hello` 里声明的角色决定这条连接是 host 还是 client（`gateway.ts` 的 peer 键为
-  `account + deviceId + role`）。同一份身份可以同时持有 host 与 client 两条连接，互不顶替；
-  存储角色与 hello 角色不再要求相等（只校验 deviceId 与凭据匹配）。
-- **注册描述符固定声明 `host`**：设备列表里它就是"可被控制的设备"，是否真的接受控制由下面的开关决定。
-- **`authorizeHostAsOwned` / `register-owned-role` 保留但通常不再触发**：单一身份下，登录注册出的行
-  本身就是 host 行；`authorizeHostByDefault()` 只在尚未授权时补齐。
+- **描述符里也没有**：`HostDeviceDescriptor` / `ClientDeviceDescriptor` 两种形状合并为
+  `AccountDeviceDescriptor`（`deviceId` / `name` / `platform` / `identityKey` / `clientVersion` /
+  `harnessVersion?`），服务端存储的设备行同样不再有 role。描述符 schema **故意不严格**：旧安装多发的
+  `role` 被忽略而不是被拒收，否则它们连注册都会失败。
+- **唯一的角色在连接上**：`hello` 里声明的角色决定这条连接是 host 还是 client（`gateway.ts` 的 peer 键为
+  `account + deviceId + role`）。同一份身份可以同时持有 host 与 client 两条连接，互不顶替；只有 client
+  连接能发起 `connect.request`；关闭控制时只拒绝 `role=host` 的连接。**这些不是死代码** —— 删掉它们就无法
+  区分同一设备的两条连接。
+- **随之删除的整条死链**：`/api/v1/devices/register-owned-role` 端点、`store.register` 的自有角色守卫、
+  插件的 `authorizeOwnedRole` / `authorizeHostAsOwned` / `authorizeHostByDefault`（含 4 处调用点）、以及
+  控制运行时的"对侧角色补授权"方法。它们只为"用一份凭据铸造第二个设备行"而存在；单一身份下登录本身就会
+  注册这台设备，之后只需把 host 连接拉起来。
+- **兼容性（有意接受）**：旧客户端仍会**发送** role（被忽略），但它们会**按 `role === 'host'` 过滤收到的
+  设备行**，所以更新前它们看到的是**空的 host 列表**。
 
 ## 允许控制设备（语义 A）
 
@@ -45,7 +55,9 @@
   去控制别的设备。
 - **跨重启保留**：标志存在服务端设备行上（`store.setHostControl()`；旧状态文件按 `true` 读取）；
   重新登录**不会**悄悄打开它（`store.register()` 保留既有值）。
-- **可见**：设备描述符带 `hostControl`；`online` 只反映实际连接，因此关掉控制后该设备显示为离线。
+- **可见（口径：列出但标注离线）**：设备列表返回账号内**所有**未吊销设备（`GET /api/v1/devices`，**不再按
+  角色过滤**），每项带 `online`（来自实际连接）与 `hostControl`（来自开关）——关掉控制的设备**仍然列出**、
+  标注为不可用/离线，而不是被隐藏（用户选定口径）。
 - 端点：`POST /api/v1/devices/self/control`，body `{ enabled: boolean }`。
 
 ## 注销设备（吊销）
