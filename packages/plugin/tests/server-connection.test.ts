@@ -6,7 +6,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { ServerApiError, type HostServerApi } from '../src/server-api.js'
-import { HostServerConnection, connectionFailureDetail } from '../src/server-connection.js'
+import { HostServerConnection, connectionFailureDetail, socketFailureDetail } from '../src/server-connection.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import { PLUGIN_VERSION } from '../src/version.js'
 
@@ -690,5 +690,19 @@ describe('connection failure diagnostics', () => {
     expect(connectionFailureDetail(typed)).toMatchObject({ name: 'ControlConnectionError', systemCode: 'CONNECTION_REPLACED' })
     // Detail only: nothing that could carry a credential ever reaches the log.
     expect(Object.keys(connectionFailureDetail(typed)).sort()).toEqual(['message', 'name', 'systemCode'])
+  })
+})
+describe('websocket failure detail', () => {
+  it('names the step that failed when the Server socket cannot open', () => {
+    // Measured need: a phone failed to open the control socket on two different networks while plain HTTPS
+    // to the same host worked, and the log said only "Unable to open the Server WebSocket".
+    expect(socketFailureDetail({ error: Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:8443'), { code: 'ECONNREFUSED' }) }))
+      .toBe(' (ECONNREFUSED: connect ECONNREFUSED 1.2.3.4:8443)')
+    expect(socketFailureDetail({ message: 'Unexpected server response: 502' })).toBe(' (Unexpected server response: 502)')
+    expect(socketFailureDetail({ error: Object.assign(new Error('getaddrinfo ENOTFOUND sakakibara.ink'), { code: 'ENOTFOUND' }) }))
+      .toContain('ENOTFOUND')
+    // Nothing useful, and never a credential: an empty suffix is correct here.
+    expect(socketFailureDetail(undefined)).toBe('')
+    expect(socketFailureDetail({})).toBe('')
   })
 })

@@ -14139,8 +14139,10 @@ var HostServerConnection = class {
           socket.close(4008, "invalid control frame");
         });
       };
-      socket.onerror = () => {
-        if (!acknowledged) finish(new ControlConnectionError("CONNECTION_FAILED", "Unable to open the Server WebSocket."));
+      socket.onerror = (event) => {
+        if (!acknowledged) {
+          finish(new ControlConnectionError("CONNECTION_FAILED", `Unable to open the Server WebSocket.${socketFailureDetail(event)}`));
+        }
       };
       socket.onclose = (event) => {
         const close = async () => {
@@ -14839,6 +14841,21 @@ function connectionFailureDetail(error) {
     ...ownCode === void 0 ? {} : { systemCode: ownCode },
     ...causeCode === void 0 ? {} : { causeCode }
   };
+}
+function socketFailureDetail(event) {
+  const parts = [];
+  if (event !== null && typeof event === "object") {
+    const message = "message" in event && typeof event.message === "string" ? event.message : void 0;
+    if (message !== void 0 && message !== "") parts.push(message);
+    const error = "error" in event ? event.error : void 0;
+    if (error !== null && typeof error === "object") {
+      const code = "code" in error && typeof error.code === "string" ? error.code : void 0;
+      const errorMessage = "message" in error && typeof error.message === "string" ? error.message : void 0;
+      if (code !== void 0) parts.push(code);
+      if (errorMessage !== void 0 && errorMessage !== "" && errorMessage !== message) parts.push(errorMessage);
+    }
+  }
+  return parts.length === 0 ? "" : ` (${parts.join(": ")})`;
 }
 function errorCode2(error) {
   return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : "CONNECTION_FAILED";

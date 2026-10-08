@@ -282,8 +282,14 @@ export class HostServerConnection {
           socket.close(4008, 'invalid control frame')
         })
       }
-      socket.onerror = () => {
-        if (!acknowledged) finish(new ControlConnectionError('CONNECTION_FAILED', 'Unable to open the Server WebSocket.'))
+      socket.onerror = event => {
+        // The event carries what actually went wrong - a name-resolution failure, a refused or timed-out
+        // connect, a TLS rejection, or a middlebox cutting the upgrade. Discarding it left only "unable to
+        // open", which cannot be acted on; measured need: a phone failed on two different networks while
+        // plain HTTPS to the same host worked, and nothing in the log could say which step failed.
+        if (!acknowledged) {
+          finish(new ControlConnectionError('CONNECTION_FAILED', `Unable to open the Server WebSocket.${socketFailureDetail(event)}`))
+        }
       }
       socket.onclose = event => {
         const close = async (): Promise<void> => {
@@ -1070,6 +1076,31 @@ export function connectionFailureDetail(error: unknown): Record<string, unknown>
     ...(ownCode === undefined ? {} : { systemCode: ownCode }),
     ...(causeCode === undefined ? {} : { causeCode }),
   }
+}
+
+/**
+ * What a failed WebSocket open reported, for the connection error's message.
+ *
+ * Node's WebSocket error event carries an Error (with a system code such as ECONNREFUSED, ENOTFOUND or a
+ * TLS code) or, for some failures, only a message. Both are what identify the failing step, and neither
+ * contains a token: only the transport-level reason is read here.
+ * @param event - the error event handed to onerror.
+ * @returns a suffix to append to the error message, empty when the event says nothing useful.
+ */
+export function socketFailureDetail(event: unknown): string {
+  const parts: string[] = []
+  if (event !== null && typeof event === 'object') {
+    const message = 'message' in event && typeof event.message === 'string' ? event.message : undefined
+    if (message !== undefined && message !== '') parts.push(message)
+    const error = 'error' in event ? event.error : undefined
+    if (error !== null && typeof error === 'object') {
+      const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined
+      const errorMessage = 'message' in error && typeof error.message === 'string' ? error.message : undefined
+      if (code !== undefined) parts.push(code)
+      if (errorMessage !== undefined && errorMessage !== '' && errorMessage !== message) parts.push(errorMessage)
+    }
+  }
+  return parts.length === 0 ? '' : ` (${parts.join(': ')})`
 }
 
 function errorCode(error: unknown): string { return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : 'CONNECTION_FAILED' }
