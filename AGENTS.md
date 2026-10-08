@@ -247,6 +247,32 @@ Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；�
 4. 线上状态文件位于 `/var/lib/ds-harness-remote/state.json` ✓，服务单元 `ds-harness-remote.service` ✓，
    工作目录 `/root/Workspace/ds-harness-remote/apps/server` ✓。
 
+### 线上 Server 的连接日志与部署核对（2026-10-08）
+
+**排查"频繁断线"只有一个权威来源：服务端的连接日志** ✓ —— nginx 的 access/error 日志只能反推（它
+只记 HTTP 与升级 ✓：实测昨天 20:00–23:58 有 **137 次** `/ws/v1/connect` 升级 ✓、其中 **63 次**是"同一秒
+两台客户端各连一次"✗，这是"两条连接互相顶替"的特征 ✓；error.log 里的 `Connection refused` 只出现在服务
+重启的瞬间 ✓）。
+
+日志由 `apps/server/src/log.ts` 的 `ServerLog` 提供 ✓（一行一条 JSON ✓、自动轮转 ✓、**磁盘占用有界** ✓），
+`gateway.ts` 记录 `peer.online` / `peer.offline`（含 `code`/`reason`/`linksDropped` ✓）、
+`link.created/accepted/ready/dropped`、`link.dropped` 的 `code`/`stage` ✓；只写标识符与结果码 ✓，
+**不写令牌、私钥、握手字节或中继密文** ✓（符合规则 7 ✓）。
+
+线上事实（部署核对）：
+
+- 服务单元 `ds-harness-remote.service` ✓，工作目录 `/root/Workspace/ds-harness-remote/apps/server` ✓，
+  `ExecStart=/usr/local/bin/node dist/main.js` ✓，`EnvironmentFile=apps/server/.env` ✓；
+- 状态文件 `/var/lib/ds-harness-remote/state.json` ✓；日志 `/var/lib/ds-harness-remote/logs/server.log` ✓；
+- `.env` 中 `DSH_SERVER_LOG_FILE` / `DSH_SERVER_LOG_MAX_BYTES=2097152` / `DSH_SERVER_LOG_FILES=3` ✓
+  → 总量上限 **6 MiB** ✓（改小/改大只需改这三个值并 `systemctl restart` ✓）；
+- **部署极易落后** ✗：本次发现线上 checkout 停在 `1396a12`（10-06 03:46 ✓），落后 123 个提交 ✓，
+  连 `src/log.ts` 都还没有 ✗ —— 所以"服务端不记日志"并不是没实现 ✓ 而是**没部署** ✓。核对步骤：
+  `git log -1` → `git pull --ff-only origin main` → `pnpm install --frozen-lockfile` →
+  `pnpm --filter @dsh-remote/protocol build && pnpm --filter @dsh-remote/server build` →
+  **确认 `dist/main.js` 含 `DSH_SERVER_LOG_FILE`** ✓ 再 `systemctl restart` ✓（先构建后重启 ✓，构建失败就
+  不影响线上 ✓）；回滚用旧提交重新构建即可 ✓。
+
 ## Native sidebar and development preview (2026-09-20)
 
 开发依赖升级到 Harness `0.2.0-rc.1`（同时兼容 `0.1.7-rc.1`），运行时按能力检测同时支持 ≤`0.1.6` 的 settings 注册表路径与 `0.1.7-rc.1` 与 `0.2.0-rc.1` 的 Volatile entry 路径（`typeof settings.register === 'function'` 分流）。终端与 loopback 设置只能在 Host 本地修改，`settings/update|replace|mutate` 禁止远程修改 `ds-harness-remote` 和 `dsh-remote`。终端默认开启；loopback 默认无端口。「远程终端」开关切换即保存并立即更新运行时拦截，「保存访问设置」按钮只提交 Loopback 端口（位于端口输入框右侧）；两者都无需重启 Host。预览入口位于 Remote Header「预览服务」，第一版限 Desktop / 连接本机 Harness 的浏览器；不把本机预览 URL 作为远程 Web 或 Android 可用地址。跨机、Windows 和真实网络热更新回归仍需另行验证。
