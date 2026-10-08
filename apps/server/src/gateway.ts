@@ -15,6 +15,8 @@ type Link = { id: string; account: string; host: string; client: string; stage: 
  */
 /** The roles a device may hold a connection for. One device identity can hold both at once. */
 const DEVICE_ROLES = ['host', 'client'] as const
+/** The role of a control connection; a device may hold one of each at the same time. */
+type DeviceRole = (typeof DEVICE_ROLES)[number]
 
 /**
  * Key of one device's Control connection.
@@ -117,10 +119,13 @@ export class Gateway {
   }
 
   /** Whether a device currently holds a Control connection for its account. */
-  isOnline(account: string, deviceId: string): boolean {
-    // A device is reachable when any of its roles holds a connection: it can accept control while also
-    // controlling another machine.
-    return DEVICE_ROLES.some(role => this.peers.has(peerKey(account, deviceId, role)))
+  isOnline(account: string, deviceId: string, role?: DeviceRole): boolean {
+    // Without a role a device counts as reachable when either connection is up: it can accept control while also
+    // controlling another machine. With a role, only that connection counts - which is what the account's device
+    // list needs, because a device with control switched off keeps its client connection and would otherwise be
+    // offered as an available Host.
+    const roles = role === undefined ? DEVICE_ROLES : [role]
+    return roles.some(candidate => this.peers.has(peerKey(account, deviceId, candidate)))
   }
 
   /** `id` is a {@link peerKey}: account-scoped, so one account's teardown never touches another's peer. */

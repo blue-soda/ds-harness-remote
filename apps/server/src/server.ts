@@ -154,7 +154,9 @@ export function createRemoteServer(config: Config) {
       ...d.descriptor,
       // Membership is account-scoped, so ids from different accounts never collide.
       membershipId: `account:${hash(d.account).slice(0, 16)}`,
-      online: gateway.isOnline(d.account, d.descriptor.deviceId),
+      // Reachability for control, not mere presence: a device whose control is switched off, or which only holds a
+    // client connection, must not be offered as an available Host.
+    online: gateway.isOnline(d.account, d.descriptor.deviceId, 'host'),
       // Lets a client show which devices would refuse control before it tries to connect.
       hostControl: d.hostControl !== false,
       lastSeenAt: d.lastSeenAt,

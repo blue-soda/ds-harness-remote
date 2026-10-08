@@ -25454,6 +25454,8 @@ var PluginControlRuntime = class {
     const identity = await identities.loadOrCreate(hostname2());
     const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId);
     if (credentials === void 0) return void 0;
+    const hostStatus = this.host?.hostStatus();
+    if (hostStatus?.error !== void 0 && HOST_AUTHORIZATION_ERRORS.has(hostStatus.error)) return void 0;
     return {
       method: credentials.authorizationMethod,
       ...credentials.account === void 0 ? {} : { account: credentials.account }

@@ -5,6 +5,7 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { resolveConfig, type Config, type ConfigInput, type ResolvedConfig } from './config.js'
 import {
   ClientModeError,
+  HOST_AUTHORIZATION_ERRORS,
   type ClientModeRuntime,
   type HostConnectionHandle,
   type HostAuthorizationControl,
@@ -488,6 +489,12 @@ export class PluginControlRuntime {
     const identity = await identities.loadOrCreate(hostname())
     const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
     if (credentials === undefined) return undefined
+    // Credentials on disk are not credentials the Server still accepts. When the device row is gone - a revoke,
+    // or a Server state cleanup - the files stay behind, and the panel used to render the authorized view: an
+    // empty device list and a control switch that answered AUTH_INVALID. Reporting no association while a
+    // terminal rejection is known makes the panel ask for a sign-in instead.
+    const hostStatus = this.host?.hostStatus()
+    if (hostStatus?.error !== undefined && HOST_AUTHORIZATION_ERRORS.has(hostStatus.error)) return undefined
     return {
       method: credentials.authorizationMethod,
       ...(credentials.account === undefined ? {} : { account: credentials.account }),
