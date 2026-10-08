@@ -1,3 +1,4 @@
+import { connectionFailureDetail } from './server-connection.js'
 import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { CodexAppFrameData, CodexAppStreamClosedData } from '@dsh-remote/protocol'
@@ -624,9 +625,13 @@ export class ClientModeRuntime {
       return true
     } catch (error: unknown) {
       this.supersededClient = undefined
+      // The code here is our own fallback (INTERNAL_ERROR) whenever the failure came from below, so the
+      // message and system codes carry the actual reason: a Host that refused control, a replaced link, a
+      // closed socket. Without them every cause reads the same.
       this.logger.warn('fast reconnect attempt failed', {
         targetDeviceId: shortId(targetDeviceId),
         code: safeErrorCode(error),
+        ...connectionFailureDetail(error),
       })
       return false
     }
@@ -812,6 +817,7 @@ export class ClientModeRuntime {
             targetDeviceId: shortId(targetDeviceId),
             attempt,
             code,
+            ...connectionFailureDetail(error),
           })
         }
       }

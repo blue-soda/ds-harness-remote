@@ -12,10 +12,13 @@
     Every top-level process of the app is frozen (the Electron main process plus the electron-as-node
     sidecars, which all lack a --type= switch), because the Host runtime may live in any of them.
 
-    Timings follow the client's own cadence (probe every 30 s, 4 s budget, then a 5 s fast-reconnect
-    cadence):
-      -Seconds 40   one missed probe, then answers again  -> fast reconnect, "link re-established"
-      -Seconds 80   two missed probes                     -> disaster fallback (the old behaviour)
+    What a client sees is decided by the Server's heartbeat, not by a probe of ours: a peer whose last
+    accepted pong is older than DSH_SERVER_PEER_TIMEOUT_MS (45 s by default) is declared offline on the
+    next check, and checks happen every DSH_SERVER_HEARTBEAT_INTERVAL_MS (20 s). The declaration therefore
+    lands in [45 s, 65 s], and it drops the peer together with every link it holds.
+      -Seconds 40   under the threshold  -> nothing should happen at all; the link survives
+      -Seconds 90   declared offline, Host returns -> the client's quick window recovers it, view intact
+      -Seconds 150  the window fails while the Host is still frozen -> fallback, then the retry schedule
 
     Every suspended process is resumed, including on Ctrl-C or an error.
 
@@ -102,10 +105,10 @@ finally {
 Write-Host @'
 
 Now check the client's log for:
-  [dsh-remote] remote Harness liveness check found no answer ... attempt:1
-  [dsh-remote] remote Harness link stopped answering; reconnecting in place
-  [dsh-remote] remote Harness reconnect finished {"reason":"link re-established"}   <- fixed behaviour
-and NOT:
-  [dsh-remote] fast reconnect attempt failed {"code":"INTERNAL_ERROR"}
+  [dsh-remote] remote Harness link needs rebuilding; trying a quick reconnect {"attempts":2,"windowMs":10000}
+  [dsh-remote] remote Harness session kept its view through a quick reconnect      <- the window held
+  [dsh-remote] remote Harness reconnect gave up; staying in the local shell        <- the schedule ended
+There is no liveness probe any more: the Server's heartbeat is the only thing that declares a peer gone,
+and a busy Host keeps answering it because pongs never wait on the business layer.
 '@
 
