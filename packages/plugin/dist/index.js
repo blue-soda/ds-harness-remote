@@ -21806,7 +21806,7 @@ var ClientModeRuntime = class {
     };
   }
   async devices() {
-    this.assertHostAuthorizationForDeviceDiscovery();
+    if (!await this.recoverHostAuthorization()) return [];
     this.requireIdentity();
     const serverDevices = await this.server.listDevices();
     const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
@@ -21817,18 +21817,21 @@ var ClientModeRuntime = class {
     }));
   }
   /**
-   * Device discovery is exposed through the local app control route. When this
-   * installation also runs a Host, keep that route closed after the Host's
-   * Server credential has become terminally invalid. The Client credential can
-   * remain usable for a short time after a revoke, so checking only
-   * `ClientServerApi.listDevices()` would otherwise leak the device directory
-   * from a Host that the user has already been told to re-authorize.
+   * Whether the Host credential is usable, after one attempt to re-authorize it.
+   *
+   * Device discovery runs through the local app control route and must not leak a device directory for a
+   * Host the Server no longer accepts, but refusing outright was worse than useless: it told a user who was
+   * already signing in to sign out first. Re-authorizing from the stored Client credential is the move that
+   * helps; when that fails too - the device was removed from the account, so there is nothing left to
+   * refresh - discovery reports nothing and the panel's authorization state takes over.
+   * @returns whether the Host credential is usable.
    */
-  assertHostAuthorizationForDeviceDiscovery() {
+  async recoverHostAuthorization() {
     const status2 = this.host?.hostStatus();
-    if (status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error)) return;
-    const message = status2.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
-    throw new ClientModeError(status2.error, message);
+    if (status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error)) return true;
+    await this.authorizeHostByDefault();
+    const after = this.host?.hostStatus();
+    return after === void 0 || after.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(after.error);
   }
   async authorizeClientWithAccount(email, password) {
     let authorization;
@@ -25305,6 +25308,13 @@ var PluginControlRuntime = class {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password);
     }
+    const hostPaused = resolveConfig(this.settings.get()).hostControl?.paused === true;
+    if (this.host !== void 0 && !hostPaused) {
+      try {
+        this.host.reconnectHost?.();
+      } catch {
+      }
+    }
     await this.settings.replace(editableConfig(next));
     return {
       status: "authorized",
@@ -28368,18 +28378,7 @@ var HostPluginRuntime = class {
     if (this.serverApi === void 0) {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before enabling Host access.", false);
     }
-    let result;
-    try {
-      result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account);
-    } catch (error) {
-      if (!(error instanceof ServerApiError) || error.code !== "DEVICE_REVOKED") throw error;
-      await this.serverConnection?.stop();
-      this.identity = await this.identities.reset(this.config.deviceName);
-      this.serverApi.bindIdentity(this.identity);
-      this.serverConnection = this.createServerConnection(this.identity);
-      result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account);
-      this.logger.info("Rotated revoked Host identity before owned-device authorization");
-    }
+    const result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account);
     if (!this.paused) this.serverConnection?.resume();
     this.logger.info("Host authorized as an owned device");
     return result;

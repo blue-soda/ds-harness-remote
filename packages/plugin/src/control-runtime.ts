@@ -277,6 +277,18 @@ export class PluginControlRuntime {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password)
     }
+    // Signing in authorizes this device for the Host role as well - one identity, one row - so bring the Host
+    // connection back now: it had stopped retrying after the Server rejected its previous credential, and
+    // waiting for a restart would leave the user looking at a permanently offline host. An explicit pause is
+    // respected, since that is the user's own choice.
+    const hostPaused = resolveConfig(this.settings.get()).hostControl?.paused === true
+    if (this.host !== undefined && !hostPaused) {
+      try {
+        this.host.reconnectHost?.()
+      } catch {
+        // The panel's status reports whatever happened next.
+      }
+    }
     await this.settings.replace(editableConfig(next))
     return {
       status: 'authorized',

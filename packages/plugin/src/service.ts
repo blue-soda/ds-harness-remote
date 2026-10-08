@@ -350,18 +350,11 @@ export class HostPluginRuntime {
     if (this.serverApi === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before enabling Host access.', false)
     }
-    let result
-    try {
-      result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account)
-    } catch (error) {
-      if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
-      await this.serverConnection?.stop()
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.serverApi.bindIdentity(this.identity)
-      this.serverConnection = this.createServerConnection(this.identity)
-      result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account)
-      this.logger.info('Rotated revoked Host identity before owned-device authorization')
-    }
+    // A revoked device keeps its identity. The Server deletes the row on revocation, so signing in again
+    // recreates it under the same id; the rotation that used to live here consumed another device slot and
+    // made one installation look like several. A refusal therefore propagates, and the panel asks for a
+    // sign-in rather than a new identity.
+    const result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account)
     // An authorization does not lift an explicit pause: the UI shows the paused
     // state with its own resume action, so the user's choice stays in force.
     if (!this.paused) this.serverConnection?.resume()

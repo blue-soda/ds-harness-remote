@@ -846,7 +846,7 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
-  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('does not list devices when the local Host authorization is %s', async error => {
+  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('reports no devices when the local Host authorization is %s, instead of telling the user to sign out', async error => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-auth-'))
     directories.push(directory)
     const listDevices = vi.fn(async () => [])
@@ -871,7 +871,9 @@ describe('ClientModeRuntime Host account control', () => {
     )
     await runtime.start()
 
-    await expect(runtime.devices()).rejects.toMatchObject({ code: error })
+    // The old behaviour refused with "sign out and authorize again", which a user who is currently signing in
+    // cannot act on. Discovery now reports nothing and leaves the state to the panel.
+    await expect(runtime.devices()).resolves.toEqual([])
     expect(listDevices).not.toHaveBeenCalled()
     await runtime.close()
   })

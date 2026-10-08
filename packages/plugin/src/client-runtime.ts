@@ -435,7 +435,11 @@ export class ClientModeRuntime {
   }
 
   async devices(): Promise<RemoteDeviceView[]> {
-    this.assertHostAuthorizationForDeviceDiscovery()
+    // A stale Host credential must not become a dead end: the user is usually *in the middle* of signing in,
+    // and "sign out and authorize again" is a circle they cannot act on. Try to re-authorize from the stored
+    // Client credential, and when that cannot work either, report no devices - the panel already renders the
+    // authorization state from the host status, and nothing is leaked.
+    if (!await this.recoverHostAuthorization()) return []
     this.requireIdentity()
     const serverDevices = await this.server.listDevices()
     const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
@@ -447,20 +451,21 @@ export class ClientModeRuntime {
   }
 
   /**
-   * Device discovery is exposed through the local app control route. When this
-   * installation also runs a Host, keep that route closed after the Host's
-   * Server credential has become terminally invalid. The Client credential can
-   * remain usable for a short time after a revoke, so checking only
-   * `ClientServerApi.listDevices()` would otherwise leak the device directory
-   * from a Host that the user has already been told to re-authorize.
+   * Whether the Host credential is usable, after one attempt to re-authorize it.
+   *
+   * Device discovery runs through the local app control route and must not leak a device directory for a
+   * Host the Server no longer accepts, but refusing outright was worse than useless: it told a user who was
+   * already signing in to sign out first. Re-authorizing from the stored Client credential is the move that
+   * helps; when that fails too - the device was removed from the account, so there is nothing left to
+   * refresh - discovery reports nothing and the panel's authorization state takes over.
+   * @returns whether the Host credential is usable.
    */
-  private assertHostAuthorizationForDeviceDiscovery(): void {
+  private async recoverHostAuthorization(): Promise<boolean> {
     const status = this.host?.hostStatus()
-    if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return
-    const message = status.error === 'DEVICE_REVOKED'
-      ? 'The local Host was revoked on the Server. Sign out and authorize this Host again.'
-      : 'The local Host authorization is no longer valid. Sign out and authorize this Host again.'
-    throw new ClientModeError(status.error, message)
+    if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return true
+    await this.authorizeHostByDefault()
+    const after = this.host?.hostStatus()
+    return after === undefined || after.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(after.error)
   }
 
   async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {
