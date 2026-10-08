@@ -13511,6 +13511,16 @@ var HostServerApi = class {
     const identity = this.requireIdentity();
     return await this.store.load(this.baseUrl, identity.deviceId) !== void 0;
   }
+  /**
+   * Drop the in-memory credential cache so the next request reads what is on disk.
+   *
+   * Signing in writes fresh credentials for this device; a long-lived runtime that kept its own copy went on
+   * presenting the rejected one and answered AUTH_INVALID until the process restarted.
+   */
+  reloadCredentials() {
+    this.credentials = void 0;
+    this.credentialsPromise = void 0;
+  }
   async clearAuthorization() {
     this.credentials = void 0;
     this.credentialsPromise = void 0;
@@ -21912,6 +21922,10 @@ var ClientModeRuntime = class {
    * remains signed in and can still control other machines, and turning control back on reconnects
    * without another sign-in.
    */
+  /** Re-read this device's credentials from disk, so a sign-in is picked up without a restart. */
+  reloadCredentials() {
+    this.server.reloadCredentials();
+  }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
     await this.host.setHostControl?.(enabled);
@@ -25308,6 +25322,8 @@ var PluginControlRuntime = class {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password);
     }
+    this.client?.reloadCredentials?.();
+    this.host?.reloadCredentials?.();
     const hostPaused = resolveConfig(this.settings.get()).hostControl?.paused === true;
     if (this.host !== void 0 && !hostPaused) {
       try {
@@ -28317,6 +28333,10 @@ var HostPluginRuntime = class {
     this.paused = false;
     this.serverConnection?.resume();
     if (wasPaused) this.logger.info("Host connection resumed");
+  }
+  /** Re-read this device's credentials from disk, so a sign-in is picked up without a restart. */
+  reloadCredentials() {
+    this.serverApi?.reloadCredentials();
   }
   /** Record whether this machine accepts control, on the Server, keeping identity and credentials. */
   async setHostControl(enabled) {

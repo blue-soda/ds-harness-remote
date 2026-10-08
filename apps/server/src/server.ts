@@ -350,7 +350,13 @@ export function createRemoteServer(config: Config) {
       const source = path.endsWith('register-owned-role') ? deviceAuth(req) : undefined
       const accountName = source === undefined ? sessionAccount(req) : source.account
       const { device } = deviceRegistrationRequestSchema.parse(await body(req))
-      if (source && (source.descriptor.deviceId === device.deviceId || source.descriptor.role === device.role)) throw new ApiError('INVALID_MESSAGE', 409)
+      // A device may register itself: with one identity per installation the client and host halves present the
+      // same id and role, so the old "same id or same role" refusal rejected every sign-in. A device registering
+      // its own id falls through to `store.register`, which still pins the identity key; a *different* device
+      // claiming this role stays refused.
+      if (source && source.descriptor.deviceId !== device.deviceId && source.descriptor.role === device.role) {
+        throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
+      }
       json(res, 200, store.register(accountName, device)); return
     }
     if (method === 'POST' && path === '/api/v1/auth/refresh') {
@@ -374,8 +380,8 @@ export function createRemoteServer(config: Config) {
     if (method === 'GET' && path === '/api/v1/me') { json(res, 200, descriptor(deviceAuth(req))); return }
     if (method === 'GET' && path === '/api/v1/devices') {
       const source = deviceAuth(req)
-      if (source.descriptor.role !== 'client') throw new ApiError('MEMBERSHIP_REQUIRED', 403)
-      // Discovery is account-scoped: a client only ever sees its own account's hosts.
+      // Discovery is account-scoped: any signed-in device sees its own account's hosts. The stored role used to
+      // have to be 'client', which locked out unified devices - their row is registered as a host.
       const items = store.devicesFor(source.account).filter(d => d.descriptor.role === 'host').map(d => {
         const { identityKey: _key, ...item } = descriptor(d)
         return item
@@ -384,8 +390,9 @@ export function createRemoteServer(config: Config) {
     }
     const match = /^\/api\/v1\/devices\/([^/]+)(\/presence)?$/.exec(path)
     if (method === 'GET' && match) {
+      // Account scope is enforced by the lookup itself; requiring the two roles to differ locked a device out
+      // of its own account now that one identity covers both halves.
       const source = deviceAuth(req), target = store.get(match[1]!, source.account)
-      if (source.descriptor.role === target.descriptor.role) throw new ApiError('MEMBERSHIP_REQUIRED', 403)
       const d = descriptor(target)
       json(res, 200, match[2] ? { deviceId: d.deviceId, online: d.online, lastSeenAt: d.lastSeenAt } : d); return
     }

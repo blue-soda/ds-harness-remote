@@ -277,10 +277,12 @@ export class PluginControlRuntime {
       }
       authorization = await api.authorizeWithAccount(identity, value.email, value.password)
     }
-    // Signing in authorizes this device for the Host role as well - one identity, one row - so bring the Host
-    // connection back now: it had stopped retrying after the Server rejected its previous credential, and
-    // waiting for a restart would leave the user looking at a permanently offline host. An explicit pause is
-    // respected, since that is the user's own choice.
+    // Signing in writes fresh credentials for this device. Both halves cache them in memory, so they have to
+    // re-read before anything else: otherwise they keep presenting the rejected credential and answer
+    // AUTH_INVALID until the process restarts. Then the Host connection comes back - it had stopped retrying
+    // after the Server refused that credential - unless the user paused it, which is their own choice.
+    this.client?.reloadCredentials?.()
+    this.host?.reloadCredentials?.()
     const hostPaused = resolveConfig(this.settings.get()).hostControl?.paused === true
     if (this.host !== undefined && !hostPaused) {
       try {

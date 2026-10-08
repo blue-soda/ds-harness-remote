@@ -130,12 +130,13 @@ describe('account and device authorization', () => {
     await request('/auth/logout', 'POST', {}, undefined, { Cookie: cookie })
     expect((await request('/auth/me', 'GET', undefined, login.data.token)).status).toBe(401)
   })
-  it('pins identity and requires distinct opposite-role registration', async () => {
+  it('pins identity and refuses a second device in the same role', async () => {
     const h = await device('host'), c = await device()
     const changed = { deviceId: h.deviceId, name: h.name, role: h.role, platform: h.platform, clientVersion: h.clientVersion, identityKey: c.identityKey }
     expect((await request('/devices/register', 'POST', { v: 1, device: changed }, accountToken)).data.error.code).toBe('PEER_IDENTITY_MISMATCH')
     expect((await request(`/devices/${h.deviceId}`, 'GET', undefined, c.accessToken)).data.identityKey).toBe(h.identityKey)
-    expect((await request(`/devices/${c.deviceId}`, 'GET', undefined, c.accessToken)).status).toBe(403)
+    // A device may read its own row: one identity covers both halves, so the two roles no longer have to differ.
+    expect((await request(`/devices/${c.deviceId}`, 'GET', undefined, c.accessToken)).status).toBe(200)
     const descriptor = { ...changed, deviceId: randomUUID() }
     expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, h.accessToken)).status).toBe(409)
     expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, c.accessToken)).status).toBe(200)
@@ -321,5 +322,15 @@ describe('device revocation', () => {
     const again = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
     expect(again.status).toBe(200)
     expect((await request('/me', 'GET', undefined, again.data.accessToken)).status).toBe(200)
+  })
+})
+describe('unified device identity', () => {
+  it('lets a device registered as a host list its account hosts', async () => {
+    // One identity per installation means the row is registered as a host, and the listing used to require the
+    // stored role to be 'client' - which locked every unified device out with a 403.
+    const h = await device('host')
+    const listed = await request('/devices', 'GET', undefined, h.accessToken)
+    expect(listed.status).toBe(200)
+    expect(listed.data.items.map(item => item.deviceId)).toContain(h.deviceId)
   })
 })

@@ -113,6 +113,17 @@ export class HostServerApi {
     return await this.store.load(this.baseUrl, identity.deviceId) !== undefined
   }
 
+  /**
+   * Drop the in-memory credential cache so the next request reads what is on disk.
+   *
+   * Signing in writes fresh credentials for this device; a long-lived runtime that kept its own copy went on
+   * presenting the rejected one and answered AUTH_INVALID until the process restarted.
+   */
+  reloadCredentials(): void {
+    this.credentials = undefined
+    this.credentialsPromise = undefined
+  }
+
   async clearAuthorization(): Promise<void> {
     this.credentials = undefined
     this.credentialsPromise = undefined

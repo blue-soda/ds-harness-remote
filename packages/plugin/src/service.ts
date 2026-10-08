@@ -279,6 +279,11 @@ export class HostPluginRuntime {
     if (wasPaused) this.logger.info('Host connection resumed')
   }
 
+  /** Re-read this device's credentials from disk, so a sign-in is picked up without a restart. */
+  reloadCredentials(): void {
+    this.serverApi?.reloadCredentials()
+  }
+
   /** Record whether this machine accepts control, on the Server, keeping identity and credentials. */
   async setHostControl(enabled: boolean): Promise<void> {
     await this.serverApi?.setHostControl(enabled)

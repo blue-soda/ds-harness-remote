@@ -168,6 +168,8 @@ export interface HostAuthorizationControl {
   hasStoredAuthorization?(): Promise<boolean>
   /** Record, on the Server, whether this machine accepts control. */
   setHostControl?(enabled: boolean): Promise<void>
+  /** Re-read this device's credentials from disk after a sign-in. */
+  reloadCredentials?(): void
   reconnectHost(): void
   /** Stop being reachable without releasing the authorization. */
   pauseHostConnection?(): Promise<void>
@@ -562,6 +564,11 @@ export class ClientModeRuntime {
    * remains signed in and can still control other machines, and turning control back on reconnects
    * without another sign-in.
    */
+  /** Re-read this device's credentials from disk, so a sign-in is picked up without a restart. */
+  reloadCredentials(): void {
+    this.server.reloadCredentials()
+  }
+
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
     if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
     // The flag first: resuming before the Server knows would only get the hello refused.
