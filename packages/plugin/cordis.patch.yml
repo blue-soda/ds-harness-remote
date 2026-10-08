@@ -10,7 +10,7 @@
         )
       config:
         enabled: true
-            serverUrl: https://sakakibara.ink:8443
+        serverUrl: https://sakakibara.ink:8443
         codex:
           enabled: true
           binary: codex
@@ -24,7 +24,7 @@
       inject: [settings, typertGateway, commands, tuiCommandTrees, tuiScenes]
       config:
         enabled: true
-            serverUrl: https://sakakibara.ink:8443
+        serverUrl: https://sakakibara.ink:8443
         codex:
           enabled: true
           binary: codex
