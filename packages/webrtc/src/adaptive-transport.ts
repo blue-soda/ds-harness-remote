@@ -316,7 +316,30 @@ export class AdaptiveTransport extends BaseTransport {
     }
     const data = fromBase64Url(payload.ciphertext)
     this.bytesReceived += data.byteLength
-    this.emit(data)
+    this.deliver(data)
+  }
+
+  /**
+   * Hand received bytes to the data listeners without letting one failure end the connection.
+   *
+   * A listener can reject a single message it cannot process - an endpoint the peer served that this
+   * side refuses, for example. While that escaped, the surrounding catch read it as a transport fault,
+   * tore the connection down, and every RPC the reconnect was awaiting rejected with
+   * TRANSPORT_CLOSED: a phone log shows `METHOD_NOT_ALLOWED` immediately followed by
+   * `fast reconnect attempt failed {"code":"INTERNAL_ERROR"}`, which escalated a healthy link to a
+   * full fallback. The stream now stays up, and a caller that cannot process a message fails on its
+   * own (its RPC times out), which is the only outcome that matches the actual fault.
+   * @param data - decrypted application bytes from the peer.
+   */
+  private deliver(data: Uint8Array): void {
+    try {
+      this.emit(data)
+    } catch (error) {
+      console.warn('[dsh-remote] a relay listener failed; keeping the transport up', {
+        message: error instanceof Error ? error.message : String(error),
+        code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
+      })
+    }
   }
 
   private async negotiate(): Promise<void> {
@@ -408,7 +431,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.rtc = rtc
     rtc.onMessage(data => {
       this.bytesReceived += data.byteLength
-      this.emit(data)
+      this.deliver(data)
     })
     rtc.onClose(() => {
       // A negotiation failure closes the provisional data channel before this

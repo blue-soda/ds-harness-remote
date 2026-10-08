@@ -372,3 +372,44 @@ function lastSentPayload(socket: FakeWebSocket, type: string): Record<string, un
   if (frame?.payload === undefined) throw new Error(`Missing ${type} frame`)
   return frame.payload
 }
+describe('AdaptiveTransport data delivery', () => {
+  it('keeps the transport up when a message handler throws', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const transport = createAdaptiveTransport()
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.relay'] }))
+    await Promise.resolve()
+    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+    await connecting
+    socket.receive(createControlFrame('transport.selected', {
+      connectionId: 'connection-1',
+      targetDeviceId: 'client-1',
+      transport: 'relay',
+    }))
+
+    // A handler that refuses one message must cost only that message: the transport stays up and the
+    // handlers behind it still receive the frame in flight. Before this, the throw escaped into the
+    // dispatcher, the connection was torn down, and the reconnect waiting on it failed.
+    const seen: number[] = []
+    transport.onMessage(() => { throw Object.assign(new Error('refused'), { code: 'METHOD_NOT_ALLOWED' }) })
+    transport.onMessage(data => { seen.push(data.byteLength) })
+    const bytes = new Uint8Array([1, 2, 3])
+    socket.receive(createControlFrame('relay', {
+      connectionId: 'connection-1',
+      targetDeviceId: 'client-1',
+      counter: 1,
+      ciphertext: Buffer.from(bytes).toString('base64url'),
+    }))
+    await Promise.resolve()
+
+    expect(seen).toEqual([3])
+    expect(warn).toHaveBeenCalledWith(
+      '[dsh-remote] a relay listener failed; keeping the transport up',
+      expect.objectContaining({ code: 'METHOD_NOT_ALLOWED' }),
+    )
+    warn.mockRestore()
+  })
+})

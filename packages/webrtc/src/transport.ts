@@ -31,8 +31,28 @@ export abstract class BaseTransport implements RemoteTransport {
     return () => this.closeHandlers.delete(cb)
   }
 
+  /**
+   * Deliver received bytes to every data handler, isolating a handler that throws.
+   *
+   * One handler that cannot process a message used to abort the loop and escape into the frame
+   * dispatcher, where the surrounding catch read it as a transport fault: on a phone that turned a
+   * refused endpoint (`METHOD_NOT_ALLOWED`) into a torn-down link, every RPC the fast reconnect was
+   * awaiting rejected with TRANSPORT_CLOSED, and the client escalated to a full fallback on a link that
+   * was healthy. A failing handler now costs only its own message, and the handlers behind it still
+   * receive the one in flight.
+   * @param data - decrypted application bytes from the peer.
+   */
   protected emit(data: Uint8Array): void {
-    for (const handler of this.handlers) handler(data)
+    for (const handler of this.handlers) {
+      try {
+        handler(data)
+      } catch (error) {
+        console.warn('[dsh-remote] a relay listener failed; keeping the transport up', {
+          message: error instanceof Error ? error.message : String(error),
+          code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
+        })
+      }
+    }
   }
 
   protected emitClose(): void {

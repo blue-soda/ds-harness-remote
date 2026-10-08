@@ -5882,9 +5882,28 @@ var BaseTransport = class {
     this.closeHandlers.add(cb);
     return () => this.closeHandlers.delete(cb);
   }
+  /**
+   * Deliver received bytes to every data handler, isolating a handler that throws.
+   *
+   * One handler that cannot process a message used to abort the loop and escape into the frame
+   * dispatcher, where the surrounding catch read it as a transport fault: on a phone that turned a
+   * refused endpoint (`METHOD_NOT_ALLOWED`) into a torn-down link, every RPC the fast reconnect was
+   * awaiting rejected with TRANSPORT_CLOSED, and the client escalated to a full fallback on a link that
+   * was healthy. A failing handler now costs only its own message, and the handlers behind it still
+   * receive the one in flight.
+   * @param data - decrypted application bytes from the peer.
+   */
   emit(data2) {
-    for (const handler of this.handlers)
-      handler(data2);
+    for (const handler of this.handlers) {
+      try {
+        handler(data2);
+      } catch (error) {
+        console.warn("[dsh-remote] a relay listener failed; keeping the transport up", {
+          message: error instanceof Error ? error.message : String(error),
+          code: typeof error === "object" && error !== null && "code" in error ? String(error.code) : void 0
+        });
+      }
+    }
   }
   emitClose() {
     for (const handler of this.closeHandlers)
@@ -7178,7 +7197,29 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     const data2 = fromBase64Url(payload.ciphertext);
     this.bytesReceived += data2.byteLength;
-    this.emit(data2);
+    this.deliver(data2);
+  }
+  /**
+   * Hand received bytes to the data listeners without letting one failure end the connection.
+   *
+   * A listener can reject a single message it cannot process - an endpoint the peer served that this
+   * side refuses, for example. While that escaped, the surrounding catch read it as a transport fault,
+   * tore the connection down, and every RPC the reconnect was awaiting rejected with
+   * TRANSPORT_CLOSED: a phone log shows `METHOD_NOT_ALLOWED` immediately followed by
+   * `fast reconnect attempt failed {"code":"INTERNAL_ERROR"}`, which escalated a healthy link to a
+   * full fallback. The stream now stays up, and a caller that cannot process a message fails on its
+   * own (its RPC times out), which is the only outcome that matches the actual fault.
+   * @param data - decrypted application bytes from the peer.
+   */
+  deliver(data2) {
+    try {
+      this.emit(data2);
+    } catch (error) {
+      console.warn("[dsh-remote] a relay listener failed; keeping the transport up", {
+        message: error instanceof Error ? error.message : String(error),
+        code: typeof error === "object" && error !== null && "code" in error ? String(error.code) : void 0
+      });
+    }
   }
   async negotiate() {
     if (this.connectionId === void 0)
@@ -7272,7 +7313,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.rtc = rtc;
     rtc.onMessage((data2) => {
       this.bytesReceived += data2.byteLength;
-      this.emit(data2);
+      this.deliver(data2);
     });
     rtc.onClose(() => {
       if (this.rtc === rtc && this.dataMode === "webrtc")

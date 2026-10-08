@@ -188,7 +188,15 @@ export class RelayTransport extends BaseTransport {
         }
         const data = fromBase64Url(payload.ciphertext)
         this.bytesReceived += data.byteLength
-        this.emit(data)
+        // Same rule as AdaptiveTransport.deliver: one listener that cannot process a message must not
+    // take the transport down with it.
+    try {
+      this.emit(data)
+    } catch (error) {
+      console.warn('[dsh-remote] a relay listener failed; keeping the transport up', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
         return
       }
       if (frame.type === 'secure.handshake') {
