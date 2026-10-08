@@ -2953,7 +2953,13 @@ window.__ModuleLoader__.load({
             // Cancelling is the same decision as returning to the local shell: it supersedes the
             // retry loop and records the target as local.
             setRouteOpen(false)
-            void props.control('mode.set', { mode: 'local' }).catch(() => undefined)
+            // The renderer keeps whatever Workspace and Session baseline it loaded while the remote
+            // session was up, and no local store can be re-read from here - so returning to the local
+            // shell has to rebuild the view, exactly like the disaster fallback does. Without this the
+            // sidebar and the session list stay remote-shaped and local work is unusable.
+            void props.control('mode.set', { mode: 'local' })
+              .catch(() => undefined)
+              .then(() => { window.location.reload() })
           },
         }, React.createElement('i', { 'aria-hidden': true }), reconnecting ? t('reconnecting') : networkLabel),
         networkOnline && !reconnecting

@@ -7,7 +7,7 @@ import type {
   RpcResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RemoteClientError, type RemoteClientCore } from '@dsh-remote/client-core'
-import { decodeByteValue, hydrateRpcAttachments } from './rpc-binary-attachments.js'
+import { decodeByteValue, encodeBase64, hydrateRpcAttachments } from './rpc-binary-attachments.js'
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
@@ -458,16 +458,15 @@ function normalizeByteResult(method: string, response: NativeResponse): NativeRe
   const raw = (value as { data?: unknown }).data
   const data = raw instanceof Uint8Array ? raw : decodeByteValue(raw)
   if (data === undefined) return response
-  // The local shell answers this endpoint with the byte extraction already applied - `data: null` plus an
-  // `attachments` list - and the client's connection layer copies the bytes back before the generated
-  // schema validates them (measured A/B: local previews work, a bare Uint8Array fails with
-  // `expected "Uint8Array", path: ["data"]`). Hand over exactly the local form; nothing in DSH changes.
+  // rc.2 is the string-era protocol: its consumers (the Android preview parses `data` with
+  // `typeof value.data !== 'string'`) require base64, and its result encoder rejects the Typert
+  // attachment envelope outright - measured HTTP 500 on /api/workspaceFiles/readBytes. So this carrier
+  // hands over base64 and leaves the Typert envelope to the Session V3 carrier, which needs it.
   return {
     ...response,
     result: {
       ...result,
-      value: { ...(value as Record<string, unknown>), data: null },
-      attachments: [{ path: ['data'], bytes: data }],
+      value: { ...(value as Record<string, unknown>), data: encodeBase64(data) },
     } as unknown as typeof result,
   }
 }
