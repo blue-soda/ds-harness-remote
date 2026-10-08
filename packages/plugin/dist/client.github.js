@@ -4179,7 +4179,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return;
           }
           wasReconnecting && (wasReconnecting = !1, current.connected === !0 && (ctx.sessions.refresh().catch(() => {
-          }), (!sawRemoteViewBefore || sawFallback) && Date.now() - lastRecoveryReloadAt > 5e3 && (lastRecoveryReloadAt = Date.now(), window.location.reload())));
+          }), Date.now() - lastRecoveryReloadAt > 2e4 && (lastRecoveryReloadAt = Date.now(), window.location.reload())));
         });
         ctx.effect(
           () => () => unsubscribeReconnectRefresh(),
