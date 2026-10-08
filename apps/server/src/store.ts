@@ -17,6 +17,9 @@ const savedDeviceSchema = z.object({
   account: z.string(),
   descriptor: accountDeviceDescriptorSchema,
   revoked: z.boolean(),
+  // Whether this device accepts control. Defaulted, so files written before the switch existed load as
+  // "yes", which is what they meant.
+  hostControl: z.boolean().default(true),
   lastSeenAt: z.number(),
 })
 /**
@@ -195,6 +198,8 @@ export class Store {
       account: accountName,
       descriptor,
       revoked: false,
+      // Signing in again must not silently switch control back on.
+      hostControl: old?.hostControl ?? true,
       lastSeenAt: old?.lastSeenAt ?? 0,
     }
     this.invalidate(descriptor.deviceId, accountName)
@@ -269,6 +274,13 @@ export class Store {
    * A device is only eligible to return by signing in again: registration requires an account session
    * or a registration code, never just a device token.
    */
+  /** Record whether a device accepts control. Persisted, so it survives a Server restart. */
+  setHostControl(id: string, enabled: boolean): void {
+    const device = this.get(id)
+    device.hostControl = enabled
+    this.save()
+  }
+
   revoke(id: string): void {
     const device = this.get(id)
     delete this.account(device.account)!.devices[id]

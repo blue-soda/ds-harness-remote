@@ -274,6 +274,36 @@ describe('health and readiness endpoints', () => {
     }
   })
 })
+describe('host control switch', () => {
+  it('refuses a host connection while control is off and keeps the switch across a re-registration', async () => {
+    const h = await device('host')
+    const online = await socket(h)
+    await online.next('hello.ack')
+
+    // Switching control off takes effect at once: the Server records it and drops the host connection.
+    expect((await request('/devices/self/control', 'POST', { enabled: false }, h.accessToken)).status).toBe(200)
+    await once(online.ws, 'close')
+
+    // While the switch is off a host connection is refused, with a code the client can act on.
+    expect((await (await socket(h)).next('error')).code).toBe('CONTROL_DISABLED')
+
+    // Signing in again must not quietly switch control back on, and the flag is visible to clients listing
+    // devices - the descriptor carries it.
+    const descriptor = {
+      deviceId: h.deviceId, identityKey: h.identityKey, name: h.name,
+      role: 'host', platform: h.platform, clientVersion: h.clientVersion,
+    }
+    const again = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(again.status).toBe(200)
+    expect((await request('/me', 'GET', undefined, again.data.accessToken)).data.hostControl).toBe(false)
+
+    // Turning it back on lets the same device in again, with no further sign-in.
+    expect((await request('/devices/self/control', 'POST', { enabled: true }, again.data.accessToken)).status).toBe(200)
+    const back = await socket({ ...h, accessToken: again.data.accessToken })
+    await back.next('hello.ack')
+  })
+})
+
 describe('device revocation', () => {
   it('removes the device and lets the same installation register again with the same id', async () => {
     const d = await device('client')

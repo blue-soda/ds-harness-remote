@@ -279,6 +279,12 @@ export class HostPluginRuntime {
     if (wasPaused) this.logger.info('Host connection resumed')
   }
 
+  /** Record whether this machine accepts control, on the Server, keeping identity and credentials. */
+  async setHostControl(enabled: boolean): Promise<void> {
+    await this.serverApi?.setHostControl(enabled)
+    this.logger.info(enabled ? 'Host control enabled' : 'Host control disabled')
+  }
+
   isPaused(): boolean { return this.paused }
 
   reconnectHost(): void {

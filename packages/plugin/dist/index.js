@@ -13510,6 +13510,18 @@ var HostServerApi = class {
     this.credentialsPromise = void 0;
     await this.store.clear();
   }
+  /**
+   * Tell the Server whether this device accepts control.
+   *
+   * The flag lives on the Server so it holds across restarts and is visible to clients listing devices;
+   * the local identity and credentials are untouched.
+   */
+  async setHostControl(enabled) {
+    await this.request("/api/v1/devices/self/control", {
+      method: "POST",
+      body: JSON.stringify({ enabled })
+    });
+  }
   async revokeCurrentDevice() {
     const identity = this.requireIdentity();
     if (await this.store.load(this.baseUrl, identity.deviceId) === void 0) {
@@ -21883,14 +21895,19 @@ var ClientModeRuntime = class {
     this.fellBackToLocal = false;
     this.remoteReconnectRun += 1;
   }
+  /**
+   * Switch whether this machine accepts control.
+   *
+   * Turning it off takes the Host connection away and tells the Server to refuse a new one, while the
+   * account sign-in, the device identity and the client half stay exactly as they are - so the device
+   * remains signed in and can still control other machines, and turning control back on reconnects
+   * without another sign-in.
+   */
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-    if (!enabled) {
-      await this.host.clearHostAuthorization();
-      return this.status();
-    }
-    const credentials = await this.server.authenticate(this.requireIdentity());
-    await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
+    await this.host.setHostControl?.(enabled);
+    if (enabled) await this.host.resumeHostConnection?.();
+    else await this.host.pauseHostConnection?.();
     return this.status();
   }
   async setMode(mode, targetDeviceId, signal) {
@@ -28284,6 +28301,11 @@ var HostPluginRuntime = class {
     this.paused = false;
     this.serverConnection?.resume();
     if (wasPaused) this.logger.info("Host connection resumed");
+  }
+  /** Record whether this machine accepts control, on the Server, keeping identity and credentials. */
+  async setHostControl(enabled) {
+    await this.serverApi?.setHostControl(enabled);
+    this.logger.info(enabled ? "Host control enabled" : "Host control disabled");
   }
   isPaused() {
     return this.paused;

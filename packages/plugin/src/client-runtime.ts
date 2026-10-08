@@ -166,6 +166,8 @@ export interface HostAuthorizationControl {
     }>
   }
   hasStoredAuthorization?(): Promise<boolean>
+  /** Record, on the Server, whether this machine accepts control. */
+  setHostControl?(enabled: boolean): Promise<void>
   reconnectHost(): void
   /** Stop being reachable without releasing the authorization. */
   pauseHostConnection?(): Promise<void>
@@ -547,14 +549,20 @@ export class ClientModeRuntime {
     this.remoteReconnectRun += 1
   }
 
+  /**
+   * Switch whether this machine accepts control.
+   *
+   * Turning it off takes the Host connection away and tells the Server to refuse a new one, while the
+   * account sign-in, the device identity and the client half stay exactly as they are - so the device
+   * remains signed in and can still control other machines, and turning control back on reconnects
+   * without another sign-in.
+   */
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
     if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
-    if (!enabled) {
-      await this.host.clearHostAuthorization()
-      return this.status()
-    }
-    const credentials = await this.server.authenticate(this.requireIdentity())
-    await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
+    // The flag first: resuming before the Server knows would only get the hello refused.
+    await this.host.setHostControl?.(enabled)
+    if (enabled) await this.host.resumeHostConnection?.()
+    else await this.host.pauseHostConnection?.()
     return this.status()
   }
 

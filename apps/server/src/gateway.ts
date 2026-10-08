@@ -111,6 +111,11 @@ export class Gateway {
       if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, retryable: true }))
     }
   }
+  /** Drop a device's host connection, leaving its client connection untouched. */
+  disconnectHost(account: string, deviceId: string, code: string, reason = 'control-disabled'): void {
+    this.disconnect(peerKey(account, deviceId, 'host'), code, reason)
+  }
+
   /** Whether a device currently holds a Control connection for its account. */
   isOnline(account: string, deviceId: string): boolean {
     // A device is reachable when any of its roles holds a connection: it can accept control while also
@@ -163,6 +168,9 @@ export class Gateway {
           // The device id must match the credential that authenticated; the role belongs to this
           // connection, not to the identity, so one identity can present itself as host and as client.
           if (device.deviceId !== p.deviceId) throw new ApiError('AUTH_INVALID')
+          // Control switched off: the device stays reachable as a client, but not as a host. Enforced here
+          // so it holds across restarts and applies to any client that tries to reach it.
+          if (p.role === 'host' && authenticated.hostControl === false) throw new ApiError('CONTROL_DISABLED')
           if (!p.protocols.includes(1)) throw new ApiError('UNSUPPORTED_VERSION')
           this.disconnect(peerKey(authenticated.account, device.deviceId, p.role), 'CONNECTION_REPLACED')
           peer = { ws, id: device.deviceId, account: authenticated.account, role: p.role, capabilities: p.capabilities, version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() }

@@ -786,6 +786,9 @@ describe('ClientModeRuntime Host account control', () => {
         accountRequired: true,
       })),
       reconnectHost: vi.fn(),
+      setHostControl: vi.fn(),
+      pauseHostConnection: vi.fn(),
+      resumeHostConnection: vi.fn(),
       clearHostAuthorization: vi.fn(),
       authorizeHostAsOwned: vi.fn(),
       authorizeHostWithAccount: vi.fn(async (email: string) => ({ account: email, expiresAt: Date.now() + 60_000, isAdmin: false })),
@@ -828,10 +831,16 @@ describe('ClientModeRuntime Host account control', () => {
       email: 'host@example.com', password: 'correct horse battery staple',
     }, signal)).resolves.toMatchObject({ ok: true, value: { account: 'host@example.com' } })
     expect(host.authorizeHostWithAccount).toHaveBeenCalledWith('host@example.com', 'correct horse battery staple')
+    // Switching control only tells the Server and takes the Host connection away or gives it back: the
+    // identity, the credentials and the client half are untouched, so no re-authorization is involved.
     await expect(handler?.('host.authorization.set', { enabled: true }, signal)).resolves.toMatchObject({ ok: true })
-    expect(host.authorizeHostAsOwned).toHaveBeenCalledWith('client-access-token', 'owner@example.com')
+    expect(host.setHostControl).toHaveBeenCalledWith(true)
+    expect(host.resumeHostConnection).toHaveBeenCalledOnce()
     await expect(handler?.('host.authorization.set', { enabled: false }, signal)).resolves.toMatchObject({ ok: true })
-    expect(host.clearHostAuthorization).toHaveBeenCalledOnce()
+    expect(host.setHostControl).toHaveBeenLastCalledWith(false)
+    expect(host.pauseHostConnection).toHaveBeenCalledOnce()
+    expect(host.authorizeHostAsOwned).not.toHaveBeenCalled()
+    expect(host.clearHostAuthorization).not.toHaveBeenCalled()
 
     await dispose()
     await runtime.close()

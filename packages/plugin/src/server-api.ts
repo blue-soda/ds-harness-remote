@@ -119,6 +119,19 @@ export class HostServerApi {
     await this.store.clear()
   }
 
+  /**
+   * Tell the Server whether this device accepts control.
+   *
+   * The flag lives on the Server so it holds across restarts and is visible to clients listing devices;
+   * the local identity and credentials are untouched.
+   */
+  async setHostControl(enabled: boolean): Promise<void> {
+    await this.request<unknown>('/api/v1/devices/self/control', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    })
+  }
+
   async revokeCurrentDevice(): Promise<void> {
     const identity = this.requireIdentity()
     if (await this.store.load(this.baseUrl, identity.deviceId) === undefined) {

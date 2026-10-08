@@ -155,6 +155,8 @@ export function createRemoteServer(config: Config) {
       // Membership is account-scoped, so ids from different accounts never collide.
       membershipId: `account:${hash(d.account).slice(0, 16)}`,
       online: gateway.isOnline(d.account, d.descriptor.deviceId),
+      // Lets a client show which devices would refuse control before it tries to connect.
+      hostControl: d.hostControl !== false,
       lastSeenAt: d.lastSeenAt,
       account: d.account,
     }
@@ -358,6 +360,16 @@ export function createRemoteServer(config: Config) {
     if (method === 'DELETE' && path === '/api/v1/devices/self') {
       const source = deviceAuth(req)
       store.revoke(source.descriptor.deviceId); json(res, 200, { status: 'revoked' }); return
+    }
+    if (method === 'POST' && path === '/api/v1/devices/self/control') {
+      const source = deviceAuth(req)
+      const requested = await body(req) as { enabled?: unknown }
+      if (typeof requested.enabled !== 'boolean') throw new ApiError('INVALID_MESSAGE')
+      store.setHostControl(source.descriptor.deviceId, requested.enabled)
+      // Switching control off has to take effect now, not at the next hello: drop the host connection, and
+      // the flag above keeps it from coming back until the device asks again.
+      if (!requested.enabled) gateway.disconnectHost(source.account, source.descriptor.deviceId, 'CONTROL_DISABLED')
+      json(res, 200, { hostControl: requested.enabled }); return
     }
     if (method === 'GET' && path === '/api/v1/me') { json(res, 200, descriptor(deviceAuth(req))); return }
     if (method === 'GET' && path === '/api/v1/devices') {
