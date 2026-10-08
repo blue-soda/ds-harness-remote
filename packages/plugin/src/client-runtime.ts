@@ -772,7 +772,17 @@ export class ClientModeRuntime {
     const delays = [0, 5_000, 5_000, 10_000, 20_000]
     let attempt = 0
     for (;;) {
-      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) return
+      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) {
+        // The schedule is spent, so stop advertising a reconnect: the header reads this flag, and leaving
+        // it set made a session that had already settled in the local shell show "reconnecting" forever.
+        // The user can still reconnect by hand from the Remote panel.
+        this.reconnecting = undefined
+        this.logger.warn('remote Harness reconnect gave up; staying in the local shell', {
+          targetDeviceId: shortId(targetDeviceId),
+          attempts: attempt,
+        })
+        return
+      }
       const wait = delays[attempt] ?? 30_000
       if (wait > 0) await new Promise<void>(resolve => { setTimeout(resolve, wait) })
       attempt += 1

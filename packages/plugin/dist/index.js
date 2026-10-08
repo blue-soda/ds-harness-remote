@@ -21148,7 +21148,14 @@ var ClientModeRuntime = class {
     const delays = [0, 5e3, 5e3, 1e4, 2e4];
     let attempt = 0;
     for (; ; ) {
-      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) return;
+      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) {
+        this.reconnecting = void 0;
+        this.logger.warn("remote Harness reconnect gave up; staying in the local shell", {
+          targetDeviceId: shortId(targetDeviceId),
+          attempts: attempt
+        });
+        return;
+      }
       const wait2 = delays[attempt] ?? 3e4;
       if (wait2 > 0) await new Promise((resolve4) => {
         setTimeout(resolve4, wait2);
