@@ -246,26 +246,33 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   切回本地会写回 `local` 记录并顶掉重试循环；认证类失败（`AUTH_REQUIRED`/`ACCOUNT_AUTH_REQUIRED`/
   `AUTH_INVALID`/`TOKEN_EXPIRED`/`DEVICE_*`/`MEMBERSHIP_REQUIRED`）**立即停止重试**，因为等待无法修复它。
   **Android 真机验收待做**（进程被回收后重开，确认自动连回与侧栏状态）。
-- [x] **半开连接：两级重连（2026-10-07，按用户决定实现）**：`ClientModeRuntime` 在会话建立后每 **30 秒**
-  发一次只读的 `harness.transport.describe`，`client.rpc` 逐调用预算 **4 秒**（原先 10 秒，用户判为过久）。
-  **只有"没有应答"才算断**：对端返回自己的错误码（`METHOD_NOT_FOUND` 等）证明它在线，因此不会误判。
-  - **第一次无应答 → 快速重连**：不回退本地，界面停留在远程会话，`status.reconnecting.phase = 'fast'`；立刻用
-    `reestablish()`（`connect()` + 重新绑定 carrier + 关旧 client）重建传输，并把探测节奏切到 **5 秒**；
-    之后任何一次探测有应答（或重建成功）即回到稳态（`finishReconnect()`）。
-  - **第二次无应答 → 灾难回退**：走与 socket 关闭完全相同的 `handleRemoteTransportLost()`（回退本地 +
-    `fellBackToLocal` + 既有退避重连），`phase = 'fallback'`。
+- [x] **断链恢复：快速重连窗口 + 有限退避（2026-10-08 重做；上一版的应用层探测已删除）**：
+  上一版是"会话建立后每 **30 秒**发一次只读的 `harness.transport.describe`，逐调用预算 **4 秒**，第一次无应答进
+  快速重连、第二次无应答进灾难回退"。**该探测已整体删除**：它排在会话自身流量之后，Host 推大历史时会被误判为
+  "没有应答"，实测形成自激循环（探测超时 → 快速重连 → 重开工作区 → 再次超时）。
+  - **两个真实触发**：Server 通知链路已丢（对端离线 / 被顶替 / 协议失败），以及我们自己发现连接已死（写入吃
+    RST，约在 Server 判超时后 1 秒；或传输被关闭）。两者都先走**快速重连窗口**，日志 `reason` 为
+    `transport-closed` 或 `link-dropped`。
+  - **快速重连窗口**：10 秒内至多 **2 次**尝试，两次都**强制 relay**（实测 relay 建链 2–3 秒，direct 协商单独
+    就要 12 秒）；期间**不切视图、不刷新工作区、不重载**，成功后只刷新会话数据，并把工作区选择重新发布一次。
+  - **窗口耗尽 → 回退本地**：走 `handleRemoteTransportLost()`（回退本地 + `fellBackToLocal` + 页面重载），
+    `phase = 'fallback'`。
+  - **退避日程与上限**：立即、5、5、10、20 秒，其后每 30 秒，**至多 5 次**；走完即停止并**收起「重连中」**
+    （日志 `reconnect gave up; staying in the local shell {"attempts":10}`），此后只接受手动重连。
   - **可见与可中断**：只有**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`，会顶掉重连循环）；
     侧栏条目与目标对话框**不再重复**该状态（用户 2026-10-07 要求把语义交给顶部栏）。启动恢复是第三阶段
     `phase = 'restore'`。
   - 定时器 `unref()`、随会话启停（切回本地/丢链/关闭时清除），不持有事件循环，也不拖住测试。
   - **回前台立即触发**：浏览器半在 `visibilitychange`（仅 visible）与 `focus` 时调用控制端点
     `client.connection.verify`，不等下一个周期。
-  - **2026-10-07 实测（挂起 Host 进程制造静默）**：第一次无应答 → 快速重连 ✓（原地重建成功，
-    日志 `link stopped answering; reconnecting in place` → `remote Harness reconnect finished {reason: link re-established}`，
-    全程**没有** `transport lost`，界面不刷新）；第二次无应答 → 灾难回退 ✓。
+  - **实测（`scripts/desktop-silence.ps1` 冻结 Host；`scripts/client-silence.ps1` 冻结客户端）**：冻结 30 秒 →
+    什么都不发生 ✓（服务端心跳阈值 45 秒未到，链路存活）；冻结 90 秒 → 服务端在 **48 秒**判离线并丢弃链路 ✓，
+    客户端恢复瞬间由**快速窗口第一次尝试**（relay-only）重建 ✓（日志 `session kept its view through a quick reconnect`），
+    **没有** `transport lost` ✓、界面不刷新 ✓；Host 长时间不可达时窗口两次都失败 → 回退 ✓ → 日程走完并收起
+    「重连中」✓（`attempts:10`）。
   - **自我替换陷阱（已修）**：快速重连的重建会**新建**控制连接，而 Server 会关闭同一设备的旧连接 —— 旧传输的
     `onClose` 曾被当成灾难回退，于是快速重连**永远把自己升级掉**（表现为"只看到灾难回退"）。现在正在被替换的
-    传输的关闭会被忽略，升级判定权只归探测；两条升级路径都带 `reason`（`transport-closed` / `unanswered-twice`）。
+    传输的关闭会被忽略；触发只认真正的断链信号，日志带 `reason`（`transport-closed` / `link-dropped`）。
   - **回退/恢复的界面重建（实测驱动）**：DSH 的工作区 store 无法从插件侧刷新（`IWorkspaces` 没有 refresh），
     所以进灾难回退时客户端半**重载一次页面**（落到本地列表）、重连成功后再**重载一次**（落回远程工作区）；标签页
     记住工作区选择，重载后能回到原处。首次快照即基准 + 双向限流，保证不循环重载。

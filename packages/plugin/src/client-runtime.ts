@@ -713,9 +713,10 @@ export class ClientModeRuntime {
   /**
    * Shared cleanup for a session whose transport is gone.
    *
-   * A close event and an exhausted liveness check must leave exactly the same state behind, so both
-   * paths run this. The session is gone for good here, which is why the phase becomes 'fallback' and
-   * the retry loop keeps the UI saying that it is reconnecting.
+   * Every trigger runs this - a close on our own transport, and the quick window running out - so they all
+   * leave exactly the same state behind. The session is gone for good here, which is why the phase becomes
+   * 'fallback' and the retry schedule takes over until it is spent; once it is, the reconnect flag is
+   * cleared so the header stops advertising a reconnect that is no longer happening.
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */

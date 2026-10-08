@@ -1,7 +1,7 @@
 #requires -Version 7
 <#
 .SYNOPSIS
-    Make the Desktop Host stop answering for a while, so a client's liveness probe misses.
+    Make the Desktop Host stop answering for a while, long enough for the Server to declare it offline.
 
 .DESCRIPTION
     The Desktop's Host runtime runs inside one of the app's Electron processes. Suspending them freezes

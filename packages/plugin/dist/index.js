@@ -13467,7 +13467,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.31";
+var PLUGIN_VERSION = "0.4.32";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -22018,9 +22018,10 @@ var ClientModeRuntime = class {
   /**
    * Shared cleanup for a session whose transport is gone.
    *
-   * A close event and an exhausted liveness check must leave exactly the same state behind, so both
-   * paths run this. The session is gone for good here, which is why the phase becomes 'fallback' and
-   * the retry loop keeps the UI saying that it is reconnecting.
+   * Every trigger runs this - a close on our own transport, and the quick window running out - so they all
+   * leave exactly the same state behind. The session is gone for good here, which is why the phase becomes
+   * 'fallback' and the retry schedule takes over until it is spent; once it is, the reconnect flag is
+   * cleared so the header stops advertising a reconnect that is no longer happening.
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */

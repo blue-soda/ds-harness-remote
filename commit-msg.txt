@@ -1,0 +1,12 @@
+chore: drop the last traces of the liveness probe and bump to 0.4.32
+
+Nothing in the source still described the deleted probe except one comment on the transport-lost path, which
+also claimed the retry loop keeps the UI saying it is reconnecting - no longer true now that a spent
+schedule clears the flag. The desktop-silence synopsis, the AGENTS status cell and incident note, and the
+TODO entry for the old two-level design all described the probe and its 4 s budget, the 5 s cadence and an
+"unanswered-twice" escalation that does not exist; they now describe what runs: two real triggers, the quick
+window, and the finite schedule with its own end. Historical notes about the earlier probe keep their
+wording, because they are history.
+
+Version 0.4.32 across all five places (root and package manifests, dsh-plugin manifests, PLUGIN_VERSION);
+0.4.31 is already on npm, so this is the first release carrying tonight's fixes.
