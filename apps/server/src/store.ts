@@ -187,7 +187,9 @@ export class Store {
     // proves it is the same installation asking to come back; a different key claiming the id is
     // refused, so ids can never be taken over.
     if (old?.revoked && old.descriptor.identityKey !== descriptor.identityKey) throw new ApiError('DEVICE_REVOKED', 403)
-    if (old && (old.descriptor.identityKey !== descriptor.identityKey || old.descriptor.role !== descriptor.role)) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
+    // The identity key decides ownership; the role no longer pins a device, because one identity may act
+    // as host and as client. A different key claiming the same id is still refused.
+    if (old && old.descriptor.identityKey !== descriptor.identityKey) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
     if (!old && Object.values(account.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
     account.devices[descriptor.deviceId] = {
       account: accountName,

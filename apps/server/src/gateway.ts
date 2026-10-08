@@ -13,7 +13,20 @@ type Link = { id: string; account: string; host: string; client: string; stage: 
  * registry is keyed by account and device id together; a client can then never
  * pair with a host of another account.
  */
-function peerKey(account: string, deviceId: string): string { return `${account}\0${deviceId}` }
+/** The roles a device may hold a connection for. One device identity can hold both at once. */
+const DEVICE_ROLES = ['host', 'client'] as const
+
+/**
+ * Key of one device's Control connection.
+ *
+ * The role is part of the key on purpose: a device has a single identity, and a single identity may hold
+ * a host connection and a client connection at the same time. Keying by device alone made those two
+ * connections replace each other, which is what forced installations to keep a separate identity per
+ * role in the first place.
+ */
+function peerKey(account: string, deviceId: string, role: (typeof DEVICE_ROLES)[number]): string {
+  return `${account}\0${deviceId}\0${role}`
+}
 function modernHost(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:\+.*)?$/.exec(version)
   if (!match) return false
@@ -54,7 +67,10 @@ export class Gateway {
         + 'shorter grace period drops every peer on the very next check.',
       )
     }
-    store.onInvalidate = (id, account) => this.disconnect(peerKey(account, id), 'AUTH_INVALID')
+    // Invalidated tokens belong to the device, not to one of its roles, so every connection it holds goes.
+    store.onInvalidate = (id, account) => {
+      for (const role of DEVICE_ROLES) this.disconnect(peerKey(account, id, role), 'AUTH_INVALID')
+    }
     server.on('upgrade', (req, socket, head) => {
       if (req.url !== '/ws/v1/connect' || (req.headers.origin && req.headers.origin !== origin) || this.wss.clients.size >= 256) {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return
@@ -66,7 +82,7 @@ export class Gateway {
         if (Date.now() - peer.lastPong > this.peerTimeoutMs) {
           // The Server is the only party that can see a client stop answering, so the reason is
           // recorded here rather than left implicit in the close code.
-          this.disconnect(peerKey(peer.account, peer.id), 'CONNECTION_FAILED', 'heartbeat-timeout')
+          this.disconnect(peerKey(peer.account, peer.id, peer.role), 'CONNECTION_FAILED', 'heartbeat-timeout')
           continue
         }
         peer.nonce = randomUUID()
@@ -79,7 +95,7 @@ export class Gateway {
   private send(peer: Peer, frame: ControlFrame): void {
     if (peer.ws.readyState !== WebSocket.OPEN) return
     if (peer.ws.bufferedAmount > 4 * MAX_RELAY_FRAME_BYTES) {
-      this.disconnect(peerKey(peer.account, peer.id), 'SLOW_CONSUMER', 'slow-consumer')
+      this.disconnect(peerKey(peer.account, peer.id, peer.role), 'SLOW_CONSUMER', 'slow-consumer')
       return
     }
     peer.ws.send(JSON.stringify(frame))
@@ -89,14 +105,17 @@ export class Gateway {
     this.log?.info('link.dropped', {
       connectionId: link.id, hostDeviceId: link.host, clientDeviceId: link.client, code, stage: link.stage,
     })
-    for (const id of [link.host, link.client]) {
-      const p = this.peers.get(peerKey(link.account, id))
+    // A link names its host and its client, so each side's connection is found under its own role.
+    for (const [id, role] of [[link.host, 'host'], [link.client, 'client']] as const) {
+      const p = this.peers.get(peerKey(link.account, id, role))
       if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, retryable: true }))
     }
   }
   /** Whether a device currently holds a Control connection for its account. */
   isOnline(account: string, deviceId: string): boolean {
-    return this.peers.has(peerKey(account, deviceId))
+    // A device is reachable when any of its roles holds a connection: it can accept control while also
+    // controlling another machine.
+    return DEVICE_ROLES.some(role => this.peers.has(peerKey(account, deviceId, role)))
   }
 
   /** `id` is a {@link peerKey}: account-scoped, so one account's teardown never touches another's peer. */
@@ -123,7 +142,7 @@ export class Gateway {
     ws.on('error', () => {})
     ws.on('close', () => {
       clearTimeout(deadline)
-      if (peer && this.peers.get(peerKey(peer.account, peer.id)) === peer) this.disconnect(peerKey(peer.account, peer.id), 'CONNECTION_FAILED')
+      if (peer && this.peers.get(peerKey(peer.account, peer.id, peer.role)) === peer) this.disconnect(peerKey(peer.account, peer.id, peer.role), 'CONNECTION_FAILED')
     })
     ws.on('message', (raw, binary) => {
       if (ws.readyState !== WebSocket.OPEN) return
@@ -141,11 +160,13 @@ export class Gateway {
           const p = frame.payload as HelloPayload
           const authenticated = this.store.authenticate(p.accessToken)
           const device = authenticated.descriptor
-          if (device.deviceId !== p.deviceId || device.role !== p.role) throw new ApiError('AUTH_INVALID')
+          // The device id must match the credential that authenticated; the role belongs to this
+          // connection, not to the identity, so one identity can present itself as host and as client.
+          if (device.deviceId !== p.deviceId) throw new ApiError('AUTH_INVALID')
           if (!p.protocols.includes(1)) throw new ApiError('UNSUPPORTED_VERSION')
-          this.disconnect(peerKey(authenticated.account, device.deviceId), 'CONNECTION_REPLACED')
-          peer = { ws, id: device.deviceId, account: authenticated.account, role: device.role, capabilities: p.capabilities, version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() }
-          this.peers.set(peerKey(peer.account, peer.id), peer)
+          this.disconnect(peerKey(authenticated.account, device.deviceId, p.role), 'CONNECTION_REPLACED')
+          peer = { ws, id: device.deviceId, account: authenticated.account, role: p.role, capabilities: p.capabilities, version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() }
+          this.peers.set(peerKey(peer.account, peer.id, peer.role), peer)
           this.log?.info('peer.online', {
             deviceId: peer.id, role: peer.role, version: peer.version, capabilities: peer.capabilities.length,
           })
@@ -154,7 +175,7 @@ export class Gateway {
           this.send(peer, createControlFrame('hello.ack', { protocol: 1, serverVersion: 'self-hosted/0.1.0', connectionSessionId: randomUUID(), heartbeatIntervalMs: this.intervalMs, maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES, maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES, capabilities: p.capabilities.includes('transport.relay') ? ['transport.relay'] : [], webrtcEnabled: false, webrtcFallbackTimeoutMs: 1 }))
           return
         }
-        if (this.peers.get(peerKey(peer.account, peer.id)) !== peer) throw new ApiError('AUTH_INVALID')
+        if (this.peers.get(peerKey(peer.account, peer.id, peer.role)) !== peer) throw new ApiError('AUTH_INVALID')
         this.handle(peer, frame)
       } catch (error) {
         const code = error instanceof ApiError ? error.code : 'INVALID_MESSAGE'
@@ -172,7 +193,7 @@ export class Gateway {
           return
         }
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(createControlFrame('error', { code, message: code, retryable: false })))
-        if (peer) this.disconnect(peerKey(peer.account, peer.id), code)
+        if (peer) this.disconnect(peerKey(peer.account, peer.id, peer.role), code)
         else { ws.close(4001, code); setTimeout(() => ws.terminate(), 1000).unref() }
       }
     })
@@ -188,7 +209,7 @@ export class Gateway {
       const request = frame.payload as ConnectRequestPayload
       if (peer.role !== 'client') throw new ApiError('MEMBERSHIP_REQUIRED')
       // Same account only: the host key is scoped to the requesting client's account.
-      const host = this.peers.get(peerKey(peer.account, request.hostDeviceId))
+      const host = this.peers.get(peerKey(peer.account, request.hostDeviceId, 'host'))
       if (!host || host.role !== 'host') { this.send(peer, createControlFrame('error', { code: 'HOST_OFFLINE', message: 'Host is offline.', retryable: true })); return }
       if (!request.preferredTransports.includes('relay') || !peer.capabilities.includes('transport.relay') || !host.capabilities.includes('transport.relay')) throw new ApiError('CAPABILITY_NOT_SUPPORTED')
       const self = this.store.get(peer.id, peer.account).descriptor
@@ -204,7 +225,7 @@ export class Gateway {
     const link = typeof id === 'string' ? this.links.get(id) : undefined
     if (!link || (peer.id !== link.host && peer.id !== link.client)) throw new ApiError('CONNECTION_NOT_FOUND')
     const otherId = peer.id === link.host ? link.client : link.host
-    const other = this.peers.get(peerKey(peer.account, otherId))
+    const other = this.peers.get(peerKey(peer.account, otherId, otherId === link.host ? 'host' : 'client'))
     if (!other) throw new ApiError('CONNECTION_FAILED')
     if (frame.type === 'connect.accepted' || frame.type === 'connect.rejected') {
       if (peer.id !== link.host || link.stage !== 'pending') throw new ApiError('INVALID_MESSAGE')

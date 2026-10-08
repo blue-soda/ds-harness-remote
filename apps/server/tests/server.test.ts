@@ -178,10 +178,18 @@ describe('control authorization and encrypted relay', () => {
     expect((await attacker.next('error')).code).toMatch(/CONNECTION_NOT_FOUND|INVALID_MESSAGE/)
     expect(ctx.host.messages.filter(m => m.type === 'relay')).toHaveLength(0)
   })
-  it('rejects account tokens and mismatched device roles in hello', async () => {
+  it('rejects account tokens in hello and lets one identity hold both roles', async () => {
     const d = await device()
     expect((await (await socket(d, { accessToken: accountToken })).next('error')).code).toBe('AUTH_INVALID')
-    expect((await (await socket(d, { role: 'host' })).next('error')).code).toBe('AUTH_INVALID')
+    // The role belongs to the connection, not to the identity: one device may present itself as a client
+    // and as a host at the same time, and the second connection must not replace the first. Keying peers
+    // by device alone is what used to force one identity per role.
+    const asClient = await socket(d)
+    await asClient.next('hello.ack')
+    const asHost = await socket(d, { role: 'host' })
+    await asHost.next('hello.ack')
+    asClient.send('ping', { nonce: 'still-here' })
+    expect(await asClient.next('pong')).toEqual({ nonce: 'still-here' })
   })
   it('replaces a device socket without removing the new connection', async () => {
     const d = await device(), old = await socket(d); await old.next('hello.ack')
