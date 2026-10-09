@@ -3492,7 +3492,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
                             type: "button",
                             className: "dshRemotePageRefresh",
                             disabled: busy,
-                            style: { fontWeight: "normal" },
+                            // Match the "allow control" label exactly: 12px/18px in the secondary label colour, so it
+                            // reads as the same kind of control instead of a page-level action.
+                            style: { fontWeight: "normal", fontSize: "12px", lineHeight: "18px", height: "auto", minWidth: "0", padding: "0 4px", color: "var(--dsw-alias-label-secondary)" },
                             title: t("codexRemote"),
                             "aria-label": t("codexRemote"),
                             onClick: () => setCodexOpen(!0)
