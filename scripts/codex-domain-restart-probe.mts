@@ -1,5 +1,5 @@
-import { CodexRemoteDomain } from './packages/plugin/src/codex/domain.js'
-import { SafeLogger } from './packages/plugin/src/logging.js'
+import { CodexRemoteDomain } from '../packages/plugin/src/codex/domain.js'
+import { SafeLogger } from '../packages/plugin/src/logging.js'
 
 const binary = process.argv[2]
 const logger = new SafeLogger({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as never)
