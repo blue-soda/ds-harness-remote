@@ -355,9 +355,9 @@ export class PluginControlRuntime {
       },
     })
     await this.settings.replace(editableConfig(next))
-    // The domain reads its configuration once at startup, so a change only takes effect if it starts again.
-    // Fire and forget: a cold start can take seconds and the dialog should not wait for it.
-    void this.host?.restartCodex?.()
+    // NOT applying the change live: CodexRemoteDomain.close() is terminal (it sets `closed`), so a restart needs a
+    // reopen path the domain does not have yet. Calling close()+start() here left the domain dead for the rest of
+    // the process - reported as "the switch does not come back" - so the change waits for a DSH restart instead.
     return this.settingsView()
   }
 
