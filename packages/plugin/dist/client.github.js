@@ -3778,8 +3778,107 @@ Minimum version required to store current data is: ` + bestVersion + `.
           )) : null
         );
       }
+      function CodexConnectionDetails(props) {
+        let { control, t, onClose } = props, [view, setView] = React.useState(void 0), [enabled, setEnabled] = React.useState(!0), [binary, setBinary] = React.useState("codex"), [busy, setBusy] = React.useState(!1), [error, setError] = React.useState(void 0);
+        React.useEffect(() => {
+          let cancelled = !1;
+          return (async () => {
+            try {
+              let loaded = await control("settings.get");
+              if (cancelled) return;
+              setView(loaded), setEnabled(loaded.config.codex?.enabled ?? !0), setBinary(loaded.config.codex?.binary ?? "codex");
+            } catch (cause) {
+              cancelled || setError(cause instanceof Error ? cause.message : String(cause));
+            }
+          })(), () => {
+            cancelled = !0;
+          };
+        }, [control]);
+        let status = view?.codexStatus, unavailable = status !== void 0 && status.available === !1, writable = view?.writable === !0, discovered = view?.discoveredCodexBinary, pinned = (view?.config.codex?.binary ?? "codex") !== "codex", editable = pinned || discovered === void 0, stateText = status === void 0 ? t("loadingSettings") : `${status.state ?? "unknown"}${status.error === void 0 ? "" : ` \xB7 ${status.error}`}`, save = async (next) => {
+          setBusy(!0), setError(void 0);
+          try {
+            let updated = await control("settings.codex.set", {
+              enabled: next.enabled ?? enabled,
+              ...next.binary === void 0 ? {} : { binary: next.binary }
+            });
+            setView(updated), setEnabled(updated.config.codex?.enabled ?? enabled), setBinary(updated.config.codex?.binary ?? binary);
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          } finally {
+            setBusy(!1);
+          }
+        };
+        return React.createElement(
+          "div",
+          { className: "dshRemoteBackdrop", role: "presentation" },
+          React.createElement(
+            "section",
+            {
+              className: "dshRemoteDialog",
+              role: "dialog",
+              "aria-modal": !0,
+              "aria-label": t("codexRemote")
+            },
+            React.createElement(
+              "div",
+              { className: "dshRemoteHeader" },
+              React.createElement("strong", null, t("codexRemote")),
+              React.createElement("button", { type: "button", onClick: onClose, "aria-label": t("close") }, "\xD7")
+            ),
+            view === void 0 ? React.createElement("p", { className: "dshRemoteSettingsState" }, error ?? t("loadingSettings")) : React.createElement(
+              React.Fragment,
+              null,
+              React.createElement("p", { className: "dshRemoteSettingsState" }, stateText),
+              unavailable ? React.createElement("p", { className: "dshRemoteError" }, t(codexUnavailableKey(status?.error))) : null,
+              React.createElement(
+                "div",
+                { className: "dshRemoteAuthorizationSetting" },
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("strong", null, t("codexRemote")),
+                  React.createElement("p", null, t("codexRemoteHint"))
+                ),
+                React.createElement("input", {
+                  type: "checkbox",
+                  role: "switch",
+                  disabled: busy || !writable || unavailable,
+                  "aria-label": t("codexRemote"),
+                  checked: enabled,
+                  onChange: (event) => void save({ enabled: event.target.checked })
+                })
+              ),
+              React.createElement(
+                "div",
+                { className: "dshRemoteField" },
+                React.createElement("label", { htmlFor: "dsh-remote-codex-binary" }, t("codexBinaryLabel")),
+                React.createElement("input", {
+                  id: "dsh-remote-codex-binary",
+                  type: "text",
+                  value: editable ? binary : discovered ?? "",
+                  readOnly: !editable,
+                  disabled: busy || !writable,
+                  placeholder: t("codexBinaryPlaceholder"),
+                  onChange: (event) => setBinary(event.target.value)
+                }),
+                React.createElement("p", null, t(editable ? pinned ? "codexBinaryPinned" : "codexBinaryMissing" : "codexBinaryAuto"))
+              ),
+              React.createElement(
+                "div",
+                { className: "dshRemoteSettingsFooter" },
+                React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? ""),
+                React.createElement("button", {
+                  type: "button",
+                  disabled: busy || !writable,
+                  onClick: () => void save({ binary })
+                }, t("codexBinaryConfirm"))
+              )
+            )
+          )
+        );
+      }
       function RemoteModeAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), refresh = async () => {
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), [codexOpen, setCodexOpen] = React.useState(!1), refresh = async () => {
           let [nextStatus, nextDevices] = await Promise.all([
             props.control("status"),
             props.control("devices").catch(() => [])
@@ -3846,6 +3945,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("switchTarget"),
             onClick: () => setOpen(!0)
           }, React.createElement("span", { "aria-hidden": !0 }, "\u25CE"), props.wide ? React.createElement("span", null, label) : null),
+          React.createElement("button", {
+            type: "button",
+            className: "dshRemoteModeButton",
+            title: t("codexRemote"),
+            "aria-label": t("codexRemote"),
+            onClick: () => setCodexOpen(!0)
+          }, React.createElement("span", { "aria-hidden": !0 }, "\u25C6"), props.wide ? React.createElement("span", null, t("codexRemote")) : null),
+          codexOpen ? React.createElement(CodexConnectionDetails, {
+            control: props.control,
+            t,
+            onClose: () => setCodexOpen(!1)
+          }) : null,
           open ? React.createElement(
             "div",
             { className: "dshRemoteBackdrop", role: "presentation" },

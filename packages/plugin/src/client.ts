@@ -2706,6 +2706,117 @@ window.__ModuleLoader__.load({
     }
 
 
+/**
+ * The Codex connection details, opened from the Remote panel.
+ *
+ * Not every DSH build renders a plugin's own settings form - the built-in plugin page can list only metadata -
+ * which left the Codex switch and command field unreachable. The same controls therefore live one tap away in
+ * the panel the user actually opens, reading and writing the same two control endpoints as the settings card.
+ */
+function CodexConnectionDetails(props: {
+  control: <T>(endpoint: string, payload?: unknown) => Promise<T>
+  t: Translate
+  onClose: () => void
+}): unknown {
+  const { control, t, onClose } = props
+  const [view, setView] = React.useState<PluginSettingsView | undefined>(undefined)
+  const [enabled, setEnabled] = React.useState(true)
+  const [binary, setBinary] = React.useState('codex')
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | undefined>(undefined)
+
+  React.useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const loaded = await control<PluginSettingsView>('settings.get')
+        if (cancelled) return
+        setView(loaded)
+        setEnabled(loaded.config.codex?.enabled ?? true)
+        setBinary(loaded.config.codex?.binary ?? 'codex')
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [control])
+
+  const status = view?.codexStatus
+  const unavailable = status !== undefined && status.available === false
+  const writable = view?.writable === true
+  const discovered = view?.discoveredCodexBinary
+  const pinned = (view?.config.codex?.binary ?? 'codex') !== 'codex'
+  const editable = pinned || discovered === undefined
+  const stateText = status === undefined ? t('loadingSettings') : `${status.state ?? 'unknown'}${status.error === undefined ? '' : ` · ${status.error}`}`
+
+  const save = async (next: { enabled?: boolean; binary?: string }): Promise<void> => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      const updated = await control<PluginSettingsView>('settings.codex.set', {
+        enabled: next.enabled ?? enabled,
+        ...(next.binary === undefined ? {} : { binary: next.binary }),
+      })
+      setView(updated)
+      setEnabled(updated.config.codex?.enabled ?? enabled)
+      setBinary(updated.config.codex?.binary ?? binary)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
+    React.createElement('section', {
+      className: 'dshRemoteDialog',
+      role: 'dialog',
+      'aria-modal': true,
+      'aria-label': t('codexRemote'),
+    },
+    React.createElement('div', { className: 'dshRemoteHeader' },
+      React.createElement('strong', null, t('codexRemote')),
+      React.createElement('button', { type: 'button', onClick: onClose, 'aria-label': t('close') }, '×')),
+    view === undefined
+      ? React.createElement('p', { className: 'dshRemoteSettingsState' }, error ?? t('loadingSettings'))
+      : React.createElement(React.Fragment, null,
+        React.createElement('p', { className: 'dshRemoteSettingsState' }, stateText),
+        unavailable
+          ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(status?.error)))
+          : null,
+        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+          React.createElement('div', null,
+            React.createElement('strong', null, t('codexRemote')),
+            React.createElement('p', null, t('codexRemoteHint'))),
+          React.createElement('input', {
+            type: 'checkbox', role: 'switch', disabled: busy || !writable || unavailable,
+            'aria-label': t('codexRemote'),
+            checked: enabled,
+            onChange: (event: Event) => void save({ enabled: (event.target as HTMLInputElement).checked }),
+          })),
+        React.createElement('div', { className: 'dshRemoteField' },
+          React.createElement('label', { htmlFor: 'dsh-remote-codex-binary' }, t('codexBinaryLabel')),
+          React.createElement('input', {
+            id: 'dsh-remote-codex-binary',
+            type: 'text',
+            value: editable ? binary : discovered ?? '',
+            readOnly: !editable,
+            disabled: busy || !writable,
+            placeholder: t('codexBinaryPlaceholder'),
+            onChange: (event: Event) => setBinary((event.target as HTMLInputElement).value),
+          }),
+          React.createElement('p', null, editable
+            ? (pinned ? t('codexBinaryPinned') : t('codexBinaryMissing'))
+            : t('codexBinaryAuto'))),
+        React.createElement('div', { className: 'dshRemoteSettingsFooter' },
+          React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
+          React.createElement('button', {
+            type: 'button',
+            disabled: busy || !writable,
+            onClick: () => void save({ binary }),
+          }, t('codexBinaryConfirm'))))))
+}
+
     function RemoteModeAction(props: {
       wide: boolean
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
@@ -2724,6 +2835,7 @@ window.__ModuleLoader__.load({
       const progressRun = React.useRef(0)
       const [error, setError] = React.useState<string | undefined>(undefined)
       const [supported, setSupported] = React.useState(true)
+      const [codexOpen, setCodexOpen] = React.useState(false)
 
       const refresh = async (): Promise<void> => {
         const [nextStatus, nextDevices] = await Promise.all([
@@ -2823,6 +2935,20 @@ window.__ModuleLoader__.load({
         }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
           ? React.createElement('span', null, label)
           : null),
+        React.createElement('button', {
+          type: 'button',
+          className: 'dshRemoteModeButton',
+          title: t('codexRemote'),
+          'aria-label': t('codexRemote'),
+          onClick: () => setCodexOpen(true),
+        }, React.createElement('span', { 'aria-hidden': true }, '◆'), props.wide
+          ? React.createElement('span', null, t('codexRemote'))
+          : null),
+        codexOpen ? React.createElement(CodexConnectionDetails, {
+          control: props.control,
+          t,
+          onClose: () => setCodexOpen(false),
+        }) : null,
         open ? React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
           React.createElement('section', {
             className: 'dshRemoteDialog',
