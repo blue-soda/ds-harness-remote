@@ -21999,10 +21999,15 @@ var ClientModeRuntime = class {
     if (selection === void 0 || selection.targetDeviceId !== targetDeviceId) return;
     if (selection.backend !== "codex") return;
     void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch((error) => {
+      const code = safeErrorCode(error);
       this.logger.warn("CodeX workspace could not be restored after a reconnect", {
         targetDeviceId: shortId2(targetDeviceId),
-        code: safeErrorCode(error)
+        code
       });
+      if (code === "FEATURE_NOT_SUPPORTED") {
+        this.lastWorkspaceSelection = void 0;
+        this.pendingWorkspaceSelection = void 0;
+      }
     });
   }
   finishReconnect(reason) {
