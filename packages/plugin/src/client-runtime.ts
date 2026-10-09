@@ -666,7 +666,14 @@ export class ClientModeRuntime {
       await this.closePreview()
       this.connected = next
       this.clearConnectionProgress(next.progressRunId)
-      this.selectRemoteTarget(next)
+      // A reconnect must not change what the window is reading. Re-pointing the carrier chain at this Host's Harness
+      // here is what moved the user into the Host's DeepSeek workspace while a Codex session - or the local shell they
+      // had deliberately returned to - was on screen. A live Codex carrier is handed the chain by selectCodexTarget
+      // once restoreCodexCarrier has rebuilt it; a Harness session keeps the old behaviour.
+      const codexContext = this.codexVirtual !== undefined
+        || shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+        || this.codexHostsSeen.has(targetDeviceId)
+      if (!codexContext) this.selectRemoteTarget(next)
       await this.closeCodexStreams(previous.client)
       await previous.client.close().catch(() => undefined)
       this.supersededClient = undefined
