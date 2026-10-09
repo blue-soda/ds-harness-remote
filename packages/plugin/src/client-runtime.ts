@@ -1027,6 +1027,9 @@ export class ClientModeRuntime {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
     }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway(remote.client))
+    // A Codex call that fails because the session is gone goes through the same reconnect entry point as a lost link,
+    // instead of being shown as an error the user cannot act on.
+    virtual.watchCodexSessionLost(() => this.noteCodexSessionLost())
     let workspace: CodexVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)

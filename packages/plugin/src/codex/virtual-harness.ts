@@ -250,6 +250,9 @@ export async function discoverCodexVirtualWorkspaces(
  * the existing ApiProxy/Typert carrier boundary, so every UI layer above the
  * official Workspace and Session controllers remains native DSH.
  */
+// The predicate lives with the client runtime; a function declaration, so the cycle is hoisted and safe.
+import { isCodexSessionLoss } from '../client-runtime.js'
+
 export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   readonly api: ApiProxy
 
@@ -291,6 +294,21 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     private readonly hostCarrier?: RemoteTypertGatewayTarget,
   ) {
     this.api = this.createApiProxy()
+  }
+
+  private onSessionLost?: () => void
+
+  /**
+   * Register what to do when a Codex call fails because the session is gone.
+   *
+   * Set after construction rather than passed in, so neither the constructor nor the static factory signature has to
+   * change: the runtime hooks its reconnect entry point here. The Host replacing or switching off its Codex domain
+   * closes the bridges, and the next call would otherwise just be shown as an error.
+   * @param handler - called once per detected loss, before the failure is returned.
+   * @returns nothing.
+   */
+  watchCodexSessionLost(handler: () => void): void {
+    this.onSessionLost = handler
   }
 
   static remote(
@@ -429,6 +447,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         }
       }
     } catch (error) {
+      if (isCodexSessionLoss(error)) this.onSessionLost?.()
       return failFrom(error)
     }
   }

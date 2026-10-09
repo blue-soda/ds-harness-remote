@@ -22014,6 +22014,17 @@ var ClientModeRuntime = class {
     this.logger.info("remote Harness reconnect finished", { targetDeviceId: shortId2(target2), reason });
   }
   /**
+   * The Codex session is gone while the transport is still up (the Host replaced or switched off its Codex
+   * domain). Deliberately the same entry point as a lost link, so both carriers take one path: quick reconnect,
+   * local fallback and the retry schedule.
+   * @returns nothing; the reconnect runs in the background.
+   */
+  noteCodexSessionLost() {
+    const connected = this.connected;
+    if (connected === void 0 || this.reconnecting !== void 0) return;
+    void this.handleRemoteTransportLost(connected.client, connected.target.deviceId, "codex-closed");
+  }
+  /**
    * Check the live session now, outside the cadence.
    *
    * Used when the page becomes visible again, which is when a suspended client is most likely to be
