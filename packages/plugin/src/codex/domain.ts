@@ -163,6 +163,12 @@ export class CodexRemoteDomain {
 
   createPeer(context: PeerConnectionContext, publish: PublishCodexFrame): CodexPeerBridge | undefined {
     if (!this.config.enabled) return undefined
+    // One bounded line per client connection, so "who attached to this device's Codex, and when" is answerable after
+    // the fact instead of guessed at. Identifiers only, truncated: no tokens, no payloads, no traffic.
+    this.logger.info('Codex client attached', {
+      peerDeviceId: context.peerDeviceId.slice(0, 12),
+      connectionId: context.connectionId.slice(0, 12),
+    })
     const bridge = new CodexPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     this.peerDeviceIds.set(context.connectionId, context.peerDeviceId)

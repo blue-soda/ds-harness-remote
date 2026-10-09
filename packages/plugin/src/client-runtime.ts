@@ -273,6 +273,21 @@ export class ClientModeRuntime {
    * the link is back.
    */
   private lastWorkspaceSelection?: RemoteWorkspaceSelection
+  /**
+   * The last workspaces listed per Host.
+   *
+   * A workspace picked in the panel is opened by id, and a replaced Codex domain hands out new ids for the same
+   * directories. Keeping the previous listing is what lets a stale id be translated back to its root and opened
+   * again instead of failing as "no longer available".
+   */
+  private readonly lastCodexListing = new Map<string, CodexVirtualWorkspaceView[]>()
+  /**
+   * Hosts this run has actually opened a Codex workspace on.
+   *
+   * Whether the peer merely never offered Codex or has just switched it off decides the wording the user sees, and
+   * the remembered selection cannot answer that on its own: switching to local clears it by design.
+   */
+  private readonly codexHostsSeen = new Set<string>()
   private codexVirtual?: CodexVirtualHarness
   private readonly proxySwitch?: ApiProxySwitch
   private readonly gatewaySwitch: TypertGatewaySwitch
@@ -592,7 +607,7 @@ export class ClientModeRuntime {
     if (targetDeviceId === undefined || targetDeviceId.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'A targetDeviceId is required for remote mode.')
     }
-    const next = await this.connect(targetDeviceId, signal)
+    const next = await this.connectWithReason(targetDeviceId, signal)
     try {
       this.assertRemoteCompatible(next)
     } catch (error) {
@@ -632,7 +647,7 @@ export class ClientModeRuntime {
     // superseding it keeps that close from being read as an unrelated second failure.
     this.supersededClient = previous?.client
     try {
-      const next = await this.connect(targetDeviceId, undefined, forceRelay)
+      const next = await this.connectWithReason(targetDeviceId, undefined, forceRelay)
       if (previous === undefined) {
         // The user asked for local while this attempt was running.
         this.supersededClient = undefined
@@ -697,7 +712,10 @@ export class ClientModeRuntime {
   private restoreCodexCarrier(targetDeviceId: string): void {
     const selection = this.lastWorkspaceSelection
     if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === undefined) return
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(async error => {
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).then(() => {
+      // Only now may the UI re-read: the Codex carrier is the one that answers it.
+      this.restoreWorkspaceSelection(targetDeviceId)
+    }).catch(async error => {
       const code = safeErrorCode(error)
       // The Host replaced its Codex domain: the same directories come back under new project ids, so the remembered
       // id is unknown while the workspace is still there. Look it up by root before giving up on it.
@@ -709,6 +727,7 @@ export class ClientModeRuntime {
             path: selection.workspacePath,
           })
           await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => undefined)
+          this.restoreWorkspaceSelection(targetDeviceId)
           return
         }
       }
@@ -758,7 +777,10 @@ export class ClientModeRuntime {
     const target = this.reconnecting?.targetDeviceId
     if (target === undefined) return
     this.reconnecting = undefined
-    this.restoreWorkspaceSelection(target)
+    // A Codex session must not have its workspace selection republished on its own: the native UI would re-read it
+    // through the Harness carrier and settle in this Host's DeepSeek workspace, which is the behaviour that was ruled
+    // out. restoreCodexCarrier publishes the selection itself once the Codex carrier is back.
+    if (!shouldRestoreCodexCarrier(this.lastWorkspaceSelection, target)) this.restoreWorkspaceSelection(target)
     this.restoreCodexCarrier(target)
     this.logger.info('remote Harness reconnect finished', { targetDeviceId: shortId(target), reason })
   }
@@ -1063,12 +1085,14 @@ export class ClientModeRuntime {
       // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
       // carrier was never rebuilt, and the workspace list could not come back when Codex did.
       const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+        || this.codexHostsSeen.has(targetDeviceId)
       if (expected) this.noteCodexSessionLost()
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
         ? 'Codex is switched off or unavailable on the selected Host.'
         : 'The selected Host does not provide CodeX workspaces.')
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
+    this.lastCodexListing.set(targetDeviceId, workspaces)
     // An empty result is what the panel renders as "no Codex workspaces". Recording the count - and the fact that
     // the capability probe passed to get here - turns the next such report into an answer instead of a guess.
     // The field name must avoid the logger's redaction pattern (it matches "workspace"), which is why the count is
@@ -1093,6 +1117,7 @@ export class ClientModeRuntime {
       // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
       // carrier was never rebuilt, and the workspace list could not come back when Codex did.
       const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+        || this.codexHostsSeen.has(targetDeviceId)
       if (expected) this.noteCodexSessionLost()
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
         ? 'Codex is switched off or unavailable on the selected Host.'
@@ -1109,9 +1134,24 @@ export class ClientModeRuntime {
     let workspace: CodexVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
-    } catch {
+    } catch (error) {
       await virtual.close()
-      throw new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected CodeX workspace is no longer available.')
+      // The panel opens the id it listed earlier; a replaced domain has since renumbered the same directories. Ask
+      // for the current id of that root once before reporting the workspace as gone.
+      const previousRoot = this.lastCodexListing.get(targetDeviceId)?.find(item => item.workspaceId === workspaceId)?.path
+      if (previousRoot !== undefined) {
+        const currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => undefined)
+        if (currentId !== undefined && currentId !== workspaceId) {
+          this.logger.info('CodeX workspace reopened under a new id', {
+            targetDeviceId: shortId(targetDeviceId),
+            path: previousRoot,
+          })
+          return this.openCodexWorkspace(targetDeviceId, currentId, signal)
+        }
+      }
+      throw error instanceof ClientModeError
+        ? error
+        : new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected CodeX workspace is no longer available.')
     }
     await this.closeCodexVirtual()
     this.codexVirtual = virtual
@@ -1124,6 +1164,7 @@ export class ClientModeRuntime {
       ...(workspace.path === undefined ? {} : { workspacePath: workspace.path }),
       ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
     })
+    this.codexHostsSeen.add(remote.target.deviceId)
     this.logger.info('CodeX virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
   }
@@ -1143,6 +1184,7 @@ export class ClientModeRuntime {
       // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
       // carrier was never rebuilt, and the workspace list could not come back when Codex did.
       const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+        || this.codexHostsSeen.has(targetDeviceId)
       if (expected) this.noteCodexSessionLost()
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
         ? 'Codex is switched off or unavailable on the selected Host.'
@@ -1436,6 +1478,32 @@ export class ClientModeRuntime {
     )
   }
 
+  /**
+   * Connect, and report the control switch when that is what refused us.
+   *
+   * A device whose control switch is off has its host connection refused by the Server. Its presence may still read
+   * online, so the failure comes back from whichever transport step gave up first - "adaptive transport has not been
+   * authorized", "the authenticated Noise channel is not connected", "the selected Host is offline" - and none of
+   * them name the switch. The device row does, so a failed attempt is re-read against it; an error that already names
+   * a cause is passed through untouched.
+   * @param targetDeviceId - the Host being connected to.
+   * @param signal - aborts the attempt.
+   * @param forceRelay - skips direct negotiation, as the reconnect window does.
+   * @returns the connected remote session.
+   */
+  private async connectWithReason(targetDeviceId: string, signal?: AbortSignal, forceRelay = false): Promise<ConnectedRemote> {
+    try {
+      return await this.connect(targetDeviceId, signal, forceRelay)
+    } catch (error) {
+      if (safeErrorCode(error) === 'CONTROL_DISABLED') throw error
+      const row = await this.server.listDevices()
+        .then(list => list.find(device => device.deviceId === targetDeviceId))
+        .catch(() => undefined)
+      if (row?.hostControl === false) throw offlineConnectionError(false)
+      throw error
+    }
+  }
+
   private async connect(targetDeviceId: string, signal?: AbortSignal, forceRelay = false): Promise<ConnectedRemote> {
     signal?.throwIfAborted()
     const progressRunId = this.connectionProgressRun + 1
@@ -1576,7 +1644,7 @@ export class ClientModeRuntime {
 
   private async ensureConnected(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
-    const next = await this.connect(targetDeviceId, signal)
+    const next = await this.connectWithReason(targetDeviceId, signal)
     const previous = this.connected
     await this.closePreview()
     this.connected = next
