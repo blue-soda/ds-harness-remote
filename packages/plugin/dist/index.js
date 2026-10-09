@@ -17911,10 +17911,13 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   async workspaces(signal) {
     return (await this.refreshCatalog(signal)).workspaces;
   }
-  async selectWorkspace(workspaceId, signal) {
+  async selectWorkspace(workspaceId, signal, rootPath) {
     const catalog = await loadCatalog(this.client, signal);
-    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId);
-    if (workspace === void 0) throw new Error("The selected CodeX workspace is no longer available.");
+    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId) ?? (rootPath === void 0 ? void 0 : catalog.workspaces.find((item) => item.path === rootPath));
+    if (workspace === void 0) {
+      const seen = catalog.workspaces.slice(0, 5).map((item) => item.workspaceId + "@" + item.path).join(", ");
+      throw new Error("The selected CodeX workspace is no longer available. (catalog: " + seen + ")");
+    }
     this.selectedWorkspaceId = workspace.workspaceId;
     this.catalog = catalog;
     return workspace;
@@ -22384,11 +22387,22 @@ var ClientModeRuntime = class {
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal);
     } catch (error) {
-      await virtual.close();
       const code = safeErrorCode(error);
       const listed = this.lastCodexListing.get(targetDeviceId);
       const previousRoot = listed?.find((item) => item.workspaceId === workspaceId)?.path ?? this.codexWorkspaceRoots.get(`${targetDeviceId}|${workspaceId}`) ?? this.lastWorkspaceSelection?.workspacePath;
       const inListing = listed?.some((item) => item.workspaceId === workspaceId) ?? false;
+      if (previousRoot !== void 0) {
+        const byRoot = await virtual.selectWorkspace(workspaceId, signal, previousRoot).catch(() => void 0);
+        if (byRoot !== void 0) {
+          this.logger.info("CodeX workspace opened by root after the id missed", {
+            targetDeviceId: shortId2(targetDeviceId),
+            path: previousRoot
+          });
+          await virtual.close();
+          return this.openCodexWorkspace(targetDeviceId, byRoot.workspaceId, signal);
+        }
+      }
+      await virtual.close();
       let currentId;
       if (previousRoot !== void 0) {
         currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => void 0);
