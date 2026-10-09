@@ -1009,7 +1009,14 @@ export class ClientModeRuntime {
     if (!remote.features.codex) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
     }
-    return discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
+    const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
+    // An empty result is what the panel renders as "no Codex workspaces". Recording the count - and the fact that
+    // the capability probe passed to get here - turns the next such report into an answer instead of a guess.
+    this.logger.info('Codex workspaces listed', {
+      targetDeviceId: shortId(targetDeviceId),
+      workspaces: workspaces.length,
+    })
+    return workspaces
   }
 
   async openCodexWorkspace(

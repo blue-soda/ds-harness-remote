@@ -914,7 +914,16 @@ export class CodexRemoteDomain {
     } catch (error) {
       if (!isProjectListFallbackError(error)) throw error
     }
-    if (roots.length > 0) return { projectIds, roots }
+    if (roots.length > 0) {
+      this.logger.debug('Codex workspace authority resolved from project/list', { projects: projectIds.size, roots: roots.length })
+      return { projectIds, roots }
+    }
+    // Reaching here with nothing is exactly what leaves a client's workspace list empty, so say it with the counts:
+    // the next report then distinguishes "the CLI knows no projects" from "we failed to read them".
+    this.logger.warn('Codex project list yielded no roots; deriving workspaces from thread cwd', {
+      projects: projectIds.size,
+      listedThreads: listedThreads?.length ?? 0,
+    })
 
     const threads: Record<string, unknown>[] = listedThreads === undefined ? [] : [...listedThreads]
     if (listedThreads === undefined) {

@@ -1835,6 +1835,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableBinary: "The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.",
     codexUnavailableGeneric: "Codex is unavailable on this host ({code}).",
     codexDisabled: "Codex is switched off on this device, so nobody can use it remotely.",
+    codexStarting: "Starting the Codex connection...",
+    codexUnavailableNoCode: "Codex is unavailable on this host.",
     codexRecheck: "Re-check",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
@@ -2101,6 +2103,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableBinary: "\u8FD9\u91CC\u7684 Codex CLI \u65E0\u6CD5\u542F\u52A8\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u7528\u7684\u547D\u4EE4\u6216\u5B8C\u6574\u8DEF\u5F84\u3002",
     codexUnavailableGeneric: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\uFF08{code}\uFF09\u3002",
     codexDisabled: "\u672C\u8BBE\u5907\u7684 Codex \u5DF2\u5173\u95ED\uFF0C\u5176\u4ED6\u7528\u6237\u65E0\u6CD5\u8FDC\u7A0B\u4F7F\u7528\u3002",
+    codexStarting: "\u6B63\u5728\u542F\u52A8 Codex \u8FDE\u63A5\u2026",
+    codexUnavailableNoCode: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\u3002",
     codexRecheck: "\u91CD\u65B0\u68C0\u67E5",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
@@ -2709,6 +2713,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           busy: busy || codexBusy,
           writable,
           unavailable: codexUnavailable,
+          state: codexDomainStatus?.state,
           reasonCode: codexDomainStatus?.error,
           editable: codexBinaryEditable,
           pinned: codexBinaryPinned,
@@ -3795,9 +3800,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
               onChange: (event) => props.onEnabledChange(event.target.checked)
             })
           ),
-          // A disabled Codex is a choice, not a fault, and an unknown code is still better than pointing the user at a
-          // place called "the host status" to go and look it up.
-          props.enabled ? unavailable ? React.createElement("p", { className: "dshRemoteError" }, t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode ?? "UNKNOWN" })) : null : React.createElement("p", { className: "dshRemoteSettingsState" }, t("codexDisabled")),
+          // A disabled Codex is a choice, not a fault, and neither is a launch in progress: available is false while the
+          // domain starts, which used to paint a red line reading UNKNOWN for the couple of seconds every switch takes.
+          // Red is for a real failure only, and a failure that carries no code says so in words instead of printing
+          // UNKNOWN as if it were a code.
+          props.enabled ? props.state === "starting" || props.state === "restarting" ? React.createElement("p", { className: "dshRemoteSettingsState" }, t("codexStarting")) : unavailable && props.state === "unavailable" ? React.createElement("p", { className: "dshRemoteError" }, props.reasonCode === void 0 ? t("codexUnavailableNoCode") : t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode })) : null : React.createElement("p", { className: "dshRemoteSettingsState" }, t("codexDisabled")),
           React.createElement(
             "div",
             { className: "dshRemoteCodexBinary" },
@@ -3903,6 +3910,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 busy,
                 writable,
                 unavailable,
+                state: status?.state,
                 reasonCode: status?.error,
                 editable,
                 pinned,
