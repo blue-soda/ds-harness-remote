@@ -677,11 +677,34 @@ export class ClientModeRuntime {
     })
   }
 
+  /**
+   * Put the Codex carrier back onto the link that just replaced the old one.
+   *
+   * A reconnect leaves the carrier holding a transfer channel bound to a transport that no longer exists, and the
+   * first use fails with "remote transport closed" while the UI still looks connected - the reported symptom:
+   * Codex sessions vanish and clicking one errors. Rebuilding the carrier is what lets an open Codex workspace
+   * survive a reconnect; when the Host no longer offers Codex the rebuild fails, is logged, and the UI keeps its
+   * ordinary empty state.
+   * @param targetDeviceId - the Host the reconnect finished against.
+   */
+  private restoreCodexCarrier(targetDeviceId: string): void {
+    const selection = this.lastWorkspaceSelection
+    if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return
+    if (selection.backend !== 'codex') return
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(error => {
+      this.logger.warn('CodeX workspace could not be restored after a reconnect', {
+        targetDeviceId: shortId(targetDeviceId),
+        code: safeErrorCode(error),
+      })
+    })
+  }
+
   private finishReconnect(reason: string): void {
     const target = this.reconnecting?.targetDeviceId
     if (target === undefined) return
     this.reconnecting = undefined
     this.restoreWorkspaceSelection(target)
+    this.restoreCodexCarrier(target)
     this.logger.info('remote Harness reconnect finished', { targetDeviceId: shortId(target), reason })
   }
 
@@ -751,6 +774,9 @@ export class ClientModeRuntime {
     // user's view, Workspace and Session list. Only when that window runs out is the session handed back
     // to the local shell and the retry loop.
     if (this.reconnecting === undefined && await this.quickReconnect(targetDeviceId)) {
+      // The session keeps its view, but a Codex carrier kept its old transfer channel: rebuild it onto the new link
+      // before anyone can click a session and hit "remote transport closed".
+      this.restoreCodexCarrier(targetDeviceId)
       this.logger.info('remote Harness session kept its view through a quick reconnect', {
         targetDeviceId: shortId(targetDeviceId),
       })

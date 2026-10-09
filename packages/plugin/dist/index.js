@@ -21984,11 +21984,33 @@ var ClientModeRuntime = class {
       workspaceId: selection.workspaceId
     });
   }
+  /**
+   * Put the Codex carrier back onto the link that just replaced the old one.
+   *
+   * A reconnect leaves the carrier holding a transfer channel bound to a transport that no longer exists, and the
+   * first use fails with "remote transport closed" while the UI still looks connected - the reported symptom:
+   * Codex sessions vanish and clicking one errors. Rebuilding the carrier is what lets an open Codex workspace
+   * survive a reconnect; when the Host no longer offers Codex the rebuild fails, is logged, and the UI keeps its
+   * ordinary empty state.
+   * @param targetDeviceId - the Host the reconnect finished against.
+   */
+  restoreCodexCarrier(targetDeviceId) {
+    const selection = this.lastWorkspaceSelection;
+    if (selection === void 0 || selection.targetDeviceId !== targetDeviceId) return;
+    if (selection.backend !== "codex") return;
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch((error) => {
+      this.logger.warn("CodeX workspace could not be restored after a reconnect", {
+        targetDeviceId: shortId2(targetDeviceId),
+        code: safeErrorCode(error)
+      });
+    });
+  }
   finishReconnect(reason) {
     const target2 = this.reconnecting?.targetDeviceId;
     if (target2 === void 0) return;
     this.reconnecting = void 0;
     this.restoreWorkspaceSelection(target2);
+    this.restoreCodexCarrier(target2);
     this.logger.info("remote Harness reconnect finished", { targetDeviceId: shortId2(target2), reason });
   }
   /**
@@ -22046,6 +22068,7 @@ var ClientModeRuntime = class {
     this.supersededClient = void 0;
     const targetName = this.connected.target.name;
     if (this.reconnecting === void 0 && await this.quickReconnect(targetDeviceId)) {
+      this.restoreCodexCarrier(targetDeviceId);
       this.logger.info("remote Harness session kept its view through a quick reconnect", {
         targetDeviceId: shortId2(targetDeviceId)
       });
