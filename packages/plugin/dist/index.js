@@ -21680,6 +21680,14 @@ var ClientModeRuntime = class {
    */
   lastCodexListing = /* @__PURE__ */ new Map();
   /**
+   * Every workspace id this client has seen for a Host, mapped to its root.
+   *
+   * A panel entry can come from a listing made before the Host replaced its Codex domain, so the id is missing from
+   * the latest listing while the directory itself is unchanged. Keeping the whole history is what lets such an id be
+   * translated back to a root and reopened.
+   */
+  codexWorkspaceRoots = /* @__PURE__ */ new Map();
+  /**
    * Hosts this run has actually opened a Codex workspace on.
    *
    * Whether the peer merely never offered Codex or has just switched it off decides the wording the user sees, and
@@ -22349,6 +22357,9 @@ var ClientModeRuntime = class {
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
     this.lastCodexListing.set(targetDeviceId, workspaces);
+    for (const item of workspaces) {
+      this.codexWorkspaceRoots.set(`${targetDeviceId}|${item.workspaceId}`, item.path);
+    }
     this.logger.info("Codex workspaces listed", {
       targetDeviceId: shortId2(targetDeviceId),
       count: workspaces.length
@@ -22374,17 +22385,29 @@ var ClientModeRuntime = class {
       workspace = await virtual.selectWorkspace(workspaceId, signal);
     } catch (error) {
       await virtual.close();
-      const previousRoot = this.lastCodexListing.get(targetDeviceId)?.find((item) => item.workspaceId === workspaceId)?.path;
+      const code = safeErrorCode(error);
+      const listed = this.lastCodexListing.get(targetDeviceId);
+      const previousRoot = listed?.find((item) => item.workspaceId === workspaceId)?.path ?? this.codexWorkspaceRoots.get(`${targetDeviceId}|${workspaceId}`) ?? this.lastWorkspaceSelection?.workspacePath;
+      const inListing = listed?.some((item) => item.workspaceId === workspaceId) ?? false;
+      let currentId;
       if (previousRoot !== void 0) {
-        const currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => void 0);
-        if (currentId !== void 0 && currentId !== workspaceId) {
-          this.logger.info("CodeX workspace reopened under a new id", {
-            targetDeviceId: shortId2(targetDeviceId),
-            path: previousRoot
-          });
-          return this.openCodexWorkspace(targetDeviceId, currentId, signal);
-        }
+        currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => void 0);
       }
+      if (currentId !== void 0 && currentId !== workspaceId) {
+        this.logger.info("CodeX workspace reopened under a new id", {
+          targetDeviceId: shortId2(targetDeviceId),
+          path: previousRoot
+        });
+        return this.openCodexWorkspace(targetDeviceId, currentId, signal);
+      }
+      this.logger.warn("selected CodeX workspace could not be opened", {
+        targetDeviceId: shortId2(targetDeviceId),
+        code,
+        inListing,
+        hasRoot: previousRoot !== void 0,
+        roots: [...this.codexWorkspaceRoots.keys()].filter((key) => key.startsWith(`${targetDeviceId}|`)).length,
+        listed: listed?.length ?? -1
+      });
       throw error instanceof ClientModeError ? error : new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
     }
     await this.closeCodexVirtual();
