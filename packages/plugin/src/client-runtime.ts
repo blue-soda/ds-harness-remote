@@ -689,8 +689,7 @@ export class ClientModeRuntime {
    */
   private restoreCodexCarrier(targetDeviceId: string): void {
     const selection = this.lastWorkspaceSelection
-    if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return
-    if (selection.backend !== 'codex') return
+    if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === undefined) return
     void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(error => {
       const code = safeErrorCode(error)
       this.logger.warn('CodeX workspace could not be restored after a reconnect', {
@@ -1716,6 +1715,22 @@ export class ClientModeRuntime {
       membershipId: descriptor.membershipId,
     })
   }
+}
+
+/**
+ * Whether a finished reconnect should rebuild a Codex carrier.
+ *
+ * Only for the same Host, and only when the remembered selection was a Codex workspace: a Harness workspace must
+ * not turn into a Codex one, and another Host's selection says nothing about this reconnect.
+ * @param selection - the client's last remembered workspace selection, if any.
+ * @param targetDeviceId - the Host the reconnect finished against.
+ * @returns true when the Codex carrier has to be rebuilt.
+ */
+export function shouldRestoreCodexCarrier(
+  selection: { targetDeviceId: string; backend?: string } | undefined,
+  targetDeviceId: string,
+): boolean {
+  return selection !== undefined && selection.targetDeviceId === targetDeviceId && selection.backend === 'codex'
 }
 
 export class ClientModeError extends Error {
