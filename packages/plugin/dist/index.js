@@ -22287,7 +22287,12 @@ var ClientModeRuntime = class {
     if (!remote.features.codex) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
-    return discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
+    const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
+    this.logger.info("Codex workspaces listed", {
+      targetDeviceId: shortId2(targetDeviceId),
+      workspaces: workspaces.length
+    });
+    return workspaces;
   }
   async openCodexWorkspace(targetDeviceId, workspaceId, signal) {
     const remote = await this.ensureConnected(targetDeviceId, signal);
@@ -24790,7 +24795,14 @@ var CodexRemoteDomain = class {
     } catch (error) {
       if (!isProjectListFallbackError(error)) throw error;
     }
-    if (roots.length > 0) return { projectIds, roots };
+    if (roots.length > 0) {
+      this.logger.debug("Codex workspace authority resolved from project/list", { projects: projectIds.size, roots: roots.length });
+      return { projectIds, roots };
+    }
+    this.logger.warn("Codex project list yielded no roots; deriving workspaces from thread cwd", {
+      projects: projectIds.size,
+      listedThreads: listedThreads?.length ?? 0
+    });
     const threads = listedThreads === void 0 ? [] : [...listedThreads];
     if (listedThreads === void 0) {
       cursor2 = void 0;

@@ -69,6 +69,8 @@ export interface ServerHostDevice {
   platform: string
   membershipId: string
   online?: boolean
+  /** The control switch as the Server has it: false means this device accepts no control right now. */
+  hostControl?: boolean
   lastSeenAt?: number
   clientVersion?: string
   harnessVersion?: string
@@ -559,6 +561,7 @@ function parseHostDevice(value: unknown): ServerHostDevice {
     platform: item.platform,
     membershipId: item.membershipId,
     ...(typeof item.online === 'boolean' ? { online: item.online } : {}),
+    ...(typeof item.hostControl === 'boolean' ? { hostControl: item.hostControl } : {}),
     ...(typeof item.lastSeenAt === 'number' && Number.isSafeInteger(item.lastSeenAt) ? { lastSeenAt: item.lastSeenAt } : {}),
     ...(typeof item.clientVersion === 'string' ? { clientVersion: item.clientVersion } : {}),
     ...(typeof item.harnessVersion === 'string' ? { harnessVersion: item.harnessVersion } : {}),
@@ -581,6 +584,7 @@ function parseAuthorizedPeer(value: unknown): AuthorizedPeerDevice {
     identityKey: item.identityKey,
     membershipId: item.membershipId,
     ...(typeof item.online === 'boolean' ? { online: item.online } : {}),
+    ...(typeof item.hostControl === 'boolean' ? { hostControl: item.hostControl } : {}),
     ...(typeof item.lastSeenAt === 'number' && Number.isSafeInteger(item.lastSeenAt) ? { lastSeenAt: item.lastSeenAt } : {}),
   }
 }

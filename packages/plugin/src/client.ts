@@ -123,6 +123,8 @@ interface RemoteDevice {
   name: string
   platform: string
   online: boolean
+  /** False when the Server says this device refuses control, so the row can say so before anyone clicks it. */
+  hostControl?: boolean
   clientVersion?: string
   harnessVersion?: string
 }
@@ -393,6 +395,7 @@ const en = {
   noRemoteHosts: 'No authorized remote Host for this account.',
   online: 'Online',
   offline: 'Offline',
+  hostRefusesControl: 'Not accepting control',
   thisMachineHost: 'This machine as Remote Host',
   connected: 'Connected',
   connectedAs: 'Connected as {account}',
@@ -664,6 +667,7 @@ const zh: Record<keyof typeof en, string> = {
   noRemoteHosts: '此账号没有已授权的远程 Host。',
   online: '在线',
   offline: '离线',
+  hostRefusesControl: '不接受控制',
   thisMachineHost: '将此设备作为远程 Host',
   connected: '已连接',
   connectedAs: '已使用 {account} 连接',
@@ -2563,7 +2567,7 @@ window.__ModuleLoader__.load({
                           device.harnessVersion === undefined ? undefined : t('harnessVersion', { version: device.harnessVersion }),
                           device.clientVersion === undefined ? undefined : t('pluginVersion', { version: device.clientVersion }),
                         ].filter(Boolean).join(' · '))),
-                      React.createElement('small', null, t(device.online ? 'online' : 'offline')))))) : null,
+                      React.createElement('small', null, [t(device.online ? 'online' : 'offline'), device.hostControl === false ? t('hostRefusesControl') : undefined].filter(Boolean).join(' · ')))))) : null,
                 React.createElement(RemoteProgressView, { progress, t }),
                 selectedHost === undefined
                   ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
@@ -3064,7 +3068,7 @@ function CodexConnectionDetails(props: {
               key: device.deviceId,
               disabled: busy || !device.online || status?.target?.deviceId === device.deviceId,
               onClick: () => void switchMode('remote', device.deviceId),
-            }, `${device.name} · ${t(device.online ? 'online' : 'offline')}`))),
+            }, `${device.name} · ${[t(device.online ? 'online' : 'offline'), device.hostControl === false ? t('hostRefusesControl') : undefined].filter(Boolean).join(' · ')}`))),
           React.createElement(RemoteProgressView, { progress, t }),
           status?.hostAuthorizationAvailable && status.host !== undefined
             ? React.createElement('div', { className: 'dshRemoteHostAccount' },
