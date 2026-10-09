@@ -1397,7 +1397,7 @@ export class ClientModeRuntime {
       this.updateConnectionProgress(progressRunId, 'authorizing-peer')
       const target = await this.authorizeHostPeer(serverDevice)
       const presence = await this.server.presenceFor(targetDeviceId)
-      if (!presence.online) throw new ClientModeError('HOST_OFFLINE', 'The selected Host is offline.', true)
+      if (!presence.online) throw offlineConnectionError(serverDevice.hostControl)
       const credentials = await this.server.authenticate(identity)
       const rtcFactory = this.config.forceRelay
         ? undefined
@@ -1758,6 +1758,26 @@ export class ClientModeRuntime {
       membershipId: descriptor.membershipId,
     })
   }
+}
+
+/**
+ * The error to report when a Host reads as offline.
+ *
+ * The Server refuses the host connection of a device whose control switch is off, so presence says offline and the
+ * failure surfaces as whichever transport step gave up first - "adaptive transport has not been authorized", "the
+ * authenticated Noise channel is not connected", "the selected Host is offline" - none of which name the switch. When
+ * the device row says control is off, that is the reason, and saying it is the only part the user can act on.
+ * @param hostControl - the Server's control flag for that device, if the row carried one.
+ * @returns the error to throw.
+ */
+export function offlineConnectionError(hostControl: boolean | undefined): ClientModeError {
+  return hostControl === false
+    ? new ClientModeError(
+      'CONTROL_DISABLED',
+      'This device is not accepting control. Turn on "Allow other users to control this device" on that device.',
+      true,
+    )
+    : new ClientModeError('HOST_OFFLINE', 'The selected Host is offline.', true)
 }
 
 /**

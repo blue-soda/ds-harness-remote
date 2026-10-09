@@ -395,6 +395,7 @@ const en = {
   noRemoteHosts: 'No authorized remote Host for this account.',
   online: 'Online',
   offline: 'Offline',
+  connectionControlDisabled: 'This device is not accepting control right now.',
   hostRefusesControl: 'Not accepting control',
   thisMachineHost: 'This machine as Remote Host',
   connected: 'Connected',
@@ -667,6 +668,7 @@ const zh: Record<keyof typeof en, string> = {
   noRemoteHosts: '此账号没有已授权的远程 Host。',
   online: '在线',
   offline: '离线',
+  connectionControlDisabled: '该设备当前不接受控制。',
   hostRefusesControl: '不接受控制',
   thisMachineHost: '将此设备作为远程 Host',
   connected: '已连接',
@@ -1043,6 +1045,7 @@ function connectionErrorMessage(code: string, t: Translate): string {
     return t('connectionAuthorizationExpired')
   }
   if (code === 'CONNECTION_REPLACED') return t('connectionReplaced')
+  if (code === 'CONTROL_DISABLED') return t('connectionControlDisabled')
   if (code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
   if (code === 'DEVICE_REVOKED') return t('connectionDeviceRevoked')
   if (code === 'DEVICE_OWNERSHIP_REQUIRED') return t('connectionOwnershipRequired')

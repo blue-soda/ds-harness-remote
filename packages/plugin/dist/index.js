@@ -22287,7 +22287,9 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      if (expected) this.noteCodexSessionLost();
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
     this.logger.info("Codex workspaces listed", {
@@ -22300,7 +22302,9 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      if (expected) this.noteCodexSessionLost();
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
     this.assertLocalHarnessCarrierAvailable();
     const virtual = CodexVirtualHarness.remote(remote.client, {
@@ -22334,7 +22338,9 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      if (expected) this.noteCodexSessionLost();
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
     this.assertLocalHarnessCarrierAvailable();
     const result = record4(await new CodexRemoteClient(remote.client).request("project/create", {
