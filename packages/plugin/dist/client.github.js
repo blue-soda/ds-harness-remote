@@ -1822,6 +1822,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     serverSaved: "Server address saved. Restart DSH to apply it.",
     codexRemote: "Codex Remote",
     codexStatusLine: "Current state: {state}",
+    codexControlAllow: "Allow other users to control Codex on this device",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
     codexBinaryLabel: "Codex command or path",
     codexBinaryMissing: 'No Codex found automatically. Install the Codex desktop app, or enter the path to a Codex CLI that supports "codex app-server".',
@@ -2084,6 +2085,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     serverSaved: "Server \u5730\u5740\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     codexRemote: "Codex Remote",
     codexStatusLine: "\u5F53\u524D\u72B6\u6001\uFF1A{state}",
+    codexControlAllow: "\u5141\u8BB8\u5176\u4ED6\u7528\u6237\u63A7\u5236\u672C\u8BBE\u5907Codex",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     codexBinaryLabel: "Codex \u547D\u4EE4\u6216\u8DEF\u5F84",
     codexBinaryMissing: '\u672A\u81EA\u52A8\u53D1\u73B0 Codex\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u586B\u5199\u652F\u6301 "codex app-server" \u7684 Codex CLI \u8DEF\u5F84\u3002',
@@ -3490,6 +3492,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                             type: "button",
                             className: "dshRemotePageRefresh",
                             disabled: busy,
+                            style: { fontWeight: "normal" },
                             title: t("codexRemote"),
                             "aria-label": t("codexRemote"),
                             onClick: () => setCodexOpen(!0)
@@ -3767,7 +3770,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement(
               "div",
               null,
-              React.createElement("strong", null, t("codexRemote"))
+              React.createElement("span", null, t("codexControlAllow"))
             ),
             React.createElement("input", {
               type: "checkbox",
