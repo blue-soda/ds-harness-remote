@@ -381,6 +381,19 @@ export class HostPluginRuntime {
     return revoked
   }
 
+  /**
+   * Restart the Codex connection so a changed setting applies without restarting DSH.
+   *
+   * The domain reads its configuration once at startup, which is why the settings used to say "restart DSH".
+   * Closing and starting it again is enough - and its own failure handling stays in charge when the new
+   * configuration still cannot work.
+   * @returns when the restart attempt finished.
+   */
+  async restartCodex(): Promise<void> {
+    await this.codex.close().catch(() => undefined)
+    await this.codex.start().catch(() => undefined)
+  }
+
   codexStatus(): ReturnType<CodexRemoteDomain['status']> {
     return this.codex.status()
   }

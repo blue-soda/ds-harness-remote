@@ -355,6 +355,9 @@ export class PluginControlRuntime {
       },
     })
     await this.settings.replace(editableConfig(next))
+    // The domain reads its configuration once at startup, so a change only takes effect if it starts again.
+    // Fire and forget: a cold start can take seconds and the dialog should not wait for it.
+    void this.host?.restartCodex?.()
     return this.settingsView()
   }
 

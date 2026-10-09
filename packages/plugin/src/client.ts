@@ -346,7 +346,8 @@ const en = {
   serverUrlHint: 'HTTPS origin used for account authorization and encrypted relay.',
   serverSaved: 'Server address saved. Restart DSH to apply it.',
   codexRemote: 'Codex Remote',
-  codexRemoteHint: 'Expose Codex projects through this Host. Restart DSH after changing this setting.',
+  codexRemoteHint: 'Expose Codex projects through this Host. Changes restart the Codex connection right away - no DSH restart needed; if it stays unavailable, restart DSH to try again.',
+  codexStatusLine: 'Current state: {state}',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
   codexBinaryLabel: 'Codex command or path',
   codexBinaryMissing: 'No Codex found automatically. Install the Codex desktop app, or enter the path to a Codex CLI that supports "codex app-server".',
@@ -611,7 +612,8 @@ const zh: Record<keyof typeof en, string> = {
   serverUrlHint: '用于账号授权和加密中继的 HTTPS 地址。',
   serverSaved: 'Server 地址已保存，重启 DSH 后生效。',
   codexRemote: 'Codex Remote',
-  codexRemoteHint: '通过这台 Host 提供 Codex 项目；修改后需重启 DSH 生效。',
+  codexRemoteHint: '通过这台 Host 提供 Codex 项目。修改后会立即重启 Codex 连接，无需重启 DSH；若仍不可用，可重启 DSH 再试。',
+  codexStatusLine: '当前状态：{state}',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
   codexBinaryLabel: 'Codex 命令或路径',
   codexBinaryMissing: '未自动发现 Codex。请安装 Codex 桌面应用，或填写支持 "codex app-server" 的 Codex CLI 路径。',
@@ -2453,19 +2455,6 @@ window.__ModuleLoader__.load({
                 'aria-label': t('refreshRemote'),
                 onClick: () => void refreshRemote(),
               }, t('refreshRemoteShort')),
-              React.createElement('button', {
-                type: 'button',
-                className: 'dshRemotePageRefresh',
-                disabled: busy,
-                title: t('codexRemote'),
-                'aria-label': t('codexRemote'),
-                onClick: () => setCodexOpen(true),
-              }, React.createElement('span', { 'aria-hidden': true }, '◆'), t('codexRemote')),
-              codexOpen ? React.createElement(CodexConnectionDetails, {
-                control: props.control,
-                t,
-                onClose: () => setCodexOpen(false),
-              }) : null,
               React.createElement('button', { type: 'button', className: 'dshRemotePageClose', onClick: () => setOpen(false), 'aria-label': t('close') }, '×'))),
           React.createElement('main', { className: 'dshRemotePageBody' },
             status?.mode === 'remote' || status?.fellBackToLocal === true ? React.createElement('button', {
@@ -2516,7 +2505,20 @@ window.__ModuleLoader__.load({
                           checked: status.host?.authorized === true && status.host?.paused !== true,
                           onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                         })) : null,
+                      React.createElement('button', {
+                        type: 'button',
+                        className: 'dshRemotePageRefresh',
+                        disabled: busy,
+                        title: t('codexRemote'),
+                        'aria-label': t('codexRemote'),
+                        onClick: () => setCodexOpen(true),
+                      }, t('codexRemote')),
                       connectedMenu)),
+        codexOpen ? React.createElement(CodexConnectionDetails, {
+          control: props.control,
+          t,
+          onClose: () => setCodexOpen(false),
+        }) : null,
                   React.createElement('div', {
                     className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
                     'aria-busy': connectingHost === undefined ? undefined : true,
@@ -2803,7 +2805,10 @@ function CodexConnectionDetails(props: {
   const discovered = view?.discoveredCodexBinary
   const pinned = (view?.config.codex?.binary ?? 'codex') !== 'codex'
   const editable = pinned || discovered === undefined
-  const stateText = status === undefined ? t('loadingSettings') : `${status.state ?? 'unknown'}${status.error === undefined ? '' : ` · ${status.error}`}`
+  const stateName = status === undefined ? undefined : `${(status.state ?? 'unknown').slice(0, 1).toUpperCase()}${(status.state ?? 'unknown').slice(1)}`
+  const stateText = stateName === undefined
+    ? t('loadingSettings')
+    : t('codexStatusLine', { state: `${stateName}${status?.error === undefined ? '' : ` · ${status.error}`}` })
 
   const save = async (next: { enabled?: boolean; binary?: string }): Promise<void> => {
     setBusy(true)

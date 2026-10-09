@@ -1821,7 +1821,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     serverUrlHint: "HTTPS origin used for account authorization and encrypted relay.",
     serverSaved: "Server address saved. Restart DSH to apply it.",
     codexRemote: "Codex Remote",
-    codexRemoteHint: "Expose Codex projects through this Host. Restart DSH after changing this setting.",
+    codexRemoteHint: "Expose Codex projects through this Host. Changes restart the Codex connection right away - no DSH restart needed; if it stays unavailable, restart DSH to try again.",
+    codexStatusLine: "Current state: {state}",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
     codexBinaryLabel: "Codex command or path",
     codexBinaryMissing: 'No Codex found automatically. Install the Codex desktop app, or enter the path to a Codex CLI that supports "codex app-server".',
@@ -2083,7 +2084,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     serverUrlHint: "\u7528\u4E8E\u8D26\u53F7\u6388\u6743\u548C\u52A0\u5BC6\u4E2D\u7EE7\u7684 HTTPS \u5730\u5740\u3002",
     serverSaved: "Server \u5730\u5740\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     codexRemote: "Codex Remote",
-    codexRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u63D0\u4F9B Codex \u9879\u76EE\uFF1B\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
+    codexRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u63D0\u4F9B Codex \u9879\u76EE\u3002\u4FEE\u6539\u540E\u4F1A\u7ACB\u5373\u91CD\u542F Codex \u8FDE\u63A5\uFF0C\u65E0\u9700\u91CD\u542F DSH\uFF1B\u82E5\u4ECD\u4E0D\u53EF\u7528\uFF0C\u53EF\u91CD\u542F DSH \u518D\u8BD5\u3002",
+    codexStatusLine: "\u5F53\u524D\u72B6\u6001\uFF1A{state}",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     codexBinaryLabel: "Codex \u547D\u4EE4\u6216\u8DEF\u5F84",
     codexBinaryMissing: '\u672A\u81EA\u52A8\u53D1\u73B0 Codex\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u586B\u5199\u652F\u6301 "codex app-server" \u7684 Codex CLI \u8DEF\u5F84\u3002',
@@ -3391,19 +3393,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   "aria-label": t("refreshRemote"),
                   onClick: () => void refreshRemote()
                 }, t("refreshRemoteShort")),
-                React.createElement("button", {
-                  type: "button",
-                  className: "dshRemotePageRefresh",
-                  disabled: busy,
-                  title: t("codexRemote"),
-                  "aria-label": t("codexRemote"),
-                  onClick: () => setCodexOpen(!0)
-                }, React.createElement("span", { "aria-hidden": !0 }, "\u25C6"), t("codexRemote")),
-                codexOpen ? React.createElement(CodexConnectionDetails, {
-                  control: props.control,
-                  t,
-                  onClose: () => setCodexOpen(!1)
-                }) : null,
                 React.createElement("button", { type: "button", className: "dshRemotePageClose", onClick: () => setOpen(!1), "aria-label": t("close") }, "\xD7")
               )
             ),
@@ -3496,9 +3485,22 @@ Minimum version required to store current data is: ` + bestVersion + `.
                             onChange: (event) => void setCurrentDeviceControl(event.target.checked)
                           })
                         ) : null,
+                        React.createElement("button", {
+                          type: "button",
+                          className: "dshRemotePageRefresh",
+                          disabled: busy,
+                          title: t("codexRemote"),
+                          "aria-label": t("codexRemote"),
+                          onClick: () => setCodexOpen(!0)
+                        }, t("codexRemote")),
                         connectedMenu
                       )
                     ),
+                    codexOpen ? React.createElement(CodexConnectionDetails, {
+                      control: props.control,
+                      t,
+                      onClose: () => setCodexOpen(!1)
+                    }) : null,
                     React.createElement("div", {
                       className: `dshRemoteHostList${connectingHost === void 0 ? "" : " isCollapsed"}`,
                       "aria-busy": connectingHost === void 0 ? void 0 : !0
@@ -3824,7 +3826,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             cancelled = !0;
           };
         }, [control]);
-        let status = view?.codexStatus, unavailable = status !== void 0 && status.available === !1, writable = view?.writable === !0, discovered = view?.discoveredCodexBinary, pinned = (view?.config.codex?.binary ?? "codex") !== "codex", editable = pinned || discovered === void 0, stateText = status === void 0 ? t("loadingSettings") : `${status.state ?? "unknown"}${status.error === void 0 ? "" : ` \xB7 ${status.error}`}`, save = async (next) => {
+        let status = view?.codexStatus, unavailable = status !== void 0 && status.available === !1, writable = view?.writable === !0, discovered = view?.discoveredCodexBinary, pinned = (view?.config.codex?.binary ?? "codex") !== "codex", editable = pinned || discovered === void 0, stateName = status === void 0 ? void 0 : `${(status.state ?? "unknown").slice(0, 1).toUpperCase()}${(status.state ?? "unknown").slice(1)}`, stateText = stateName === void 0 ? t("loadingSettings") : t("codexStatusLine", { state: `${stateName}${status?.error === void 0 ? "" : ` \xB7 ${status.error}`}` }), save = async (next) => {
           setBusy(!0), setError(void 0);
           try {
             let updated = await control("settings.codex.set", {

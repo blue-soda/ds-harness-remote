@@ -25355,6 +25355,7 @@ var PluginControlRuntime = class {
       }
     });
     await this.settings.replace(editableConfig(next));
+    void this.host?.restartCodex?.();
     return this.settingsView();
   }
   async setAcp(payload) {
@@ -28371,6 +28372,18 @@ var HostPluginRuntime = class {
     const revoked = await this.identities.revokePeer(deviceId);
     if (revoked) await this.connections.revoke(deviceId);
     return revoked;
+  }
+  /**
+   * Restart the Codex connection so a changed setting applies without restarting DSH.
+   *
+   * The domain reads its configuration once at startup, which is why the settings used to say "restart DSH".
+   * Closing and starting it again is enough - and its own failure handling stays in charge when the new
+   * configuration still cannot work.
+   * @returns when the restart attempt finished.
+   */
+  async restartCodex() {
+    await this.codex.close().catch(() => void 0);
+    await this.codex.start().catch(() => void 0);
   }
   codexStatus() {
     return this.codex.status();

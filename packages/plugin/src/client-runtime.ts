@@ -180,6 +180,8 @@ export interface HostAuthorizationControl {
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>
   authorizeHostWithCode(code: string): Promise<unknown>
   codexStatus?(): { available: boolean; enabled?: boolean; state?: string; error?: string }
+  /** Restart the Codex connection so a changed setting applies without restarting DSH. */
+  restartCodex?(): Promise<void>
   codexCall?(input: unknown, signal?: AbortSignal): Promise<unknown>
   codexRespond?(input: unknown, signal?: AbortSignal): Promise<{ resolved: true }>
   codexOpenStream?(
