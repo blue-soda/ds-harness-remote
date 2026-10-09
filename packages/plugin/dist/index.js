@@ -22013,13 +22013,51 @@ var ClientModeRuntime = class {
   restoreCodexCarrier(targetDeviceId) {
     const selection = this.lastWorkspaceSelection;
     if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === void 0) return;
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch((error) => {
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(async (error) => {
       const code = safeErrorCode(error);
+      if (selection.workspacePath !== void 0) {
+        const recovered = await this.codexWorkspaceIdForPath(targetDeviceId, selection.workspacePath).catch(() => void 0);
+        if (recovered !== void 0 && recovered !== selection.workspaceId) {
+          this.logger.info("CodeX workspace restored under a new id", {
+            targetDeviceId: shortId2(targetDeviceId),
+            path: selection.workspacePath
+          });
+          await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => void 0);
+          return;
+        }
+      }
       this.logger.warn("CodeX workspace could not be restored after a reconnect", {
         targetDeviceId: shortId2(targetDeviceId),
         code
       });
+      this.fallBackToLocalForCodex();
     });
+  }
+  /**
+   * The id the Host currently uses for a workspace root.
+   *
+   * @param targetDeviceId - the Host to ask.
+   * @param path - the workspace root as it was remembered.
+   * @returns the current workspace id, or undefined when the Host no longer offers that root.
+   */
+  async codexWorkspaceIdForPath(targetDeviceId, path) {
+    const workspaces = await this.listCodexWorkspaces(targetDeviceId);
+    const match = workspaces.find((candidate) => candidate.path === path);
+    return match?.workspaceId;
+  }
+  /**
+   * Show the client's own shell while a Codex session is unavailable.
+   *
+   * The peer's other carrier must not stand in for the Codex workspace that was lost, and this deliberately does not
+   * touch the reconnect run counter: the retry schedule keeps trying to restore the Codex workspace while the user
+   * works locally.
+   * @returns nothing.
+   */
+  fallBackToLocalForCodex() {
+    void this.closeCodexVirtual();
+    this.proxySwitch?.selectLocal();
+    this.gatewaySwitch.selectLocal();
+    this.fellBackToLocal = true;
   }
   finishReconnect(reason) {
     const target2 = this.reconnecting?.targetDeviceId;
@@ -22294,7 +22332,7 @@ var ClientModeRuntime = class {
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
     this.logger.info("Codex workspaces listed", {
       targetDeviceId: shortId2(targetDeviceId),
-      workspaces: workspaces.length
+      count: workspaces.length
     });
     return workspaces;
   }
@@ -22327,6 +22365,7 @@ var ClientModeRuntime = class {
       targetDeviceId: remote.target.deviceId,
       workspaceId,
       backend: "codex",
+      ...workspace.path === void 0 ? {} : { workspacePath: workspace.path },
       ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
     });
     this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId2(remote.target.deviceId) });

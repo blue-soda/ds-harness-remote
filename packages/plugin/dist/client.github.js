@@ -1869,6 +1869,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     online: "Online",
     offline: "Offline",
     connectionControlDisabled: "This device is not accepting control right now.",
+    connectionHostOffline: "The selected Host is offline.",
     hostRefusesControl: "Not accepting control",
     thisMachineHost: "This machine as Remote Host",
     connected: "Connected",
@@ -2139,6 +2140,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     online: "\u5728\u7EBF",
     offline: "\u79BB\u7EBF",
     connectionControlDisabled: "\u8BE5\u8BBE\u5907\u5F53\u524D\u4E0D\u63A5\u53D7\u63A7\u5236\u3002",
+    connectionHostOffline: "\u6240\u9009 Host \u5F53\u524D\u79BB\u7EBF\u3002",
     hostRefusesControl: "\u4E0D\u63A5\u53D7\u63A7\u5236",
     thisMachineHost: "\u5C06\u6B64\u8BBE\u5907\u4F5C\u4E3A\u8FDC\u7A0B Host",
     connected: "\u5DF2\u8FDE\u63A5",
@@ -2429,7 +2431,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
   function connectionErrorMessage(code, t) {
-    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "CONTROL_DISABLED" ? "connectionControlDisabled" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" || code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
+    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "CONTROL_DISABLED" ? "connectionControlDisabled" : code === "HOST_OFFLINE" ? "connectionHostOffline" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" || code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
   }
   async function setDeviceControl(control, enabled, authorized) {
     return enabled && !authorized ? await control("host.authorization.set", { enabled: !0 }) : await control("host.connection.set", { connected: enabled });

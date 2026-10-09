@@ -236,6 +236,15 @@ const FALLBACK_STEADY_ATTEMPTS = 5
 
 
 
+/**
+ * How old a recorded remote target may be and still be restored on startup.
+ *
+ * The record carried a timestamp all along and nothing read it, so a target left behind days earlier was still
+ * restored: the boot retry loop kept trying while the other side was down, succeeded much later, and switched the
+ * window into that device's session without anyone asking. A restart within the window still resumes as intended.
+ */
+const RESTORE_MAX_AGE_MS = 30 * 60 * 1000
+
 export class ClientModeRuntime {
   private preview?: LoopbackPreview
   private identity?: HostIdentity
@@ -981,6 +990,14 @@ export class ClientModeRuntime {
       })
       return false
     }
+    const ageMs = Date.now() - record.savedAt
+    if (!Number.isFinite(ageMs) || ageMs > RESTORE_MAX_AGE_MS) {
+      this.logger.info('recorded remote target is stale; not restoring', {
+        targetDeviceId: shortId(record.hostDeviceId),
+        ageMinutes: Number.isFinite(ageMs) ? Math.round(ageMs / 60_000) : -1,
+      })
+      return false
+    }
     this.reconnecting = {
       targetDeviceId: record.hostDeviceId,
       ...(record.hostName === undefined ? {} : { targetName: record.hostName }),
@@ -988,6 +1005,7 @@ export class ClientModeRuntime {
     }
     this.logger.info('restoring the remote target of the previous run', {
       targetDeviceId: shortId(record.hostDeviceId),
+      ageMinutes: Math.round((Date.now() - record.savedAt) / 60_000),
     })
     void this.reconnectRemoteSession(record.hostDeviceId)
     return true
