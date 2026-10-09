@@ -360,6 +360,8 @@ const en = {
   codexUnavailableBinary: 'The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.',
   codexUnavailableGeneric: 'Codex is unavailable on this host ({code}).',
   codexDisabled: 'Codex is switched off on this device, so nobody can use it remotely.',
+  codexStarting: 'Starting the Codex connection...',
+  codexUnavailableNoCode: 'Codex is unavailable on this host.',
   codexRecheck: 'Re-check',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
@@ -629,6 +631,8 @@ const zh: Record<keyof typeof en, string> = {
   codexUnavailableBinary: '这里的 Codex CLI 无法启动。请安装 Codex 桌面应用，或在下方填写可用的命令或完整路径。',
   codexUnavailableGeneric: '这台 Host 上的 Codex 当前不可用（{code}）。',
   codexDisabled: '本设备的 Codex 已关闭，其他用户无法远程使用。',
+  codexStarting: '正在启动 Codex 连接…',
+  codexUnavailableNoCode: '这台 Host 上的 Codex 当前不可用。',
   codexRecheck: '重新检查',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
@@ -1513,6 +1517,7 @@ window.__ModuleLoader__.load({
         busy: busy || codexBusy,
         writable,
         unavailable: codexUnavailable,
+        state: codexDomainStatus?.state,
         reasonCode: codexDomainStatus?.error,
         editable: codexBinaryEditable,
         pinned: codexBinaryPinned,
@@ -2735,6 +2740,8 @@ function CodexConnectionFields(props: {
   busy: boolean
   writable: boolean
   unavailable: boolean
+  /** The domain's own state, so a launch in progress is not mistaken for a failure. */
+  state?: string
   reasonCode?: string
   editable: boolean
   pinned: boolean
@@ -2759,13 +2766,19 @@ function CodexConnectionFields(props: {
         checked: props.enabled,
         onChange: (event: Event) => props.onEnabledChange((event.target as HTMLInputElement).checked),
       })),
-    // A disabled Codex is a choice, not a fault, and an unknown code is still better than pointing the user at a
-    // place called "the host status" to go and look it up.
+    // A disabled Codex is a choice, not a fault, and neither is a launch in progress: available is false while the
+    // domain starts, which used to paint a red line reading UNKNOWN for the couple of seconds every switch takes.
+    // Red is for a real failure only, and a failure that carries no code says so in words instead of printing
+    // UNKNOWN as if it were a code.
     !props.enabled
       ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('codexDisabled'))
-      : unavailable
-        ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode ?? 'UNKNOWN' }))
-        : null,
+      : props.state === 'starting' || props.state === 'restarting'
+        ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('codexStarting'))
+        : unavailable && props.state === 'unavailable'
+          ? React.createElement('p', { className: 'dshRemoteError' }, props.reasonCode === undefined
+            ? t('codexUnavailableNoCode')
+            : t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode }))
+          : null,
     React.createElement('div', { className: 'dshRemoteCodexBinary' },
       React.createElement('input', {
         type: 'text',
@@ -2895,6 +2908,7 @@ function CodexConnectionDetails(props: {
           busy,
           writable,
           unavailable,
+          state: status?.state,
           reasonCode: status?.error,
           editable,
           pinned,

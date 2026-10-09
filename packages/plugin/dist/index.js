@@ -17890,6 +17890,19 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.localCarrier = carrier;
   }
   localCarrier;
+  onSessionLost;
+  /**
+   * Register what to do when a Codex call fails because the session is gone.
+   *
+   * Set after construction rather than passed in, so neither the constructor nor the static factory signature has to
+   * change: the runtime hooks its reconnect entry point here. The Host replacing or switching off its Codex domain
+   * closes the bridges, and the next call would otherwise just be shown as an error.
+   * @param handler - called once per detected loss, before the failure is returned.
+   * @returns nothing.
+   */
+  watchCodexSessionLost(handler) {
+    this.onSessionLost = handler;
+  }
   static remote(core, host, sessionGeneration = "legacy", hostCarrier) {
     return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration, hostCarrier);
   }
@@ -18030,6 +18043,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         }
       }
     } catch (error) {
+      if (isCodexSessionLoss(error)) this.onSessionLost?.();
       return failFrom(error);
     }
   }
@@ -22286,6 +22300,7 @@ var ClientModeRuntime = class {
       deviceId: remote.target.deviceId,
       name: remote.target.name
     }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway2(remote.client));
+    virtual.watchCodexSessionLost(() => this.noteCodexSessionLost());
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal);
@@ -22899,6 +22914,11 @@ var ClientModeRuntime = class {
     });
   }
 };
+function isCodexSessionLoss(error) {
+  const own = error !== null && typeof error === "object" && "code" in error ? error.code : void 0;
+  const code = typeof own === "string" ? own : safeErrorCode(error);
+  return code === "CODEX_CONNECTION_CLOSED" || code === "CODEX_CLOSED";
+}
 function shouldRestoreCodexCarrier(selection, targetDeviceId) {
   return selection !== void 0 && selection.targetDeviceId === targetDeviceId && selection.backend === "codex";
 }
