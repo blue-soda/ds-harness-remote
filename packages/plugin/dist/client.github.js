@@ -1948,7 +1948,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     confirmAddWorkspace: "Add and open",
     showAllWorkspaces: "Show all DSH workspaces",
     showAllCodexWorkspaces: "Show all CodeX workspaces",
-    remoteModePrefix: "Remote mode \xB7 ",
+    remoteModeDsh: "Remote DSH \xB7 ",
+    remoteModeCodex: "Remote Codex \xB7 ",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
     remoteNetworkRelay: "Relay",
@@ -2213,7 +2214,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     confirmAddWorkspace: "\u786E\u8BA4\u5E76\u6253\u5F00",
     showAllWorkspaces: "\u663E\u793A\u5168\u90E8 DSH \u5DE5\u4F5C\u533A",
     showAllCodexWorkspaces: "\u663E\u793A\u5168\u90E8 CodeX \u5DE5\u4F5C\u533A",
-    remoteModePrefix: "\u8FDC\u7A0B\u6A21\u5F0F \xB7 ",
+    remoteModeDsh: "\u8FDC\u7A0BDSH \xB7 ",
+    remoteModeCodex: "\u8FDC\u7A0BCodex \xB7 ",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
     remoteNetworkRelay: "\u4E2D\u7EE7",
@@ -4107,7 +4109,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             strokeLinejoin: "round",
             "aria-hidden": !0
           }, React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement("path", { d: "M8 21h8M12 17v4" })),
-          React.createElement("span", { className: "dshRemoteModePrefix" }, t("remoteModePrefix")),
+          React.createElement("span", { className: "dshRemoteModePrefix" }, t(status.backend === "codex" ? "remoteModeCodex" : "remoteModeDsh")),
           React.createElement(
             "span",
             { className: "dshRemoteSessionTarget" },

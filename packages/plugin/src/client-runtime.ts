@@ -696,13 +696,10 @@ export class ClientModeRuntime {
         targetDeviceId: shortId(targetDeviceId),
         code,
       })
-      // The Host says it no longer offers Codex, so a Codex workspace cannot be shown at all. Forgetting the
-      // selection is what makes the client fall back to the Harness view of that Host: keeping it left the UI
-      // claiming a Codex workspace whose session list could only come out empty.
-      if (code === 'FEATURE_NOT_SUPPORTED') {
-        this.lastWorkspaceSelection = undefined
-        this.pendingWorkspaceSelection = undefined
-      }
+      // The memory is deliberately kept: a Host that has just come back can report no Codex capability for a few
+      // seconds while its domain starts, and forgetting the selection on that first answer left the client with
+      // nothing to restore - it settled on the Host's Harness view instead of retrying the Codex workspace. The
+      // reconnect schedule keeps trying, and only an explicit choice by the user replaces the selection.
     })
   }
 

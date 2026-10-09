@@ -22003,10 +22003,6 @@ var ClientModeRuntime = class {
         targetDeviceId: shortId2(targetDeviceId),
         code
       });
-      if (code === "FEATURE_NOT_SUPPORTED") {
-        this.lastWorkspaceSelection = void 0;
-        this.pendingWorkspaceSelection = void 0;
-      }
     });
   }
   finishReconnect(reason) {
