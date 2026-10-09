@@ -24250,8 +24250,31 @@ var CodexRemoteDomain = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
-    this.available = false;
+    await this.teardown();
     this.state = this.config.enabled ? "unavailable" : "disabled";
+  }
+  /**
+   * Apply a changed configuration without restarting DSH.
+   *
+   * Deliberately not close()+start(): close() is terminal, so that pair left the domain dead for the rest of the
+   * process (the bug behind "the switch never comes back"). This shares close()'s teardown without setting the
+   * terminal flag, and a disabled configuration simply stops - no launch, state `disabled`.
+   * @returns when the replacement attempt finished.
+   */
+  async restart() {
+    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
+    await this.teardown();
+    this.unavailableCode = void 0;
+    this.restartAttempt = 0;
+    if (!this.config.enabled) {
+      this.state = "disabled";
+      return;
+    }
+    await this.start();
+  }
+  /** Release every live resource; shared by close() (terminal) and restart() (not). */
+  async teardown() {
+    this.available = false;
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
     for (const bridge of [...this.peers.values()]) await bridge.closeAll();
