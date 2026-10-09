@@ -1868,6 +1868,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteHosts: "No authorized remote Host for this account.",
     online: "Online",
     offline: "Offline",
+    hostRefusesControl: "Not accepting control",
     thisMachineHost: "This machine as Remote Host",
     connected: "Connected",
     connectedAs: "Connected as {account}",
@@ -2136,6 +2137,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     noRemoteHosts: "\u6B64\u8D26\u53F7\u6CA1\u6709\u5DF2\u6388\u6743\u7684\u8FDC\u7A0B Host\u3002",
     online: "\u5728\u7EBF",
     offline: "\u79BB\u7EBF",
+    hostRefusesControl: "\u4E0D\u63A5\u53D7\u63A7\u5236",
     thisMachineHost: "\u5C06\u6B64\u8BBE\u5907\u4F5C\u4E3A\u8FDC\u7A0B Host",
     connected: "\u5DF2\u8FDE\u63A5",
     connectedAs: "\u5DF2\u4F7F\u7528 {account} \u8FDE\u63A5",
@@ -3544,7 +3546,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                           device.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: device.clientVersion })
                         ].filter(Boolean).join(" \xB7 "))
                       ),
-                      React.createElement("small", null, t(device.online ? "online" : "offline"))
+                      React.createElement("small", null, [t(device.online ? "online" : "offline"), device.hostControl === !1 ? t("hostRefusesControl") : void 0].filter(Boolean).join(" \xB7 "))
                     )))
                   ) : null,
                   React.createElement(RemoteProgressView, { progress, t }),
@@ -4027,7 +4029,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 key: device.deviceId,
                 disabled: busy || !device.online || status?.target?.deviceId === device.deviceId,
                 onClick: () => void switchMode("remote", device.deviceId)
-              }, `${device.name} \xB7 ${t(device.online ? "online" : "offline")}`))),
+              }, `${device.name} \xB7 ${[t(device.online ? "online" : "offline"), device.hostControl === !1 ? t("hostRefusesControl") : void 0].filter(Boolean).join(" \xB7 ")}`))),
               React.createElement(RemoteProgressView, { progress, t }),
               status?.hostAuthorizationAvailable && status.host !== void 0 ? React.createElement(
                 "div",

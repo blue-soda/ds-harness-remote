@@ -1007,7 +1007,15 @@ export class ClientModeRuntime {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
+      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
+      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
+      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
+      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+      if (expected) this.noteCodexSessionLost()
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
+        ? 'Codex is switched off or unavailable on the selected Host.'
+        : 'The selected Host does not provide CodeX workspaces.')
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
     // An empty result is what the panel renders as "no Codex workspaces". Recording the count - and the fact that
@@ -1027,7 +1035,15 @@ export class ClientModeRuntime {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
+      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
+      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
+      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
+      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+      if (expected) this.noteCodexSessionLost()
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
+        ? 'Codex is switched off or unavailable on the selected Host.'
+        : 'The selected Host does not provide CodeX workspaces.')
     }
     this.assertLocalHarnessCarrierAvailable()
     const virtual = CodexVirtualHarness.remote(remote.client, {
@@ -1068,7 +1084,15 @@ export class ClientModeRuntime {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
+      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
+      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
+      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
+      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+      if (expected) this.noteCodexSessionLost()
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
+        ? 'Codex is switched off or unavailable on the selected Host.'
+        : 'The selected Host does not provide CodeX workspaces.')
     }
     this.assertLocalHarnessCarrierAvailable()
     const result = record(await new CodexRemoteClient(remote.client).request('project/create', {

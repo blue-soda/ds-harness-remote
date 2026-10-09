@@ -13884,6 +13884,7 @@ function parseHostDevice(value) {
     platform: item.platform,
     membershipId: item.membershipId,
     ...typeof item.online === "boolean" ? { online: item.online } : {},
+    ...typeof item.hostControl === "boolean" ? { hostControl: item.hostControl } : {},
     ...typeof item.lastSeenAt === "number" && Number.isSafeInteger(item.lastSeenAt) ? { lastSeenAt: item.lastSeenAt } : {},
     ...typeof item.clientVersion === "string" ? { clientVersion: item.clientVersion } : {},
     ...typeof item.harnessVersion === "string" ? { harnessVersion: item.harnessVersion } : {}
@@ -13901,6 +13902,7 @@ function parseAuthorizedPeer(value) {
     identityKey: item.identityKey,
     membershipId: item.membershipId,
     ...typeof item.online === "boolean" ? { online: item.online } : {},
+    ...typeof item.hostControl === "boolean" ? { hostControl: item.hostControl } : {},
     ...typeof item.lastSeenAt === "number" && Number.isSafeInteger(item.lastSeenAt) ? { lastSeenAt: item.lastSeenAt } : {}
   };
 }
