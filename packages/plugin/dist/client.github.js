@@ -3846,7 +3846,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
             cancelled = !0;
           };
         }, [control]);
-        let status = view?.codexStatus, unavailable = status !== void 0 && status.available === !1, writable = view?.writable === !0, discovered = view?.discoveredCodexBinary, pinned = (view?.config.codex?.binary ?? "codex") !== "codex", editable = pinned || discovered === void 0, stateName = status === void 0 ? void 0 : `${(status.state ?? "unknown").slice(0, 1).toUpperCase()}${(status.state ?? "unknown").slice(1)}`, stateText = stateName === void 0 ? t("loadingSettings") : t("codexStatusLine", { state: `${stateName}${status?.error === void 0 ? "" : ` \xB7 ${status.error}`}` }), save = async (next) => {
+        let status = view?.codexStatus, unavailable = status !== void 0 && status.available === !1, settledState = status?.state;
+        React.useEffect(() => {
+          if (view === void 0 || busy || settledState === "ready" || settledState === "disabled") return;
+          let timer = setInterval(() => {
+            control("settings.get").then((next) => {
+              setView(next), setEnabled(next.config.codex?.enabled ?? !0), setBinary(next.config.codex?.binary ?? "codex");
+            }).catch(() => {
+            });
+          }, 2e3);
+          return () => {
+            clearInterval(timer);
+          };
+        }, [control, view, busy, settledState]);
+        let writable = view?.writable === !0, discovered = view?.discoveredCodexBinary, pinned = (view?.config.codex?.binary ?? "codex") !== "codex", editable = pinned || discovered === void 0, stateName = status === void 0 ? void 0 : `${(status.state ?? "unknown").slice(0, 1).toUpperCase()}${(status.state ?? "unknown").slice(1)}`, stateText = stateName === void 0 ? t("loadingSettings") : t("codexStatusLine", { state: `${stateName}${status?.error === void 0 ? "" : ` \xB7 ${status.error}`}` }), save = async (next) => {
           setBusy(!0), setError(void 0);
           try {
             let updated = await control("settings.codex.set", {
@@ -3897,15 +3910,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 onConfirm: () => void save({ binary }),
                 onUseAuto: () => void save({ binary: "" })
               }),
+              // No confirm button: the switch and the command field save on their own, and a footer button could only
+              // re-send the state the dialog captured when it opened - which is how pressing it turned a starting Codex
+              // back off. The footer keeps the message line and nothing else.
               React.createElement(
                 "div",
                 { className: "dshRemoteSettingsFooter" },
-                React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? ""),
-                React.createElement("button", {
-                  type: "button",
-                  disabled: busy,
-                  onClick: () => void save({ binary })
-                }, t("codexBinaryConfirm"))
+                React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? "")
               )
             )
           )

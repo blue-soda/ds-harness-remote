@@ -2829,6 +2829,22 @@ function CodexConnectionDetails(props: {
 
   const status = view?.codexStatus
   const unavailable = status !== undefined && status.available === false
+  // The Host starts Codex in the background, so a dialog opened while it was starting kept showing `starting`
+  // until it was closed and reopened. Re-read gently until the domain settles, then stop; closing clears it.
+  const settledState = status?.state
+  React.useEffect(() => {
+    if (view === undefined || busy || settledState === 'ready' || settledState === 'disabled') return
+    const timer = setInterval(() => {
+      void control<PluginSettingsView>('settings.get')
+        .then((next: PluginSettingsView) => {
+          setView(next)
+          setEnabled(next.config.codex?.enabled ?? true)
+          setBinary(next.config.codex?.binary ?? 'codex')
+        })
+        .catch(() => undefined)
+    }, 2_000)
+    return () => { clearInterval(timer) }
+  }, [control, view, busy, settledState])
   const writable = view?.writable === true
   const discovered = view?.discoveredCodexBinary
   const pinned = (view?.config.codex?.binary ?? 'codex') !== 'codex'
@@ -2886,14 +2902,11 @@ function CodexConnectionDetails(props: {
           onConfirm: () => void save({ binary }),
           onUseAuto: () => void save({ binary: '' }),
         }),
+        // No confirm button: the switch and the command field save on their own, and a footer button could only
+        // re-send the state the dialog captured when it opened - which is how pressing it turned a starting Codex
+        // back off. The footer keeps the message line and nothing else.
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
-          React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
-
-          React.createElement('button', {
-            type: 'button',
-            disabled: busy,
-            onClick: () => void save({ binary }),
-          }, t('codexBinaryConfirm'))))))
+          React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? '')))))
 }
 
     function RemoteModeAction(props: {
