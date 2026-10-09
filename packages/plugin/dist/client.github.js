@@ -3784,7 +3784,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement("input", {
               type: "checkbox",
               role: "switch",
-              disabled: busy || !writable || unavailable,
+              // Only greyed out while it is ON and the domain cannot run. A switched-off Codex also reports
+              // available:false - that is the off state, not a failure - so treating it as "unavailable" locked the
+              // switch and left no way to turn Codex back on.
+              disabled: busy || !writable || unavailable && props.enabled,
               "aria-label": t("codexRemote"),
               checked: props.enabled,
               onChange: (event) => props.onEnabledChange(event.target.checked)

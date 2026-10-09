@@ -2748,7 +2748,11 @@ function CodexConnectionFields(props: {
       React.createElement('div', null,
         React.createElement('span', null, t('codexControlAllow'))),
       React.createElement('input', {
-        type: 'checkbox', role: 'switch', disabled: busy || !writable || unavailable,
+        type: 'checkbox', role: 'switch',
+        // Only greyed out while it is ON and the domain cannot run. A switched-off Codex also reports
+        // available:false - that is the off state, not a failure - so treating it as "unavailable" locked the
+        // switch and left no way to turn Codex back on.
+        disabled: busy || !writable || (unavailable && props.enabled),
         'aria-label': t('codexRemote'),
         checked: props.enabled,
         onChange: (event: Event) => props.onEnabledChange((event.target as HTMLInputElement).checked),
