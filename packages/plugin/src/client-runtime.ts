@@ -115,6 +115,13 @@ interface RemoteWorkspaceSelection {
   workspaceId: string
   backend?: 'harness' | 'codex'
   sessionId?: string
+  /**
+   * The workspace root this selection was made on.
+   *
+   * A Codex domain that gets replaced hands out new project ids for the same directories, so the id alone cannot
+   * recognise the workspace after a reconnect; the root path can.
+   */
+  workspacePath?: string
 }
 
 type HarnessRemoteTransport = 'remoteGateway' | 'apiProxy'
@@ -690,17 +697,61 @@ export class ClientModeRuntime {
   private restoreCodexCarrier(targetDeviceId: string): void {
     const selection = this.lastWorkspaceSelection
     if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === undefined) return
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(error => {
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(async error => {
       const code = safeErrorCode(error)
+      // The Host replaced its Codex domain: the same directories come back under new project ids, so the remembered
+      // id is unknown while the workspace is still there. Look it up by root before giving up on it.
+      if (selection.workspacePath !== undefined) {
+        const recovered = await this.codexWorkspaceIdForPath(targetDeviceId, selection.workspacePath).catch(() => undefined)
+        if (recovered !== undefined && recovered !== selection.workspaceId) {
+          this.logger.info('CodeX workspace restored under a new id', {
+            targetDeviceId: shortId(targetDeviceId),
+            path: selection.workspacePath,
+          })
+          await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => undefined)
+          return
+        }
+      }
       this.logger.warn('CodeX workspace could not be restored after a reconnect', {
         targetDeviceId: shortId(targetDeviceId),
         code,
       })
+      // A Codex session that cannot be brought back must not leave the user in this Host's Harness workspace: the
+      // agreed fallback is the client's own shell, with the retry schedule still trying the Codex workspace.
+      this.fallBackToLocalForCodex()
       // The memory is deliberately kept: a Host that has just come back can report no Codex capability for a few
       // seconds while its domain starts, and forgetting the selection on that first answer left the client with
       // nothing to restore - it settled on the Host's Harness view instead of retrying the Codex workspace. The
       // reconnect schedule keeps trying, and only an explicit choice by the user replaces the selection.
     })
+  }
+
+  /**
+   * The id the Host currently uses for a workspace root.
+   *
+   * @param targetDeviceId - the Host to ask.
+   * @param path - the workspace root as it was remembered.
+   * @returns the current workspace id, or undefined when the Host no longer offers that root.
+   */
+  private async codexWorkspaceIdForPath(targetDeviceId: string, path: string): Promise<string | undefined> {
+    const workspaces = await this.listCodexWorkspaces(targetDeviceId)
+    const match = workspaces.find(candidate => candidate.path === path)
+    return match?.workspaceId
+  }
+
+  /**
+   * Show the client's own shell while a Codex session is unavailable.
+   *
+   * The peer's other carrier must not stand in for the Codex workspace that was lost, and this deliberately does not
+   * touch the reconnect run counter: the retry schedule keeps trying to restore the Codex workspace while the user
+   * works locally.
+   * @returns nothing.
+   */
+  private fallBackToLocalForCodex(): void {
+    void this.closeCodexVirtual()
+    this.proxySwitch?.selectLocal()
+    this.gatewaySwitch.selectLocal()
+    this.fellBackToLocal = true
   }
 
   private finishReconnect(reason: string): void {
@@ -1020,9 +1071,11 @@ export class ClientModeRuntime {
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
     // An empty result is what the panel renders as "no Codex workspaces". Recording the count - and the fact that
     // the capability probe passed to get here - turns the next such report into an answer instead of a guess.
+    // The field name must avoid the logger's redaction pattern (it matches "workspace"), which is why the count is
+    // called count: logging it as "workspaces" printed [REDACTED] and told nobody anything.
     this.logger.info('Codex workspaces listed', {
       targetDeviceId: shortId(targetDeviceId),
-      workspaces: workspaces.length,
+      count: workspaces.length,
     })
     return workspaces
   }
@@ -1068,6 +1121,7 @@ export class ClientModeRuntime {
       targetDeviceId: remote.target.deviceId,
       workspaceId,
       backend: 'codex',
+      ...(workspace.path === undefined ? {} : { workspacePath: workspace.path }),
       ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
     })
     this.logger.info('CodeX virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
