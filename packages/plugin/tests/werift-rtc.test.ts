@@ -56,6 +56,15 @@ class CapturingWeriftPeerConnection {
   async close(): Promise<void> {}
 }
 
+/**
+ * A directly connected pair is reported as `lan` or `p2p` depending on the address scopes ICE nominated.
+ *
+ * The distinction is environmental, not a property of this code: a host carrying extra virtual adapters
+ * (Hyper-V, a VPN client) can select a pair across two private subnets, which the backend then labels `p2p`
+ * even though nothing is relayed. What these tests are about is that a direct path exists at all - `turn`
+ * would mean a relay was needed, and `relay` would mean WebRTC never came up.
+ */
+const DIRECT_TRANSPORTS = ['lan', 'p2p']
 describe('werift RTC backend', () => {
   it('resolves native dependencies from a symlinked plugin physical path', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-remote-rtc-'))
@@ -227,7 +236,7 @@ describe('werift RTC backend', () => {
 
     expect(new TextDecoder().decode(responderReceived[0]!)).toBe('hello-from-adapter')
     expect(new TextDecoder().decode(initiatorReceived[0]!)).toBe('reply')
-    expect(initiator.selectedTransport() ?? responder.selectedTransport()).toBe('lan')
+    expect(DIRECT_TRANSPORTS).toContain(initiator.selectedTransport() ?? responder.selectedTransport())
 
     await initiator.close()
     await responder.close()
@@ -259,7 +268,7 @@ describe('werift RTC backend', () => {
     await waitFor(() => received.length === 1, 'node default receive')
 
     expect(new TextDecoder().decode(received[0]!)).toBe('hello-from-node-default')
-    expect(initiator.selectedTransport() ?? responder.selectedTransport()).toBe('lan')
+    expect(DIRECT_TRANSPORTS).toContain(initiator.selectedTransport() ?? responder.selectedTransport())
 
     await initiator.close()
     await responder.close()
@@ -292,7 +301,7 @@ describe('werift RTC backend', () => {
     await waitFor(() => received.length === 1, 'helper receive')
 
     expect(new TextDecoder().decode(received[0]!)).toBe('hello-from-helper')
-    expect(initiator.selectedTransport() ?? responder.selectedTransport()).toBe('lan')
+    expect(DIRECT_TRANSPORTS).toContain(initiator.selectedTransport() ?? responder.selectedTransport())
 
     await initiator.close()
     await responder.close()
