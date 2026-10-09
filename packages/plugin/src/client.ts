@@ -358,7 +358,8 @@ const en = {
   codexUnavailableAccount: 'Codex cannot reach your account from this network (region not supported, or the sign-in expired). It returns as soon as the account can be refreshed.',
   codexUnavailableSignIn: 'Codex is not signed in on this host. Sign in with the Codex app, then restart DSH.',
   codexUnavailableBinary: 'The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.',
-  codexUnavailableGeneric: 'Codex is unavailable on this host; the host status records the reason.',
+  codexUnavailableGeneric: 'Codex is unavailable on this host ({code}).',
+  codexDisabled: 'Codex is switched off on this device, so nobody can use it remotely.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -624,7 +625,8 @@ const zh: Record<keyof typeof en, string> = {
   codexUnavailableAccount: 'Codex 无法从当前网络访问你的账号（区域不受支持，或登录已过期）。账号恢复可达后 Codex 即回来。',
   codexUnavailableSignIn: '这台 Host 上的 Codex 尚未登录。请先用 Codex 应用登录，然后重启 DSH。',
   codexUnavailableBinary: '这里的 Codex CLI 无法启动。请安装 Codex 桌面应用，或在下方填写可用的命令或完整路径。',
-  codexUnavailableGeneric: '这台 Host 上的 Codex 当前不可用，具体原因记录在 Host 状态里。',
+  codexUnavailableGeneric: '这台 Host 上的 Codex 当前不可用（{code}）。',
+  codexDisabled: '本设备的 Codex 已关闭，其他用户无法远程使用。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -2738,9 +2740,13 @@ function CodexConnectionFields(props: {
         checked: props.enabled,
         onChange: (event: Event) => props.onEnabledChange((event.target as HTMLInputElement).checked),
       })),
-    unavailable
-      ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(props.reasonCode)))
-      : null,
+    // A disabled Codex is a choice, not a fault, and an unknown code is still better than pointing the user at a
+    // place called "the host status" to go and look it up.
+    !props.enabled
+      ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('codexDisabled'))
+      : unavailable
+        ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode ?? 'UNKNOWN' }))
+        : null,
     React.createElement('div', { className: 'dshRemoteCodexBinary' },
       React.createElement('input', {
         type: 'text',
@@ -2867,7 +2873,7 @@ function CodexConnectionDetails(props: {
           React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
           React.createElement('button', {
             type: 'button',
-            disabled: busy || !writable,
+            disabled: busy,
             onClick: () => void save({ binary }),
           }, t('codexBinaryConfirm'))))))
 }

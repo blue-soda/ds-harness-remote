@@ -1833,7 +1833,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableAccount: "Codex cannot reach your account from this network (region not supported, or the sign-in expired). It returns as soon as the account can be refreshed.",
     codexUnavailableSignIn: "Codex is not signed in on this host. Sign in with the Codex app, then restart DSH.",
     codexUnavailableBinary: "The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.",
-    codexUnavailableGeneric: "Codex is unavailable on this host; the host status records the reason.",
+    codexUnavailableGeneric: "Codex is unavailable on this host ({code}).",
+    codexDisabled: "Codex is switched off on this device, so nobody can use it remotely.",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -2096,7 +2097,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableAccount: "Codex \u65E0\u6CD5\u4ECE\u5F53\u524D\u7F51\u7EDC\u8BBF\u95EE\u4F60\u7684\u8D26\u53F7\uFF08\u533A\u57DF\u4E0D\u53D7\u652F\u6301\uFF0C\u6216\u767B\u5F55\u5DF2\u8FC7\u671F\uFF09\u3002\u8D26\u53F7\u6062\u590D\u53EF\u8FBE\u540E Codex \u5373\u56DE\u6765\u3002",
     codexUnavailableSignIn: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5C1A\u672A\u767B\u5F55\u3002\u8BF7\u5148\u7528 Codex \u5E94\u7528\u767B\u5F55\uFF0C\u7136\u540E\u91CD\u542F DSH\u3002",
     codexUnavailableBinary: "\u8FD9\u91CC\u7684 Codex CLI \u65E0\u6CD5\u542F\u52A8\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u7528\u7684\u547D\u4EE4\u6216\u5B8C\u6574\u8DEF\u5F84\u3002",
-    codexUnavailableGeneric: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\uFF0C\u5177\u4F53\u539F\u56E0\u8BB0\u5F55\u5728 Host \u72B6\u6001\u91CC\u3002",
+    codexUnavailableGeneric: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\uFF08{code}\uFF09\u3002",
+    codexDisabled: "\u672C\u8BBE\u5907\u7684 Codex \u5DF2\u5173\u95ED\uFF0C\u5176\u4ED6\u7528\u6237\u65E0\u6CD5\u8FDC\u7A0B\u4F7F\u7528\u3002",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -3783,7 +3785,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
               onChange: (event) => props.onEnabledChange(event.target.checked)
             })
           ),
-          unavailable ? React.createElement("p", { className: "dshRemoteError" }, t(codexUnavailableKey(props.reasonCode))) : null,
+          // A disabled Codex is a choice, not a fault, and an unknown code is still better than pointing the user at a
+          // place called "the host status" to go and look it up.
+          props.enabled ? unavailable ? React.createElement("p", { className: "dshRemoteError" }, t(codexUnavailableKey(props.reasonCode), { code: props.reasonCode ?? "UNKNOWN" })) : null : React.createElement("p", { className: "dshRemoteSettingsState" }, t("codexDisabled")),
           React.createElement(
             "div",
             { className: "dshRemoteCodexBinary" },
@@ -3891,7 +3895,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? ""),
                 React.createElement("button", {
                   type: "button",
-                  disabled: busy || !writable,
+                  disabled: busy,
                   onClick: () => void save({ binary })
                 }, t("codexBinaryConfirm"))
               )
