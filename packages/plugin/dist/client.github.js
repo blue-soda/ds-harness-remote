@@ -2968,7 +2968,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteWorkspaceAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [authorizationResolved, setAuthorizationResolved] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState(DEFAULT_REMOTE_SERVER_URL), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(!1), [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState(void 0), [loginMethod, setLoginMethod] = React.useState(
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [codexOpen, setCodexOpen] = React.useState(!1), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [authorizationResolved, setAuthorizationResolved] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState(DEFAULT_REMOTE_SERVER_URL), [editingServerUrl, setEditingServerUrl] = React.useState(!1), [awaitingDeepSeek, setAwaitingDeepSeek] = React.useState(!1), [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState(void 0), [loginMethod, setLoginMethod] = React.useState(
           isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider
         ), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [confirmingSignOut, setConfirmingSignOut] = React.useState(!1), [confirmingRevoke, setConfirmingRevoke] = React.useState(!1), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
@@ -3391,6 +3391,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   "aria-label": t("refreshRemote"),
                   onClick: () => void refreshRemote()
                 }, t("refreshRemoteShort")),
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemotePageRefresh",
+                  disabled: busy,
+                  title: t("codexRemote"),
+                  "aria-label": t("codexRemote"),
+                  onClick: () => setCodexOpen(!0)
+                }, React.createElement("span", { "aria-hidden": !0 }, "\u25C6"), t("codexRemote")),
+                codexOpen ? React.createElement(CodexConnectionDetails, {
+                  control: props.control,
+                  t,
+                  onClose: () => setCodexOpen(!1)
+                }) : null,
                 React.createElement("button", { type: "button", className: "dshRemotePageClose", onClick: () => setOpen(!1), "aria-label": t("close") }, "\xD7")
               )
             ),
@@ -3877,7 +3890,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteModeAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), [codexOpen, setCodexOpen] = React.useState(!1), refresh = async () => {
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), refresh = async () => {
           let [nextStatus, nextDevices] = await Promise.all([
             props.control("status"),
             props.control("devices").catch(() => [])
@@ -3944,18 +3957,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("switchTarget"),
             onClick: () => setOpen(!0)
           }, React.createElement("span", { "aria-hidden": !0 }, "\u25CE"), props.wide ? React.createElement("span", null, label) : null),
-          React.createElement("button", {
-            type: "button",
-            className: "dshRemoteModeButton",
-            title: t("codexRemote"),
-            "aria-label": t("codexRemote"),
-            onClick: () => setCodexOpen(!0)
-          }, React.createElement("span", { "aria-hidden": !0 }, "\u25C6"), props.wide ? React.createElement("span", null, t("codexRemote")) : null),
-          codexOpen ? React.createElement(CodexConnectionDetails, {
-            control: props.control,
-            t,
-            onClose: () => setCodexOpen(!1)
-          }) : null,
           open ? React.createElement(
             "div",
             { className: "dshRemoteBackdrop", role: "presentation" },

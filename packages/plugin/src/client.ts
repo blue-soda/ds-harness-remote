@@ -1692,6 +1692,9 @@ window.__ModuleLoader__.load({
       const [connectingHost, setConnectingHost] = React.useState<RemoteDevice | undefined>(undefined)
       const [workspaces, setWorkspaces] = React.useState<RemoteWorkspaceView[]>([])
       const [codexWorkspaces, setCodexWorkspaces] = React.useState<CodexWorkspaceView[]>([])
+      // The Codex connection details, reachable from this panel: some DSH builds never render the plugin's own
+      // settings form, so this is where the switch and command field have to live.
+      const [codexOpen, setCodexOpen] = React.useState(false)
       const [workspaceBackend, setWorkspaceBackend] = React.useState<'harness' | 'codex'>('harness')
       const [codexWorkspaceId, setCodexWorkspaceId] = React.useState<string | undefined>(undefined)
       const [directory, setDirectory] = React.useState<RemoteDirectoryListing | undefined>(undefined)
@@ -2450,6 +2453,19 @@ window.__ModuleLoader__.load({
                 'aria-label': t('refreshRemote'),
                 onClick: () => void refreshRemote(),
               }, t('refreshRemoteShort')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemotePageRefresh',
+                disabled: busy,
+                title: t('codexRemote'),
+                'aria-label': t('codexRemote'),
+                onClick: () => setCodexOpen(true),
+              }, React.createElement('span', { 'aria-hidden': true }, '◆'), t('codexRemote')),
+              codexOpen ? React.createElement(CodexConnectionDetails, {
+                control: props.control,
+                t,
+                onClose: () => setCodexOpen(false),
+              }) : null,
               React.createElement('button', { type: 'button', className: 'dshRemotePageClose', onClick: () => setOpen(false), 'aria-label': t('close') }, '×'))),
           React.createElement('main', { className: 'dshRemotePageBody' },
             status?.mode === 'remote' || status?.fellBackToLocal === true ? React.createElement('button', {
@@ -2864,7 +2880,6 @@ function CodexConnectionDetails(props: {
       const progressRun = React.useRef(0)
       const [error, setError] = React.useState<string | undefined>(undefined)
       const [supported, setSupported] = React.useState(true)
-      const [codexOpen, setCodexOpen] = React.useState(false)
 
       const refresh = async (): Promise<void> => {
         const [nextStatus, nextDevices] = await Promise.all([
@@ -2964,20 +2979,6 @@ function CodexConnectionDetails(props: {
         }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
           ? React.createElement('span', null, label)
           : null),
-        React.createElement('button', {
-          type: 'button',
-          className: 'dshRemoteModeButton',
-          title: t('codexRemote'),
-          'aria-label': t('codexRemote'),
-          onClick: () => setCodexOpen(true),
-        }, React.createElement('span', { 'aria-hidden': true }, '◆'), props.wide
-          ? React.createElement('span', null, t('codexRemote'))
-          : null),
-        codexOpen ? React.createElement(CodexConnectionDetails, {
-          control: props.control,
-          t,
-          onClose: () => setCodexOpen(false),
-        }) : null,
         open ? React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
           React.createElement('section', {
             className: 'dshRemoteDialog',
