@@ -21671,6 +21671,21 @@ var ClientModeRuntime = class {
    * the link is back.
    */
   lastWorkspaceSelection;
+  /**
+   * The last workspaces listed per Host.
+   *
+   * A workspace picked in the panel is opened by id, and a replaced Codex domain hands out new ids for the same
+   * directories. Keeping the previous listing is what lets a stale id be translated back to its root and opened
+   * again instead of failing as "no longer available".
+   */
+  lastCodexListing = /* @__PURE__ */ new Map();
+  /**
+   * Hosts this run has actually opened a Codex workspace on.
+   *
+   * Whether the peer merely never offered Codex or has just switched it off decides the wording the user sees, and
+   * the remembered selection cannot answer that on its own: switching to local clears it by design.
+   */
+  codexHostsSeen = /* @__PURE__ */ new Set();
   codexVirtual;
   proxySwitch;
   gatewaySwitch;
@@ -21920,7 +21935,7 @@ var ClientModeRuntime = class {
     if (targetDeviceId === void 0 || targetDeviceId.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "A targetDeviceId is required for remote mode.");
     }
-    const next = await this.connect(targetDeviceId, signal);
+    const next = await this.connectWithReason(targetDeviceId, signal);
     try {
       this.assertRemoteCompatible(next);
     } catch (error) {
@@ -21955,7 +21970,7 @@ var ClientModeRuntime = class {
     const previous = this.connected;
     this.supersededClient = previous?.client;
     try {
-      const next = await this.connect(targetDeviceId, void 0, forceRelay);
+      const next = await this.connectWithReason(targetDeviceId, void 0, forceRelay);
       if (previous === void 0) {
         this.supersededClient = void 0;
         await next.client.close().catch(() => void 0);
@@ -22013,7 +22028,9 @@ var ClientModeRuntime = class {
   restoreCodexCarrier(targetDeviceId) {
     const selection = this.lastWorkspaceSelection;
     if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === void 0) return;
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(async (error) => {
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).then(() => {
+      this.restoreWorkspaceSelection(targetDeviceId);
+    }).catch(async (error) => {
       const code = safeErrorCode(error);
       if (selection.workspacePath !== void 0) {
         const recovered = await this.codexWorkspaceIdForPath(targetDeviceId, selection.workspacePath).catch(() => void 0);
@@ -22023,6 +22040,7 @@ var ClientModeRuntime = class {
             path: selection.workspacePath
           });
           await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => void 0);
+          this.restoreWorkspaceSelection(targetDeviceId);
           return;
         }
       }
@@ -22063,7 +22081,7 @@ var ClientModeRuntime = class {
     const target2 = this.reconnecting?.targetDeviceId;
     if (target2 === void 0) return;
     this.reconnecting = void 0;
-    this.restoreWorkspaceSelection(target2);
+    if (!shouldRestoreCodexCarrier(this.lastWorkspaceSelection, target2)) this.restoreWorkspaceSelection(target2);
     this.restoreCodexCarrier(target2);
     this.logger.info("remote Harness reconnect finished", { targetDeviceId: shortId2(target2), reason });
   }
@@ -22325,11 +22343,12 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId) || this.codexHostsSeen.has(targetDeviceId);
       if (expected) this.noteCodexSessionLost();
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
+    this.lastCodexListing.set(targetDeviceId, workspaces);
     this.logger.info("Codex workspaces listed", {
       targetDeviceId: shortId2(targetDeviceId),
       count: workspaces.length
@@ -22340,7 +22359,7 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId) || this.codexHostsSeen.has(targetDeviceId);
       if (expected) this.noteCodexSessionLost();
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
@@ -22353,9 +22372,20 @@ var ClientModeRuntime = class {
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal);
-    } catch {
+    } catch (error) {
       await virtual.close();
-      throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
+      const previousRoot = this.lastCodexListing.get(targetDeviceId)?.find((item) => item.workspaceId === workspaceId)?.path;
+      if (previousRoot !== void 0) {
+        const currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => void 0);
+        if (currentId !== void 0 && currentId !== workspaceId) {
+          this.logger.info("CodeX workspace reopened under a new id", {
+            targetDeviceId: shortId2(targetDeviceId),
+            path: previousRoot
+          });
+          return this.openCodexWorkspace(targetDeviceId, currentId, signal);
+        }
+      }
+      throw error instanceof ClientModeError ? error : new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
     }
     await this.closeCodexVirtual();
     this.codexVirtual = virtual;
@@ -22368,6 +22398,7 @@ var ClientModeRuntime = class {
       ...workspace.path === void 0 ? {} : { workspacePath: workspace.path },
       ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
     });
+    this.codexHostsSeen.add(remote.target.deviceId);
     this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId2(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }
@@ -22377,7 +22408,7 @@ var ClientModeRuntime = class {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
     if (!remote.features.codex) {
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId);
+      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId) || this.codexHostsSeen.has(targetDeviceId);
       if (expected) this.noteCodexSessionLost();
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", expected ? "Codex is switched off or unavailable on the selected Host." : "The selected Host does not provide CodeX workspaces.");
     }
@@ -22620,6 +22651,29 @@ var ClientModeRuntime = class {
       "This Client does not provide a compatible Harness carrier for the selected remote workspace."
     );
   }
+  /**
+   * Connect, and report the control switch when that is what refused us.
+   *
+   * A device whose control switch is off has its host connection refused by the Server. Its presence may still read
+   * online, so the failure comes back from whichever transport step gave up first - "adaptive transport has not been
+   * authorized", "the authenticated Noise channel is not connected", "the selected Host is offline" - and none of
+   * them name the switch. The device row does, so a failed attempt is re-read against it; an error that already names
+   * a cause is passed through untouched.
+   * @param targetDeviceId - the Host being connected to.
+   * @param signal - aborts the attempt.
+   * @param forceRelay - skips direct negotiation, as the reconnect window does.
+   * @returns the connected remote session.
+   */
+  async connectWithReason(targetDeviceId, signal, forceRelay = false) {
+    try {
+      return await this.connect(targetDeviceId, signal, forceRelay);
+    } catch (error) {
+      if (safeErrorCode(error) === "CONTROL_DISABLED") throw error;
+      const row = await this.server.listDevices().then((list) => list.find((device) => device.deviceId === targetDeviceId)).catch(() => void 0);
+      if (row?.hostControl === false) throw offlineConnectionError(false);
+      throw error;
+    }
+  }
   async connect(targetDeviceId, signal, forceRelay = false) {
     signal?.throwIfAborted();
     const progressRunId = this.connectionProgressRun + 1;
@@ -22750,7 +22804,7 @@ var ClientModeRuntime = class {
   }
   async ensureConnected(targetDeviceId, signal) {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
-    const next = await this.connect(targetDeviceId, signal);
+    const next = await this.connectWithReason(targetDeviceId, signal);
     const previous = this.connected;
     await this.closePreview();
     this.connected = next;
@@ -24192,6 +24246,10 @@ var CodexRemoteDomain = class {
   }
   createPeer(context, publish) {
     if (!this.config.enabled) return void 0;
+    this.logger.info("Codex client attached", {
+      peerDeviceId: context.peerDeviceId.slice(0, 12),
+      connectionId: context.connectionId.slice(0, 12)
+    });
     const bridge = new CodexPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);

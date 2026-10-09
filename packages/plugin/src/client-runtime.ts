@@ -282,6 +282,14 @@ export class ClientModeRuntime {
    */
   private readonly lastCodexListing = new Map<string, CodexVirtualWorkspaceView[]>()
   /**
+   * Every workspace id this client has seen for a Host, mapped to its root.
+   *
+   * A panel entry can come from a listing made before the Host replaced its Codex domain, so the id is missing from
+   * the latest listing while the directory itself is unchanged. Keeping the whole history is what lets such an id be
+   * translated back to a root and reopened.
+   */
+  private readonly codexWorkspaceRoots = new Map<string, string>()
+  /**
    * Hosts this run has actually opened a Codex workspace on.
    *
    * Whether the peer merely never offered Codex or has just switched it off decides the wording the user sees, and
@@ -1093,6 +1101,9 @@ export class ClientModeRuntime {
     }
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
     this.lastCodexListing.set(targetDeviceId, workspaces)
+    for (const item of workspaces) {
+      this.codexWorkspaceRoots.set(`${targetDeviceId}|${item.workspaceId}`, item.path)
+    }
     // An empty result is what the panel renders as "no Codex workspaces". Recording the count - and the fact that
     // the capability probe passed to get here - turns the next such report into an answer instead of a guess.
     // The field name must avoid the logger's redaction pattern (it matches "workspace"), which is why the count is
@@ -1136,19 +1147,36 @@ export class ClientModeRuntime {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
     } catch (error) {
       await virtual.close()
-      // The panel opens the id it listed earlier; a replaced domain has since renumbered the same directories. Ask
-      // for the current id of that root once before reporting the workspace as gone.
-      const previousRoot = this.lastCodexListing.get(targetDeviceId)?.find(item => item.workspaceId === workspaceId)?.path
+      const code = safeErrorCode(error)
+      // The panel opens the id it listed earlier; a replaced domain has since renumbered the same directories, so the
+      // id is unknown while the workspace is still there. The root is what survives, and it can come from either the
+      // listing that produced the id or the selection this client remembered.
+      const listed = this.lastCodexListing.get(targetDeviceId)
+      const previousRoot = listed?.find(item => item.workspaceId === workspaceId)?.path
+        ?? this.codexWorkspaceRoots.get(`${targetDeviceId}|${workspaceId}`)
+        ?? this.lastWorkspaceSelection?.workspacePath
+      const inListing = listed?.some(item => item.workspaceId === workspaceId) ?? false
+      let currentId: string | undefined
       if (previousRoot !== undefined) {
-        const currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => undefined)
-        if (currentId !== undefined && currentId !== workspaceId) {
-          this.logger.info('CodeX workspace reopened under a new id', {
-            targetDeviceId: shortId(targetDeviceId),
-            path: previousRoot,
-          })
-          return this.openCodexWorkspace(targetDeviceId, currentId, signal)
-        }
+        currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => undefined)
       }
+      if (currentId !== undefined && currentId !== workspaceId) {
+        this.logger.info('CodeX workspace reopened under a new id', {
+          targetDeviceId: shortId(targetDeviceId),
+          path: previousRoot,
+        })
+        return this.openCodexWorkspace(targetDeviceId, currentId, signal)
+      }
+      // Nothing to recover with is exactly the case that used to be silent, so say what was known: the code the Host
+      // gave, whether that id ever appeared in a listing, and whether a root was available to re-match on.
+      this.logger.warn('selected CodeX workspace could not be opened', {
+        targetDeviceId: shortId(targetDeviceId),
+        code,
+        inListing,
+        hasRoot: previousRoot !== undefined,
+        roots: [...this.codexWorkspaceRoots.keys()].filter(key => key.startsWith(`${targetDeviceId}|`)).length,
+        listed: listed?.length ?? -1,
+      })
       throw error instanceof ClientModeError
         ? error
         : new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected CodeX workspace is no longer available.')
