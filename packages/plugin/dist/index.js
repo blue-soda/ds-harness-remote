@@ -21622,6 +21622,7 @@ var QUICK_RECONNECT_WINDOW_MS = 1e4;
 var QUICK_RECONNECT_RETRY_DELAY_MS = 5e3;
 var QUICK_RECONNECT_FORCE_RELAY = true;
 var FALLBACK_STEADY_ATTEMPTS = 5;
+var RESTORE_MAX_AGE_MS = 30 * 60 * 1e3;
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
     this.config = config;
@@ -22252,13 +22253,22 @@ var ClientModeRuntime = class {
       });
       return false;
     }
+    const ageMs = Date.now() - record7.savedAt;
+    if (!Number.isFinite(ageMs) || ageMs > RESTORE_MAX_AGE_MS) {
+      this.logger.info("recorded remote target is stale; not restoring", {
+        targetDeviceId: shortId2(record7.hostDeviceId),
+        ageMinutes: Number.isFinite(ageMs) ? Math.round(ageMs / 6e4) : -1
+      });
+      return false;
+    }
     this.reconnecting = {
       targetDeviceId: record7.hostDeviceId,
       ...record7.hostName === void 0 ? {} : { targetName: record7.hostName },
       phase: "restore"
     };
     this.logger.info("restoring the remote target of the previous run", {
-      targetDeviceId: shortId2(record7.hostDeviceId)
+      targetDeviceId: shortId2(record7.hostDeviceId),
+      ageMinutes: Math.round((Date.now() - record7.savedAt) / 6e4)
     });
     void this.reconnectRemoteSession(record7.hostDeviceId);
     return true;
