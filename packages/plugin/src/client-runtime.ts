@@ -26,6 +26,7 @@ import {
   codexProjectWorkspaceId,
   CodexVirtualHarness,
   discoverCodexVirtualWorkspaces,
+  sameWorkspaceRoot,
   type CodexVirtualWorkspaceView,
 } from './codex/virtual-harness.js'
 import {
@@ -762,7 +763,7 @@ export class ClientModeRuntime {
    */
   private async codexWorkspaceIdForPath(targetDeviceId: string, path: string): Promise<string | undefined> {
     const workspaces = await this.listCodexWorkspaces(targetDeviceId)
-    const match = workspaces.find(candidate => candidate.path === path)
+    const match = workspaces.find(candidate => sameWorkspaceRoot(candidate.path, path))
     return match?.workspaceId
   }
 
@@ -1182,6 +1183,7 @@ export class ClientModeRuntime {
       }
       // Nothing to recover with is exactly the case that used to be silent, so say what was known: the code the Host
       // gave, whether that id ever appeared in a listing, and whether a root was available to re-match on.
+      const currentListing = this.lastCodexListing.get(targetDeviceId) ?? []
       this.logger.warn('selected CodeX workspace could not be opened', {
         targetDeviceId: shortId(targetDeviceId),
         code,
@@ -1189,6 +1191,10 @@ export class ClientModeRuntime {
         hasRoot: previousRoot !== undefined,
         roots: [...this.codexWorkspaceRoots.keys()].filter(key => key.startsWith(`${targetDeviceId}|`)).length,
         listed: listed?.length ?? -1,
+        // What was asked for against what the Host currently offers, so the next report needs no second round trip.
+        wanted: workspaceId.slice(0, 60),
+        root: previousRoot === undefined ? '(none)' : previousRoot,
+        current: currentListing.slice(0, 5).map(item => item.workspaceId + '@' + item.path).join(', '),
       })
       throw error instanceof ClientModeError
         ? error

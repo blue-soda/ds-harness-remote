@@ -72,6 +72,21 @@ export interface CodexVirtualWorkspaceView {
   updatedAt: string
 }
 
+/**
+ * Whether two workspace roots name the same directory.
+ *
+ * Windows paths are case-insensitive and come spelled differently depending on where they were read from - project
+ * roots, thread cwd, a picked directory - so an exact comparison misses the directory that is right there. Separators
+ * are normalised and case is folded; nothing else is guessed at.
+ * @param left - one root.
+ * @param right - the other root.
+ * @returns true when they name the same directory.
+ */
+export function sameWorkspaceRoot(left: string, right: string): boolean {
+  const normalise = (value: string): string => value.trim().replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase()
+  return normalise(left) === normalise(right)
+}
+
 export function codexProjectWorkspaceId(projectId: string): string {
   return `${CODEX_WORKSPACE_PREFIX}project:${projectId}`
 }
@@ -334,12 +349,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     // which numbers the same directory differently. An id from an earlier listing therefore misses while the
     // directory is right there, so a known root is accepted as the identity of last resort.
     const workspace = catalog.workspaces.find(item => item.workspaceId === workspaceId)
-      ?? (rootPath === undefined ? undefined : catalog.workspaces.find(item => item.path === rootPath))
+      ?? (rootPath === undefined ? undefined : catalog.workspaces.find(item => sameWorkspaceRoot(item.path, rootPath)))
     if (workspace === undefined) {
       // Say what the catalog did contain. Ids and roots of a few entries are what tells a renumbered workspace apart
       // from a genuinely missing one, and without them this failure can only be guessed at.
       const seen = catalog.workspaces.slice(0, 5).map(item => item.workspaceId + '@' + item.path).join(', ')
-      throw new Error('The selected CodeX workspace is no longer available. (catalog: ' + seen + ')')
+      throw new Error('The selected CodeX workspace is no longer available. (wanted: ' + workspaceId
+        + ' root: ' + String(rootPath) + ' catalog: ' + seen + ')')
     }
     this.selectedWorkspaceId = workspace.workspaceId
     this.catalog = catalog
