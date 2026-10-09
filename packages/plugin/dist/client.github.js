@@ -3128,7 +3128,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, cancelAddingWorkspace = () => {
           setAddingWorkspace(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath("");
         }, refreshRemote = async () => {
-          setBusy(!0), setNotice(void 0), setError(void 0);
+          setBusy(!0), setNotice(void 0), setError(void 0), props.control("settings.get").then(async (view) => {
+            view.config.codex?.enabled !== !1 && view.codexStatus?.available !== !0 && await props.control("settings.codex.set", { enabled: !0 });
+          }).catch(() => {
+          });
           try {
             let nextStatus = await props.control("status");
             if (setStatus(nextStatus), !nextStatus.available) {
@@ -3895,14 +3898,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 "div",
                 { className: "dshRemoteSettingsFooter" },
                 React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? ""),
-                React.createElement("button", {
-                  type: "button",
-                  className: "dshRemoteDiscard",
-                  disabled: busy,
-                  // Writes the settings as they stand, which makes the Host restart the Codex connection: the way to
-                  // re-check a domain that failed while the account was unreachable, without restarting DSH.
-                  onClick: () => void save({})
-                }, t("codexRecheck")),
                 React.createElement("button", {
                   type: "button",
                   disabled: busy,

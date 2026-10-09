@@ -2037,6 +2037,17 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setNotice(undefined)
         setError(undefined)
+        // The refresh button is also the way back for a Codex connection that failed while its account could not be
+        // reached: re-writing the settings as they stand makes the Host start it again, which is how enabling the
+        // proxy takes effect without restarting DSH. A switched-off Codex is left alone - that is a choice, not a
+        // failure to retry.
+        void props.control<PluginSettingsView>('settings.get')
+          .then(async view => {
+            if (view.config.codex?.enabled === false) return
+            if (view.codexStatus?.available === true) return
+            await props.control<PluginSettingsView>('settings.codex.set', { enabled: true })
+          })
+          .catch(() => undefined)
         try {
           const nextStatus = await props.control<RemoteStatus>('status')
           setStatus(nextStatus)
@@ -2873,14 +2884,7 @@ function CodexConnectionDetails(props: {
         }),
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
           React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
-          React.createElement('button', {
-            type: 'button',
-            className: 'dshRemoteDiscard',
-            disabled: busy,
-            // Writes the settings as they stand, which makes the Host restart the Codex connection: the way to
-            // re-check a domain that failed while the account was unreachable, without restarting DSH.
-            onClick: () => void save({}),
-          }, t('codexRecheck')),
+
           React.createElement('button', {
             type: 'button',
             disabled: busy,
