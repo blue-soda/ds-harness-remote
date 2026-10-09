@@ -24323,7 +24323,12 @@ var CodexRemoteDomain = class {
     });
     try {
       await appServer.start();
-      const account = await appServer.call("account/read", { refreshToken: false }, 15e3);
+      let account;
+      try {
+        account = await appServer.call("account/read", { refreshToken: false }, 15e3);
+      } catch (error) {
+        throw classifyAccountProbeFailure(error);
+      }
       if (!accountCanRun(account)) {
         throw new RpcError("CODEX_AUTH_REQUIRED", "Codex is not signed in on this Host.");
       }
@@ -24899,6 +24904,16 @@ function parseRespond(input2) {
   }
   return input2;
 }
+function classifyAccountProbeFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/unsupported_country_region_territory|country, region, or territory|403|forbidden/i.test(message)) {
+    return new RpcError("CODEX_ACCOUNT_UNREACHABLE", "Codex cannot reach the account from this network region.");
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return new RpcError("CODEX_ACCOUNT_UNREACHABLE", "Codex could not reach the account in time.");
+  }
+  return error instanceof Error ? error : new RpcError("CODEX_UPSTREAM_ERROR", "Codex App Server could not complete the request.");
+}
 function accountCanRun(result) {
   if (!isRecord12(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
   return result.requiresOpenaiAuth === false || isRecord12(result.account);
@@ -25430,6 +25445,7 @@ var PluginControlRuntime = class {
     const associations = await this.associations(config);
     const association = associations.host;
     const discovered = discoveredCodexBinary(config.codex?.binary ?? "codex");
+    const codexStatus = this.host?.codexStatus?.();
     return {
       config,
       deviceName: hostname2(),
@@ -25438,7 +25454,8 @@ var PluginControlRuntime = class {
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map((item) => [item.id, commandAvailable(item.command ?? "")])),
       ...association === void 0 ? {} : { association },
-      ...discovered === void 0 ? {} : { discoveredCodexBinary: discovered }
+      ...discovered === void 0 ? {} : { discoveredCodexBinary: discovered },
+      ...codexStatus === void 0 ? {} : { codexStatus }
     };
   }
   async associations(config) {

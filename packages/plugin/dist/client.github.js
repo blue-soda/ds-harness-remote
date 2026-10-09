@@ -1829,6 +1829,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexBinaryAuto: "Use auto-discovery",
     codexBinaryPlaceholder: 'Path to a Codex CLI that supports "codex app-server"',
     codexBinaryPinned: "Set by hand. Clear the field and confirm to discover it automatically again.",
+    codexUnavailableAccount: "Codex cannot reach your account from this network (region not supported, or the sign-in expired). It returns as soon as the account can be refreshed.",
+    codexUnavailableSignIn: "Codex is not signed in on this host. Sign in with the Codex app, then restart DSH.",
+    codexUnavailableBinary: "The Codex CLI could not be started here. Install the Codex desktop app, or set the command above to one that works.",
+    codexUnavailableGeneric: "Codex is unavailable on this host; the host status records the reason.",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -2087,6 +2091,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexBinaryAuto: "\u6062\u590D\u81EA\u52A8\u53D1\u73B0",
     codexBinaryPlaceholder: '\u652F\u6301 "codex app-server" \u7684 Codex CLI \u8DEF\u5F84',
     codexBinaryPinned: "\u5F53\u524D\u4E3A\u624B\u52A8\u6307\u5B9A\uFF1B\u6E05\u7A7A\u540E\u786E\u8BA4\u5373\u53EF\u6062\u590D\u81EA\u52A8\u53D1\u73B0\u3002",
+    codexUnavailableAccount: "Codex \u65E0\u6CD5\u4ECE\u5F53\u524D\u7F51\u7EDC\u8BBF\u95EE\u4F60\u7684\u8D26\u53F7\uFF08\u533A\u57DF\u4E0D\u53D7\u652F\u6301\uFF0C\u6216\u767B\u5F55\u5DF2\u8FC7\u671F\uFF09\u3002\u8D26\u53F7\u6062\u590D\u53EF\u8FBE\u540E Codex \u5373\u56DE\u6765\u3002",
+    codexUnavailableSignIn: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5C1A\u672A\u767B\u5F55\u3002\u8BF7\u5148\u7528 Codex \u5E94\u7528\u767B\u5F55\uFF0C\u7136\u540E\u91CD\u542F DSH\u3002",
+    codexUnavailableBinary: "\u8FD9\u91CC\u7684 Codex CLI \u65E0\u6CD5\u542F\u52A8\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u5728\u4E0A\u65B9\u586B\u5199\u53EF\u7528\u7684\u547D\u4EE4\u3002",
+    codexUnavailableGeneric: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\uFF0C\u5177\u4F53\u539F\u56E0\u8BB0\u5F55\u5728 Host \u72B6\u6001\u91CC\u3002",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -2296,7 +2304,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
     refreshQrCode: "\u5237\u65B0\u4E8C\u7EF4\u7801",
     codexVirtualWorkspace: "CodeX \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
-  }, defaultPreferredTransports = ["lan", "p2p", "turn", "relay"], controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
+  };
+  function codexUnavailableKey(code) {
+    return code === "CODEX_ACCOUNT_UNREACHABLE" ? "codexUnavailableAccount" : code === "CODEX_AUTH_REQUIRED" ? "codexUnavailableSignIn" : code === "CODEX_BINARY_UNAVAILABLE" || code === "CODEX_START_TIMEOUT" ? "codexUnavailableBinary" : "codexUnavailableGeneric";
+  }
+  var defaultPreferredTransports = ["lan", "p2p", "turn", "relay"], controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
     constructor(message) {
       super(message), this.name = "ControlRouteUnavailableError";
     }
@@ -2682,7 +2694,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ),
             React.createElement("small", null, t("previewPortsHint"))
           )
-        ), codexBinaryConfigured = settingsView?.config.codex?.binary ?? "codex", codexBinaryDiscovered = settingsView?.discoveredCodexBinary, codexBinaryPinned = codexBinaryConfigured !== "codex", codexBinaryEditable = codexBinaryPinned || codexBinaryDiscovered === void 0, codexSetting = React.createElement(
+        ), codexBinaryConfigured = settingsView?.config.codex?.binary ?? "codex", codexBinaryDiscovered = settingsView?.discoveredCodexBinary, codexBinaryPinned = codexBinaryConfigured !== "codex", codexBinaryEditable = codexBinaryPinned || codexBinaryDiscovered === void 0, codexDomainStatus = settingsView?.codexStatus, codexUnavailable = codexDomainStatus !== void 0 && codexDomainStatus.available === !1, codexSetting = React.createElement(
           React.Fragment,
           null,
           React.createElement(
@@ -2697,12 +2709,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement("input", {
               type: "checkbox",
               role: "switch",
-              disabled: busy || codexBusy || !writable,
+              disabled: busy || codexBusy || !writable || codexUnavailable,
               "aria-label": t("codexRemote"),
               checked: codexEnabled,
               onChange: (event) => void setCodexRemote(event.target.checked)
             })
           ),
+          codexUnavailable ? React.createElement("p", { className: "dshRemoteError" }, t(codexUnavailableKey(codexDomainStatus?.error))) : null,
           React.createElement(
             "div",
             { className: "dshRemoteCodexBinary" },

@@ -179,7 +179,7 @@ export interface HostAuthorizationControl {
   localHarnessVersion?(): string | undefined
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>
   authorizeHostWithCode(code: string): Promise<unknown>
-  codexStatus?(): { available: boolean }
+  codexStatus?(): { available: boolean; enabled?: boolean; state?: string; error?: string }
   codexCall?(input: unknown, signal?: AbortSignal): Promise<unknown>
   codexRespond?(input: unknown, signal?: AbortSignal): Promise<{ resolved: true }>
   codexOpenStream?(

@@ -445,7 +445,15 @@ export class CodexRemoteDomain {
     })
     try {
       await appServer.start()
-      const account = await appServer.call('account/read', { refreshToken: false }, 15_000)
+      let account: unknown
+      try {
+        account = await appServer.call('account/read', { refreshToken: false }, 15_000)
+      } catch (error) {
+        // The account probe is a gate: its failure decides whether Codex exists at all in the UI, so a raw
+        // CODEX_UPSTREAM_ERROR made a region-blocked account look like a deleted feature. Classify it instead -
+        // only the classification travels, never the upstream text.
+        throw classifyAccountProbeFailure(error)
+      }
       if (!accountCanRun(account)) {
         throw new RpcError('CODEX_AUTH_REQUIRED', 'Codex is not signed in on this Host.')
       }
@@ -1127,6 +1135,26 @@ function parseRespond(input: unknown): { requestHandle: string; decision: 'accep
     throw new RpcError('INVALID_MESSAGE', 'The Codex approval response is invalid.')
   }
   return input as { requestHandle: string; decision: 'accept' | 'decline' | 'cancel' }
+}
+
+/**
+ * Turn an account-probe failure into a code the panel can explain.
+ *
+ * Measured cause of the "Codex vanished" report: the CLI answers 403 unsupported_country_region_territory when
+ * the network cannot reach the account, which is a different problem from a missing binary or a signed-out
+ * account. The upstream text is inspected here and discarded - what leaves this function is a code.
+ * @param error - whatever the App Server request threw.
+ * @returns the error to raise in its place.
+ */
+export function classifyAccountProbeFailure(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/unsupported_country_region_territory|country, region, or territory|403|forbidden/i.test(message)) {
+    return new RpcError('CODEX_ACCOUNT_UNREACHABLE', 'Codex cannot reach the account from this network region.')
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return new RpcError('CODEX_ACCOUNT_UNREACHABLE', 'Codex could not reach the account in time.')
+  }
+  return error instanceof Error ? error : new RpcError('CODEX_UPSTREAM_ERROR', 'Codex App Server could not complete the request.')
 }
 
 function accountCanRun(result: unknown): boolean {

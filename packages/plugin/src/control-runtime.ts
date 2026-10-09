@@ -461,6 +461,9 @@ export class PluginControlRuntime {
     // One identity means one association: the panel no longer has a role to pick.
     const association = associations.host
     const discovered = discoveredCodexBinary(config.codex?.binary ?? 'codex')
+    // The panel greys the Codex switch out and explains itself when the domain cannot run. Without this it had
+    // no way to know, which is why an unreachable Codex account looked like a missing setting.
+    const codexStatus = this.host?.codexStatus?.()
     return {
       config,
       deviceName: hostname(),
@@ -470,6 +473,7 @@ export class PluginControlRuntime {
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, commandAvailable(item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
       ...(discovered === undefined ? {} : { discoveredCodexBinary: discovered }),
+      ...(codexStatus === undefined ? {} : { codexStatus }),
     }
   }
 
