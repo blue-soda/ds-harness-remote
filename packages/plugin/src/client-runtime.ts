@@ -692,10 +692,18 @@ export class ClientModeRuntime {
     if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return
     if (selection.backend !== 'codex') return
     void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(error => {
+      const code = safeErrorCode(error)
       this.logger.warn('CodeX workspace could not be restored after a reconnect', {
         targetDeviceId: shortId(targetDeviceId),
-        code: safeErrorCode(error),
+        code,
       })
+      // The Host says it no longer offers Codex, so a Codex workspace cannot be shown at all. Forgetting the
+      // selection is what makes the client fall back to the Harness view of that Host: keeping it left the UI
+      // claiming a Codex workspace whose session list could only come out empty.
+      if (code === 'FEATURE_NOT_SUPPORTED') {
+        this.lastWorkspaceSelection = undefined
+        this.pendingWorkspaceSelection = undefined
+      }
     })
   }
 
