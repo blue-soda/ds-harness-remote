@@ -17847,6 +17847,10 @@ function isHostWorkspaceEndpoint(endpoint) {
 function isHostWorkspaceStreamEndpoint(endpoint) {
   return HOST_WORKSPACE_STREAM_ENDPOINTS.has(endpoint);
 }
+function sameWorkspaceRoot(left, right) {
+  const normalise = (value) => value.trim().replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+  return normalise(left) === normalise(right);
+}
 function codexProjectWorkspaceId(projectId) {
   return `${CODEX_WORKSPACE_PREFIX}project:${projectId}`;
 }
@@ -17913,10 +17917,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   async selectWorkspace(workspaceId, signal, rootPath) {
     const catalog = await loadCatalog(this.client, signal);
-    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId) ?? (rootPath === void 0 ? void 0 : catalog.workspaces.find((item) => item.path === rootPath));
+    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId) ?? (rootPath === void 0 ? void 0 : catalog.workspaces.find((item) => sameWorkspaceRoot(item.path, rootPath)));
     if (workspace === void 0) {
       const seen = catalog.workspaces.slice(0, 5).map((item) => item.workspaceId + "@" + item.path).join(", ");
-      throw new Error("The selected CodeX workspace is no longer available. (catalog: " + seen + ")");
+      throw new Error("The selected CodeX workspace is no longer available. (wanted: " + workspaceId + " root: " + String(rootPath) + " catalog: " + seen + ")");
     }
     this.selectedWorkspaceId = workspace.workspaceId;
     this.catalog = catalog;
@@ -22071,7 +22075,7 @@ var ClientModeRuntime = class {
    */
   async codexWorkspaceIdForPath(targetDeviceId, path) {
     const workspaces = await this.listCodexWorkspaces(targetDeviceId);
-    const match = workspaces.find((candidate) => candidate.path === path);
+    const match = workspaces.find((candidate) => sameWorkspaceRoot(candidate.path, path));
     return match?.workspaceId;
   }
   /**
@@ -22414,13 +22418,18 @@ var ClientModeRuntime = class {
         });
         return this.openCodexWorkspace(targetDeviceId, currentId, signal);
       }
+      const currentListing = this.lastCodexListing.get(targetDeviceId) ?? [];
       this.logger.warn("selected CodeX workspace could not be opened", {
         targetDeviceId: shortId2(targetDeviceId),
         code,
         inListing,
         hasRoot: previousRoot !== void 0,
         roots: [...this.codexWorkspaceRoots.keys()].filter((key) => key.startsWith(`${targetDeviceId}|`)).length,
-        listed: listed?.length ?? -1
+        listed: listed?.length ?? -1,
+        // What was asked for against what the Host currently offers, so the next report needs no second round trip.
+        wanted: workspaceId.slice(0, 60),
+        root: previousRoot === void 0 ? "(none)" : previousRoot,
+        current: currentListing.slice(0, 5).map((item) => item.workspaceId + "@" + item.path).join(", ")
       });
       throw error instanceof ClientModeError ? error : new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
     }
