@@ -1146,7 +1146,6 @@ export class ClientModeRuntime {
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
     } catch (error) {
-      await virtual.close()
       const code = safeErrorCode(error)
       // The panel opens the id it listed earlier; a replaced domain has since renumbered the same directories, so the
       // id is unknown while the workspace is still there. The root is what survives, and it can come from either the
@@ -1156,6 +1155,20 @@ export class ClientModeRuntime {
         ?? this.codexWorkspaceRoots.get(`${targetDeviceId}|${workspaceId}`)
         ?? this.lastWorkspaceSelection?.workspacePath
       const inListing = listed?.some(item => item.workspaceId === workspaceId) ?? false
+      // Retry the same id with the root as a hint before renumbering anything: the carrier rebuilds its catalog on
+      // every call and may number the directory differently than the listing that produced this id.
+      if (previousRoot !== undefined) {
+        const byRoot = await virtual.selectWorkspace(workspaceId, signal, previousRoot).catch(() => undefined)
+        if (byRoot !== undefined) {
+          this.logger.info('CodeX workspace opened by root after the id missed', {
+            targetDeviceId: shortId(targetDeviceId),
+            path: previousRoot,
+          })
+          await virtual.close()
+          return this.openCodexWorkspace(targetDeviceId, byRoot.workspaceId, signal)
+        }
+      }
+      await virtual.close()
       let currentId: string | undefined
       if (previousRoot !== undefined) {
         currentId = await this.codexWorkspaceIdForPath(targetDeviceId, previousRoot).catch(() => undefined)

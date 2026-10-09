@@ -324,10 +324,23 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     return (await this.refreshCatalog(signal)).workspaces
   }
 
-  async selectWorkspace(workspaceId: string, signal?: AbortSignal): Promise<CodexVirtualWorkspaceView> {
+  async selectWorkspace(
+    workspaceId: string,
+    signal?: AbortSignal,
+    rootPath?: string,
+  ): Promise<CodexVirtualWorkspaceView> {
     const catalog = await loadCatalog(this.client, signal)
+    // The catalog is rebuilt on every call, and it is derived from thread cwd when project/list answers nothing -
+    // which numbers the same directory differently. An id from an earlier listing therefore misses while the
+    // directory is right there, so a known root is accepted as the identity of last resort.
     const workspace = catalog.workspaces.find(item => item.workspaceId === workspaceId)
-    if (workspace === undefined) throw new Error('The selected CodeX workspace is no longer available.')
+      ?? (rootPath === undefined ? undefined : catalog.workspaces.find(item => item.path === rootPath))
+    if (workspace === undefined) {
+      // Say what the catalog did contain. Ids and roots of a few entries are what tells a renumbered workspace apart
+      // from a genuinely missing one, and without them this failure can only be guessed at.
+      const seen = catalog.workspaces.slice(0, 5).map(item => item.workspaceId + '@' + item.path).join(', ')
+      throw new Error('The selected CodeX workspace is no longer available. (catalog: ' + seen + ')')
+    }
     this.selectedWorkspaceId = workspace.workspaceId
     this.catalog = catalog
     return workspace
