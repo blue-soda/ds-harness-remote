@@ -25378,6 +25378,7 @@ var PluginControlRuntime = class {
       }
     });
     await this.settings.replace(editableConfig(next));
+    void this.host?.restartCodex?.(next.codex);
     return this.settingsView();
   }
   async setAcp(payload) {
@@ -28403,8 +28404,10 @@ var HostPluginRuntime = class {
    * version needs the domain to support reopening; until then a settings change waits for a DSH restart.
    * @returns when the restart attempt finished.
    */
-  async restartCodex() {
-    await this.codex.close().catch(() => void 0);
+  async restartCodex(config) {
+    const previous = this.codex;
+    this.codex = new CodexRemoteDomain(config, this.logger);
+    await previous.close().catch(() => void 0);
     await this.codex.start().catch(() => void 0);
   }
   codexStatus() {

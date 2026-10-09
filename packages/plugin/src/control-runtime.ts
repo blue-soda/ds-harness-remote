@@ -355,9 +355,10 @@ export class PluginControlRuntime {
       },
     })
     await this.settings.replace(editableConfig(next))
-    // NOT applying the change live: CodexRemoteDomain.close() is terminal (it sets `closed`), so a restart needs a
-    // reopen path the domain does not have yet. Calling close()+start() here left the domain dead for the rest of
-    // the process - reported as "the switch does not come back" - so the change waits for a DSH restart instead.
+    // Apply it now. The service replaces the domain with one built from this configuration, and the old instance's
+    // close() is terminal on purpose - it is being retired, not reused.
+    // Fire and forget: a cold App Server start can take seconds and this dialog should not wait for it.
+    void this.host?.restartCodex?.(next.codex)
     return this.settingsView()
   }
 

@@ -13,7 +13,7 @@ import {
 import { ApiProxySwitch, type HarnessMode } from './api-proxy-switch.js'
 import { ClientSecureTransport } from './client-secure-transport.js'
 import { ClientTargetStore } from './client-target-store.js'
-import type { ResolvedConfig } from './config.js'
+import type { ResolvedCodexConfig, ResolvedConfig } from './config.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
@@ -180,8 +180,8 @@ export interface HostAuthorizationControl {
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>
   authorizeHostWithCode(code: string): Promise<unknown>
   codexStatus?(): { available: boolean; enabled?: boolean; state?: string; error?: string }
-  /** Restart the Codex connection so a changed setting applies without restarting DSH. */
-  restartCodex?(): Promise<void>
+  /** Restart the Codex connection with a new configuration, without restarting DSH. */
+  restartCodex?(config: ResolvedCodexConfig): Promise<void>
   codexCall?(input: unknown, signal?: AbortSignal): Promise<unknown>
   codexRespond?(input: unknown, signal?: AbortSignal): Promise<{ resolved: true }>
   codexOpenStream?(

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { createEvent } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
-import type { ResolvedConfig } from './config.js'
+import type { ResolvedCodexConfig, ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
 import {
   harnessSessionGeneration,
@@ -88,7 +88,7 @@ export class HostPluginRuntime {
   private starting = true
   private harnessVersion?: string
   private closed = false
-  private readonly codex: CodexRemoteDomain
+  private codex: CodexRemoteDomain
   private readonly codexWorkspaceState = new CodexWorkspaceState()
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
@@ -389,8 +389,14 @@ export class HostPluginRuntime {
    * version needs the domain to support reopening; until then a settings change waits for a DSH restart.
    * @returns when the restart attempt finished.
    */
-  async restartCodex(): Promise<void> {
-    await this.codex.close().catch(() => undefined)
+  async restartCodex(config: ResolvedCodexConfig): Promise<void> {
+    // The configuration is injected at construction and read all over the domain, so applying it means
+    // replacing the instance rather than mutating it: the previous one is closed (which drops its Codex peers,
+    // exactly what a disabled or redirected Codex should do) and a fresh one starts from the new configuration.
+    // Every other reference goes through `this.codex`, so nothing else has to be rebuilt.
+    const previous = this.codex
+    this.codex = new CodexRemoteDomain(config, this.logger)
+    await previous.close().catch(() => undefined)
     await this.codex.start().catch(() => undefined)
   }
 
