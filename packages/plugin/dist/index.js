@@ -21622,7 +21622,6 @@ var QUICK_RECONNECT_WINDOW_MS = 1e4;
 var QUICK_RECONNECT_RETRY_DELAY_MS = 5e3;
 var QUICK_RECONNECT_FORCE_RELAY = true;
 var FALLBACK_STEADY_ATTEMPTS = 5;
-var RESTORE_MAX_AGE_MS = 30 * 60 * 1e3;
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
     this.config = config;
@@ -22014,13 +22013,51 @@ var ClientModeRuntime = class {
   restoreCodexCarrier(targetDeviceId) {
     const selection = this.lastWorkspaceSelection;
     if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === void 0) return;
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch((error) => {
+    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch(async (error) => {
       const code = safeErrorCode(error);
+      if (selection.workspacePath !== void 0) {
+        const recovered = await this.codexWorkspaceIdForPath(targetDeviceId, selection.workspacePath).catch(() => void 0);
+        if (recovered !== void 0 && recovered !== selection.workspaceId) {
+          this.logger.info("CodeX workspace restored under a new id", {
+            targetDeviceId: shortId2(targetDeviceId),
+            path: selection.workspacePath
+          });
+          await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => void 0);
+          return;
+        }
+      }
       this.logger.warn("CodeX workspace could not be restored after a reconnect", {
         targetDeviceId: shortId2(targetDeviceId),
         code
       });
+      this.fallBackToLocalForCodex();
     });
+  }
+  /**
+   * The id the Host currently uses for a workspace root.
+   *
+   * @param targetDeviceId - the Host to ask.
+   * @param path - the workspace root as it was remembered.
+   * @returns the current workspace id, or undefined when the Host no longer offers that root.
+   */
+  async codexWorkspaceIdForPath(targetDeviceId, path) {
+    const workspaces = await this.listCodexWorkspaces(targetDeviceId);
+    const match = workspaces.find((candidate) => candidate.path === path);
+    return match?.workspaceId;
+  }
+  /**
+   * Show the client's own shell while a Codex session is unavailable.
+   *
+   * The peer's other carrier must not stand in for the Codex workspace that was lost, and this deliberately does not
+   * touch the reconnect run counter: the retry schedule keeps trying to restore the Codex workspace while the user
+   * works locally.
+   * @returns nothing.
+   */
+  fallBackToLocalForCodex() {
+    void this.closeCodexVirtual();
+    this.proxySwitch?.selectLocal();
+    this.gatewaySwitch.selectLocal();
+    this.fellBackToLocal = true;
   }
   finishReconnect(reason) {
     const target2 = this.reconnecting?.targetDeviceId;
@@ -22215,22 +22252,13 @@ var ClientModeRuntime = class {
       });
       return false;
     }
-    const ageMs = Date.now() - record7.savedAt;
-    if (!Number.isFinite(ageMs) || ageMs > RESTORE_MAX_AGE_MS) {
-      this.logger.info("recorded remote target is stale; not restoring", {
-        targetDeviceId: shortId2(record7.hostDeviceId),
-        ageMinutes: Number.isFinite(ageMs) ? Math.round(ageMs / 6e4) : -1
-      });
-      return false;
-    }
     this.reconnecting = {
       targetDeviceId: record7.hostDeviceId,
       ...record7.hostName === void 0 ? {} : { targetName: record7.hostName },
       phase: "restore"
     };
     this.logger.info("restoring the remote target of the previous run", {
-      targetDeviceId: shortId2(record7.hostDeviceId),
-      ageMinutes: Math.round((Date.now() - record7.savedAt) / 6e4)
+      targetDeviceId: shortId2(record7.hostDeviceId)
     });
     void this.reconnectRemoteSession(record7.hostDeviceId);
     return true;
@@ -22304,7 +22332,7 @@ var ClientModeRuntime = class {
     const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
     this.logger.info("Codex workspaces listed", {
       targetDeviceId: shortId2(targetDeviceId),
-      workspaces: workspaces.length
+      count: workspaces.length
     });
     return workspaces;
   }
@@ -22337,6 +22365,7 @@ var ClientModeRuntime = class {
       targetDeviceId: remote.target.deviceId,
       workspaceId,
       backend: "codex",
+      ...workspace.path === void 0 ? {} : { workspacePath: workspace.path },
       ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
     });
     this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId2(remote.target.deviceId) });
