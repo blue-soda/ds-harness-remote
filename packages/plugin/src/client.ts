@@ -1498,53 +1498,22 @@ window.__ModuleLoader__.load({
       const codexDomainStatus = settingsView?.codexStatus
       const codexUnavailable = codexDomainStatus !== undefined && codexDomainStatus.available === false
 
-      const codexSetting = React.createElement(React.Fragment, null,
-        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-          React.createElement('div', null,
-            React.createElement('strong', null, t('codexRemote')),
-            React.createElement('p', null, t('codexRemoteHint'))),
-          React.createElement('input', {
-            type: 'checkbox', role: 'switch', disabled: busy || codexBusy || !writable || codexUnavailable,
-            'aria-label': t('codexRemote'),
-            checked: codexEnabled,
-            onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
-          })),
-        codexUnavailable
-          ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(codexDomainStatus?.error)))
-          : null,
-        React.createElement('div', { className: 'dshRemoteCodexBinary' },
-          React.createElement('input', {
-            type: 'text',
-            value: codexBinaryEditable ? codexBinary : codexBinaryDiscovered ?? '',
-            readOnly: !codexBinaryEditable,
-            disabled: busy || codexBusy || !writable,
-            className: codexBinaryEditable ? '' : 'isDiscovered',
-            placeholder: codexBinaryEditable ? t('codexBinaryPlaceholder') : undefined,
-            'aria-label': t('codexBinaryLabel'),
-            onChange: (event: Event) => setCodexBinary((event.target as HTMLInputElement).value),
-            onKeyDown: (event: KeyboardEvent) => {
-              if (event.key === 'Enter' && codexBinaryEditable) void setCodexBinaryPath(codexBinary)
-            },
-          }),
-          codexBinaryEditable
-            ? React.createElement('button', {
-              type: 'button', className: 'dshRemoteDiscard',
-              disabled: busy || codexBusy || !writable,
-              onClick: () => void setCodexBinaryPath(codexBinary),
-            }, t('codexBinaryConfirm'))
-            : null,
-          codexBinaryPinned
-            ? React.createElement('button', {
-              type: 'button', className: 'dshRemoteDiscard',
-              disabled: busy || codexBusy || !writable,
-              onClick: () => { setCodexBinary(''); void setCodexBinaryPath('') },
-            }, t('codexBinaryAuto'))
-            : null,
-          // The greyed field already shows the discovered path, so the only line
-          // worth printing is the one that asks the user for something.
-          codexBinaryPinned || codexBinaryDiscovered === undefined
-            ? React.createElement('p', null, codexBinaryPinned ? t('codexBinaryPinned') : t('codexBinaryMissing'))
-            : null))
+      const codexSetting = React.createElement(CodexConnectionFields, {
+        t,
+        enabled: codexEnabled,
+        onEnabledChange: (next: boolean) => void setCodexRemote(next),
+        busy: busy || codexBusy,
+        writable,
+        unavailable: codexUnavailable,
+        reasonCode: codexDomainStatus?.error,
+        editable: codexBinaryEditable,
+        pinned: codexBinaryPinned,
+        discovered: codexBinaryDiscovered,
+        value: codexBinary,
+        onValueChange: (next: string) => setCodexBinary(next),
+        onConfirm: () => void setCodexBinaryPath(codexBinary),
+        onUseAuto: () => { setCodexBinary(''); void setCodexBinaryPath('') },
+      })
 
       const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
         React.createElement('summary', null,
@@ -2713,6 +2682,77 @@ window.__ModuleLoader__.load({
  * which left the Codex switch and command field unreachable. The same controls therefore live one tap away in
  * the panel the user actually opens, reading and writing the same two control endpoints as the settings card.
  */
+/**
+ * The Codex switch and command field, rendered the same way wherever they are offered.
+ *
+ * The settings card and the Remote panel dialog show the same thing, so they share this component rather than
+ * two copies of the markup: an unavailable domain greys the switch out, prints the reason, and leaves the
+ * command field editable - pointing it at a working CLI is the fix for the binary case.
+ */
+function CodexConnectionFields(props: {
+  t: Translate
+  enabled: boolean
+  onEnabledChange: (enabled: boolean) => void
+  busy: boolean
+  writable: boolean
+  unavailable: boolean
+  reasonCode?: string
+  editable: boolean
+  pinned: boolean
+  discovered?: string
+  value: string
+  onValueChange: (value: string) => void
+  onConfirm: () => void
+  onUseAuto: () => void
+}): unknown {
+  const { t, busy, writable, unavailable, editable, pinned, discovered, value } = props
+  return React.createElement(React.Fragment, null,
+    React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+      React.createElement('div', null,
+        React.createElement('strong', null, t('codexRemote')),
+        React.createElement('p', null, t('codexRemoteHint'))),
+      React.createElement('input', {
+        type: 'checkbox', role: 'switch', disabled: busy || !writable || unavailable,
+        'aria-label': t('codexRemote'),
+        checked: props.enabled,
+        onChange: (event: Event) => props.onEnabledChange((event.target as HTMLInputElement).checked),
+      })),
+    unavailable
+      ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(props.reasonCode)))
+      : null,
+    React.createElement('div', { className: 'dshRemoteCodexBinary' },
+      React.createElement('input', {
+        type: 'text',
+        value: editable ? value : discovered ?? '',
+        readOnly: !editable,
+        disabled: busy || !writable,
+        className: editable ? '' : 'isDiscovered',
+        placeholder: editable ? t('codexBinaryPlaceholder') : undefined,
+        'aria-label': t('codexBinaryLabel'),
+        onChange: (event: Event) => props.onValueChange((event.target as HTMLInputElement).value),
+        onKeyDown: (event: KeyboardEvent) => {
+          if (event.key === 'Enter' && editable) props.onConfirm()
+        },
+      }),
+      editable
+        ? React.createElement('button', {
+          type: 'button', className: 'dshRemoteDiscard',
+          disabled: busy || !writable,
+          onClick: () => props.onConfirm(),
+        }, t('codexBinaryConfirm'))
+        : null,
+      pinned
+        ? React.createElement('button', {
+          type: 'button', className: 'dshRemoteDiscard',
+          disabled: busy || !writable,
+          onClick: () => props.onUseAuto(),
+        }, t('codexBinaryAuto'))
+        : null,
+      pinned || discovered === undefined
+        ? React.createElement('p', null, pinned ? t('codexBinaryPinned') : t('codexBinaryMissing'))
+        : null))
+}
+
 function CodexConnectionDetails(props: {
   control: <T>(endpoint: string, payload?: unknown) => Promise<T>
   t: Translate
@@ -2781,33 +2821,22 @@ function CodexConnectionDetails(props: {
       ? React.createElement('p', { className: 'dshRemoteSettingsState' }, error ?? t('loadingSettings'))
       : React.createElement(React.Fragment, null,
         React.createElement('p', { className: 'dshRemoteSettingsState' }, stateText),
-        unavailable
-          ? React.createElement('p', { className: 'dshRemoteError' }, t(codexUnavailableKey(status?.error)))
-          : null,
-        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-          React.createElement('div', null,
-            React.createElement('strong', null, t('codexRemote')),
-            React.createElement('p', null, t('codexRemoteHint'))),
-          React.createElement('input', {
-            type: 'checkbox', role: 'switch', disabled: busy || !writable || unavailable,
-            'aria-label': t('codexRemote'),
-            checked: enabled,
-            onChange: (event: Event) => void save({ enabled: (event.target as HTMLInputElement).checked }),
-          })),
-        React.createElement('div', { className: 'dshRemoteField' },
-          React.createElement('label', { htmlFor: 'dsh-remote-codex-binary' }, t('codexBinaryLabel')),
-          React.createElement('input', {
-            id: 'dsh-remote-codex-binary',
-            type: 'text',
-            value: editable ? binary : discovered ?? '',
-            readOnly: !editable,
-            disabled: busy || !writable,
-            placeholder: t('codexBinaryPlaceholder'),
-            onChange: (event: Event) => setBinary((event.target as HTMLInputElement).value),
-          }),
-          React.createElement('p', null, editable
-            ? (pinned ? t('codexBinaryPinned') : t('codexBinaryMissing'))
-            : t('codexBinaryAuto'))),
+        React.createElement(CodexConnectionFields, {
+          t,
+          enabled,
+          onEnabledChange: (next: boolean) => void save({ enabled: next }),
+          busy,
+          writable,
+          unavailable,
+          reasonCode: status?.error,
+          editable,
+          pinned,
+          discovered,
+          value: binary,
+          onValueChange: (next: string) => setBinary(next),
+          onConfirm: () => void save({ binary }),
+          onUseAuto: () => void save({ binary: '' }),
+        }),
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
           React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
           React.createElement('button', {
