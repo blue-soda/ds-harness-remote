@@ -52,13 +52,13 @@ describe('CodexRemoteDomain', () => {
     await utimes(older, new Date(1_000_000), new Date(1_000_000))
     await utimes(newer, new Date(2_000_000), new Date(2_000_000))
 
-    const candidates = codexBinaryCandidates('codex', 'win32', home)
+    const candidates = codexBinaryCandidates('codex', 'win32', home, join(home, 'no-local-app-data'))
     expect(candidates[0]).toBe(newer)
     expect(candidates.at(-1)).toBe('codex')
     // An explicit binary is still used exactly as configured.
-    expect(codexBinaryCandidates('C:/custom/codex.exe', 'win32', home)).toEqual(['C:/custom/codex.exe'])
+    expect(codexBinaryCandidates('C:/custom/codex.exe', 'win32', home, join(home, 'no-local-app-data'))).toEqual(['C:/custom/codex.exe'])
     // No desktop app installed, no bundled candidate.
-    expect(codexBinaryCandidates('codex', 'win32', join(home, 'elsewhere'))).toEqual(['codex'])
+    expect(codexBinaryCandidates('codex', 'win32', join(home, 'elsewhere'), join(home, 'no-local-app-data'))).toEqual(['codex'])
   })
 
   it('stays unavailable when the optional domain is disabled', async () => {

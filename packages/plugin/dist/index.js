@@ -24876,9 +24876,15 @@ var CodexRemoteDomain = class {
     return paths;
   }
 };
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2()) {
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2(), localAppData = process.env.LOCALAPPDATA) {
   if (configured !== "codex") return [configured];
-  if (hostPlatform === "win32") return [...bundledWindowsCodex(userHome), configured];
+  if (hostPlatform === "win32") {
+    return [.../* @__PURE__ */ new Set([
+      ...bundledWindowsCodex(userHome),
+      ...localAppData === void 0 ? [] : bundledWindowsCodexAt(localAppData),
+      configured
+    ])];
+  }
   if (hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
@@ -24906,7 +24912,10 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ])];
 }
 function bundledWindowsCodex(userHome) {
-  const bin = join7(userHome, "AppData", "Local", "OpenAI", "Codex", "bin");
+  return bundledWindowsCodexAt(join7(userHome, "AppData", "Local"));
+}
+function bundledWindowsCodexAt(localAppData) {
+  const bin = join7(localAppData, "OpenAI", "Codex", "bin");
   try {
     const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join7(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync3(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
     const candidate = newest[0]?.candidate;

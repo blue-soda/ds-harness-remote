@@ -1083,9 +1083,19 @@ export function codexBinaryCandidates(
   configured: string,
   hostPlatform: NodeJS.Platform = process.platform,
   userHome: string = homedir(),
+  localAppData: string | undefined = process.env.LOCALAPPDATA,
 ): string[] {
   if (configured !== 'codex') return [configured]
-  if (hostPlatform === 'win32') return [...bundledWindowsCodex(userHome), configured]
+  if (hostPlatform === 'win32') {
+    // Two anchors on purpose: `userHome` comes from homedir(), which is not guaranteed to point at the account
+    // that installed the Codex app (a Desktop shell can run with a different profile), while LOCALAPPDATA is what
+    // the installer itself used. Either one finding the binary is enough.
+    return [...new Set([
+      ...bundledWindowsCodex(userHome),
+      ...(localAppData === undefined ? [] : bundledWindowsCodexAt(localAppData)),
+      configured,
+    ])]
+  }
   if (hostPlatform !== 'darwin') return [configured]
 
   // The platform is a parameter, not necessarily this host: joining with the host flavour would
@@ -1129,7 +1139,16 @@ export function codexBinaryCandidates(
  * @returns the newest bundled binary, or nothing when the app is not installed.
  */
 function bundledWindowsCodex(userHome: string): string[] {
-  const bin = join(userHome, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin')
+  return bundledWindowsCodexAt(join(userHome, 'AppData', 'Local'))
+}
+
+/**
+ * The newest Codex binary under a local app-data directory.
+ * @param localAppData - the directory that contains `OpenAI/Codex/bin`.
+ * @returns the newest bundled binary, or nothing when the app is not installed there.
+ */
+function bundledWindowsCodexAt(localAppData: string): string[] {
+  const bin = join(localAppData, 'OpenAI', 'Codex', 'bin')
   try {
     const newest = readdirSync(bin, { withFileTypes: true })
       .filter(entry => entry.isDirectory())

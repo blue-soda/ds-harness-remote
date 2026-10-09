@@ -357,7 +357,7 @@ const en = {
   codexBinaryPinned: 'Set by hand. Clear the field and confirm to discover it automatically again.',
   codexUnavailableAccount: 'Codex cannot reach your account from this network (region not supported, or the sign-in expired). It returns as soon as the account can be refreshed.',
   codexUnavailableSignIn: 'Codex is not signed in on this host. Sign in with the Codex app, then restart DSH.',
-  codexUnavailableBinary: 'The Codex CLI could not be started here. Install the Codex desktop app, or set the command above to one that works.',
+  codexUnavailableBinary: 'The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.',
   codexUnavailableGeneric: 'Codex is unavailable on this host; the host status records the reason.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
@@ -623,7 +623,7 @@ const zh: Record<keyof typeof en, string> = {
   codexBinaryPinned: '当前为手动指定；清空后确认即可恢复自动发现。',
   codexUnavailableAccount: 'Codex 无法从当前网络访问你的账号（区域不受支持，或登录已过期）。账号恢复可达后 Codex 即回来。',
   codexUnavailableSignIn: '这台 Host 上的 Codex 尚未登录。请先用 Codex 应用登录，然后重启 DSH。',
-  codexUnavailableBinary: '这里的 Codex CLI 无法启动。请安装 Codex 桌面应用，或在上方填写可用的命令。',
+  codexUnavailableBinary: '这里的 Codex CLI 无法启动。请安装 Codex 桌面应用，或在下方填写可用的命令或完整路径。',
   codexUnavailableGeneric: '这台 Host 上的 Codex 当前不可用，具体原因记录在 Host 状态里。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
@@ -2746,7 +2746,9 @@ function CodexConnectionFields(props: {
         type: 'text',
         value: editable ? value : discovered ?? '',
         readOnly: !editable,
-        disabled: busy || !writable,
+        // Never disabled for being unwritable: when the CLI cannot start, this field is the only way out, and a
+        // failed save reports itself in the dialog instead of leaving the user with a dead control.
+        disabled: busy,
         className: editable ? '' : 'isDiscovered',
         placeholder: editable ? t('codexBinaryPlaceholder') : undefined,
         'aria-label': t('codexBinaryLabel'),
@@ -2758,14 +2760,14 @@ function CodexConnectionFields(props: {
       editable
         ? React.createElement('button', {
           type: 'button', className: 'dshRemoteDiscard',
-          disabled: busy || !writable,
+          disabled: busy,
           onClick: () => props.onConfirm(),
         }, t('codexBinaryConfirm'))
         : null,
       pinned
         ? React.createElement('button', {
           type: 'button', className: 'dshRemoteDiscard',
-          disabled: busy || !writable,
+          disabled: busy,
           onClick: () => props.onUseAuto(),
         }, t('codexBinaryAuto'))
         : null,
