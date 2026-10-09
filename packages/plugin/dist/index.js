@@ -22596,7 +22596,7 @@ var ClientModeRuntime = class {
       this.updateConnectionProgress(progressRunId, "authorizing-peer");
       const target2 = await this.authorizeHostPeer(serverDevice);
       const presence = await this.server.presenceFor(targetDeviceId);
-      if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
+      if (!presence.online) throw offlineConnectionError(serverDevice.hostControl);
       const credentials = await this.server.authenticate(identity);
       const rtcFactory = this.config.forceRelay ? void 0 : await this.rtcFactoryProvider({ routeTargets: [this.server.baseUrl] }).catch(() => void 0);
       if (!this.config.forceRelay && rtcFactory === void 0) {
@@ -22927,6 +22927,13 @@ var ClientModeRuntime = class {
     });
   }
 };
+function offlineConnectionError(hostControl) {
+  return hostControl === false ? new ClientModeError(
+    "CONTROL_DISABLED",
+    'This device is not accepting control. Turn on "Allow other users to control this device" on that device.',
+    true
+  ) : new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
+}
 function isCodexSessionLoss(error) {
   const own = error !== null && typeof error === "object" && "code" in error ? error.code : void 0;
   const code = typeof own === "string" ? own : safeErrorCode(error);
