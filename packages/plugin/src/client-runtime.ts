@@ -832,11 +832,16 @@ export class ClientModeRuntime {
         // Report the early attempts, then only occasionally: a Host that stays
         // away would otherwise fill the log every half minute.
         if (attempt < 3 || attempt % 10 === 0) {
+          const detail = connectionFailureDetail(error)
+          const systemCode = typeof detail.systemCode === 'string' ? detail.systemCode : undefined
+          // `code` here is only the error's class - INTERNAL_ERROR when nothing matched - while the connect path's
+          // own code (HOST_OFFLINE, CAPABILITY_MISSING, ...) is what actually says why. That one is logged as the
+          // code, and the prose stays a detail so it does not read like a verdict about the peer.
           this.logger.warn('remote Harness reconnect attempt failed', {
             targetDeviceId: shortId(targetDeviceId),
             attempt,
-            code,
-            ...connectionFailureDetail(error),
+            code: systemCode ?? code ?? 'UNKNOWN',
+            ...detail,
           })
         }
       }

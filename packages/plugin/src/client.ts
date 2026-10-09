@@ -360,6 +360,7 @@ const en = {
   codexUnavailableBinary: 'The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.',
   codexUnavailableGeneric: 'Codex is unavailable on this host ({code}).',
   codexDisabled: 'Codex is switched off on this device, so nobody can use it remotely.',
+  codexRecheck: 'Re-check',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -627,6 +628,7 @@ const zh: Record<keyof typeof en, string> = {
   codexUnavailableBinary: '这里的 Codex CLI 无法启动。请安装 Codex 桌面应用，或在下方填写可用的命令或完整路径。',
   codexUnavailableGeneric: '这台 Host 上的 Codex 当前不可用（{code}）。',
   codexDisabled: '本设备的 Codex 已关闭，其他用户无法远程使用。',
+  codexRecheck: '重新检查',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -2871,6 +2873,14 @@ function CodexConnectionDetails(props: {
         }),
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
           React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? ''),
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDiscard',
+            disabled: busy,
+            // Writes the settings as they stand, which makes the Host restart the Codex connection: the way to
+            // re-check a domain that failed while the account was unreachable, without restarting DSH.
+            onClick: () => void save({}),
+          }, t('codexRecheck')),
           React.createElement('button', {
             type: 'button',
             disabled: busy,

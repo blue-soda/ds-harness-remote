@@ -1835,6 +1835,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableBinary: "The Codex CLI could not be started here. Install the Codex desktop app, or set the command or full path in the field below.",
     codexUnavailableGeneric: "Codex is unavailable on this host ({code}).",
     codexDisabled: "Codex is switched off on this device, so nobody can use it remotely.",
+    codexRecheck: "Re-check",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -2099,6 +2100,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexUnavailableBinary: "\u8FD9\u91CC\u7684 Codex CLI \u65E0\u6CD5\u542F\u52A8\u3002\u8BF7\u5B89\u88C5 Codex \u684C\u9762\u5E94\u7528\uFF0C\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u7528\u7684\u547D\u4EE4\u6216\u5B8C\u6574\u8DEF\u5F84\u3002",
     codexUnavailableGeneric: "\u8FD9\u53F0 Host \u4E0A\u7684 Codex \u5F53\u524D\u4E0D\u53EF\u7528\uFF08{code}\uFF09\u3002",
     codexDisabled: "\u672C\u8BBE\u5907\u7684 Codex \u5DF2\u5173\u95ED\uFF0C\u5176\u4ED6\u7528\u6237\u65E0\u6CD5\u8FDC\u7A0B\u4F7F\u7528\u3002",
+    codexRecheck: "\u91CD\u65B0\u68C0\u67E5",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -3893,6 +3895,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 "div",
                 { className: "dshRemoteSettingsFooter" },
                 React.createElement("p", { className: error === void 0 ? "dshRemoteNotice" : "dshRemoteError" }, error ?? ""),
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteDiscard",
+                  disabled: busy,
+                  // Writes the settings as they stand, which makes the Host restart the Codex connection: the way to
+                  // re-check a domain that failed while the account was unreachable, without restarting DSH.
+                  onClick: () => void save({})
+                }, t("codexRecheck")),
                 React.createElement("button", {
                   type: "button",
                   disabled: busy,

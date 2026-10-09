@@ -22113,11 +22113,13 @@ var ClientModeRuntime = class {
           return;
         }
         if (attempt < 3 || attempt % 10 === 0) {
+          const detail = connectionFailureDetail(error);
+          const systemCode = typeof detail.systemCode === "string" ? detail.systemCode : void 0;
           this.logger.warn("remote Harness reconnect attempt failed", {
             targetDeviceId: shortId2(targetDeviceId),
             attempt,
-            code,
-            ...connectionFailureDetail(error)
+            code: systemCode ?? code ?? "UNKNOWN",
+            ...detail
           });
         }
       }
