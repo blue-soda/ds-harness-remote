@@ -21996,8 +21996,7 @@ var ClientModeRuntime = class {
    */
   restoreCodexCarrier(targetDeviceId) {
     const selection = this.lastWorkspaceSelection;
-    if (selection === void 0 || selection.targetDeviceId !== targetDeviceId) return;
-    if (selection.backend !== "codex") return;
+    if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === void 0) return;
     void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).catch((error) => {
       const code = safeErrorCode(error);
       this.logger.warn("CodeX workspace could not be restored after a reconnect", {
@@ -22893,6 +22892,9 @@ var ClientModeRuntime = class {
     });
   }
 };
+function shouldRestoreCodexCarrier(selection, targetDeviceId) {
+  return selection !== void 0 && selection.targetDeviceId === targetDeviceId && selection.backend === "codex";
+}
 var ClientModeError = class extends Error {
   constructor(code, message, retryable = false) {
     super(message);
