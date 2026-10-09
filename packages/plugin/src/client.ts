@@ -473,7 +473,8 @@ const en = {
   confirmAddWorkspace: 'Add and open',
   showAllWorkspaces: 'Show all DSH workspaces',
   showAllCodexWorkspaces: 'Show all CodeX workspaces',
-  remoteModePrefix: 'Remote mode · ',
+  remoteModeDsh: 'Remote DSH · ',
+  remoteModeCodex: 'Remote Codex · ',
   remoteNetworkP2p: 'P2P',
   remoteNetworkTurn: 'TURN',
   remoteNetworkRelay: 'Relay',
@@ -741,7 +742,8 @@ const zh: Record<keyof typeof en, string> = {
   confirmAddWorkspace: '确认并打开',
   showAllWorkspaces: '显示全部 DSH 工作区',
   showAllCodexWorkspaces: '显示全部 CodeX 工作区',
-  remoteModePrefix: '远程模式 · ',
+  remoteModeDsh: '远程DSH · ',
+  remoteModeCodex: '远程Codex · ',
   remoteNetworkP2p: 'P2P',
   remoteNetworkTurn: 'TURN',
   remoteNetworkRelay: '中继',
@@ -3195,7 +3197,7 @@ function CodexConnectionDetails(props: {
           viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7,
           strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
         }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement('path', { d: 'M8 21h8M12 17v4' })),
-        React.createElement('span', { className: 'dshRemoteModePrefix' }, t('remoteModePrefix')),
+        React.createElement('span', { className: 'dshRemoteModePrefix' }, t(status.backend === 'codex' ? 'remoteModeCodex' : 'remoteModeDsh')),
         React.createElement('span', { className: 'dshRemoteSessionTarget' },
           // While reconnecting the carriers may already describe the local shell, so its name must not
           // stand in for the target: name the Host the reconnect is about, or its short id.
