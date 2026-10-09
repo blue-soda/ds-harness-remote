@@ -713,6 +713,18 @@ export class ClientModeRuntime {
   }
 
   /**
+   * The Codex session is gone while the transport is still up (the Host replaced or switched off its Codex
+   * domain). Deliberately the same entry point as a lost link, so both carriers take one path: quick reconnect,
+   * local fallback and the retry schedule.
+   * @returns nothing; the reconnect runs in the background.
+   */
+  noteCodexSessionLost(): void {
+    const connected = this.connected
+    if (connected === undefined || this.reconnecting !== undefined) return
+    void this.handleRemoteTransportLost(connected.client, connected.target.deviceId, 'codex-closed')
+  }
+
+  /**
    * Check the live session now, outside the cadence.
    *
    * Used when the page becomes visible again, which is when a suspended client is most likely to be
@@ -768,7 +780,7 @@ export class ClientModeRuntime {
   private async handleRemoteTransportLost(
     client: RemoteClientCore,
     targetDeviceId: string,
-    reason: 'transport-closed' | 'link-dropped',
+    reason: 'transport-closed' | 'link-dropped' | 'codex-closed',
   ): Promise<void> {
     if (this.connected?.client !== client) return
     this.supersededClient = undefined
