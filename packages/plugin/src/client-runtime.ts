@@ -1723,6 +1723,26 @@ export class ClientModeRuntime {
  * @param targetDeviceId - the Host the reconnect finished against.
  * @returns true when the Codex carrier has to be rebuilt.
  */
+/**
+ * Whether a Codex RPC failure means the remote session is gone, rather than the request being wrong.
+ *
+ * Closing the Codex switch on the Host replaces its domain, which closes every Codex bridge: the next call from
+ * this client fails with CODEX_CONNECTION_CLOSED even though the transport is still up. That is a session loss like
+ * any other - the same fast reconnect, local fallback and retry schedule - and not an error to show and forget.
+ * The codes are stable on purpose; the prose is not matched against.
+ * @param error - whatever the Codex call threw.
+ * @returns true when the remote Codex session should be treated as lost.
+ */
+export function isCodexSessionLoss(error: unknown): boolean {
+  // The RpcError the bridge throws carries its code as a plain property, which safeErrorCode does not necessarily
+  // surface, so read it first and fall back to the helper for wrapped errors.
+  const own = error !== null && typeof error === 'object' && 'code' in error
+    ? (error as { code?: unknown }).code
+    : undefined
+  const code = typeof own === 'string' ? own : safeErrorCode(error)
+  return code === 'CODEX_CONNECTION_CLOSED' || code === 'CODEX_CLOSED'
+}
+
 export function shouldRestoreCodexCarrier(
   selection: { targetDeviceId: string; backend?: string } | undefined,
   targetDeviceId: string,
