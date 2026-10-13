@@ -18,4 +18,4 @@
 - 保持**一台设备一份身份**：`role` 只存在于连接上；"能否被控制"只看控制开关；关闭控制的主机仍然列出（标注离线）而不隐藏。
 - 新增**脚本化端到端矩阵**（`scripts/remote-e2e.mts`）：2 类会话 × 3 种失去方式（控制开关 / Codex 开关 / 冻结进程）× 3 个阶段（快速窗口 / 重试日程 / 放弃），外加浏览、取消、重启恢复与 Codex 负例。
 
-[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.29...v0.5.0) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.0/README.md)
+[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.4.29...v0.5.0) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.0/README.md)
