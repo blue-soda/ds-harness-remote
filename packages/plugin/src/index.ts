@@ -15,7 +15,7 @@ import {
 } from './config.js'
 import { PluginControlRuntime, type DeepSeekSessionSource, type PluginSettingsBinding } from './control-runtime.js'
 import type { HostWebServerLike } from './control-route.js'
-import { IdentityStore, ensureDeviceDirectory, serverStorageDirectory } from './identity-store.js'
+import { IdentityStore, ensureDeviceDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
 import { ClientServerApi } from './server-api.js'

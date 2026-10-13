@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type {
+  CodexAppCapabilityData,
   CodexAppFrameData,
   CodexAppStreamClosedData,
   CodexAppTransferChunkParams,
@@ -23,8 +24,8 @@ import { RpcError } from '../safe-error.js'
 import type { CodexRemoteDomain } from './domain.js'
 
 export type PublishCodexFrame = (
-  event: 'codex.app.frame' | 'codex.app.stream.closed',
-  data: CodexAppFrameData | CodexAppStreamClosedData,
+  event: 'codex.app.frame' | 'codex.app.stream.closed' | 'codex.app.capability',
+  data: CodexAppFrameData | CodexAppStreamClosedData | CodexAppCapabilityData,
 ) => Promise<void>
 
 interface IncomingTransfer {
@@ -268,6 +269,20 @@ export class CodexPeerBridge {
       }
       await this.publish('codex.app.frame', data)
     }
+  }
+
+  /**
+   * Tell this connection whether the Host can serve Codex, and say it only when that actually changed.
+   *
+   * The per-stream closes below only reach a client that is watching a thread. A session parked on its history,
+   * or a workspace with nothing open, heard nothing until its next call failed - which is why switching Codex
+   * off looked like a plain error instead of a lost session. This states the fact rather than the conclusion, so
+   * the client can decide whether the session it is showing is the one affected.
+   * @param available - whether Codex can be served right now.
+   */
+  async notifyCapability(available: boolean): Promise<void> {
+    if (this.closed) return
+    await this.publish('codex.app.capability', { available }).catch(() => undefined)
   }
 
   async failStreams(reason: CodexAppStreamClosedData['reason'] = 'failed'): Promise<void> {

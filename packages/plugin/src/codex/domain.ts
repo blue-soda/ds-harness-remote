@@ -28,22 +28,41 @@ import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
 /**
+ * How often the domain retries once the fast ladder is spent.
+ *
+ * The failure that lands here is usually transient, and giving up for good meant the user had to re-write the
+ * Codex settings (or restart DSH) to get Codex back after turning a proxy on. A minute is slow enough to be
+ * quiet and fast enough that "it came back by itself" is true.
+ */
+const CODEX_SLOW_RETRY_MS = 60_000
+/**
+ * How long the account probe (`account/read`) may take.
+ *
+ * This probe is a gate: if it fails, the whole Codex domain reads 'unavailable' and the panel hides Codex
+ * settings and workspaces along with it. It used to share the 15s start timeout, which is tighter than any
+ * other request in the system (`APP_SERVER_REQUEST_TIMEOUT_MS` is 60s) and measured too tight in practice: a
+ * cold App Server on a machine with a large Codex state (a 427 MB thread database here) did not answer within
+ * 15s, so a healthy install reported CODEX_ACCOUNT_UNREACHABLE and the Codex half of the product vanished.
+ * A normal request's budget is the honest ceiling - nothing about the first read is cheaper than the rest.
+ */
+const ACCOUNT_PROBE_TIMEOUT_MS = 60_000
+/**
  * How long the whole App Server launch may take.
  *
  * `launchAppServer` tries several binary candidates and each attempt can spend a full request
  * timeout waiting for a binary that will never answer, so a missing or broken install used to
  * cost that timeout several times over. One budget for all candidates keeps the domain's own
- * status honest ('unavailable' in seconds, not tens of seconds) while the existing restart
- * backoff keeps trying in the background.
+ * status honest ('unavailable', not minutes) while the existing restart backoff keeps trying in the
+ * background - the launch never blocks Host readiness.
  *
- * It has to stay above the per-attempt timeout in `app-server.ts` (15s), otherwise the budget
- * expires while the first candidate is still legitimately starting and *every* installation
- * reports CODEX_START_TIMEOUT. That is not hypothetical: the Codex desktop app ships a ~319 MB
- * `codex.exe` whose cold start plus handshake measured 5.3s on the development machine, so the
- * old 5s budget made the whole Codex domain permanently unavailable - no Codex settings, no
- * Codex workspaces - on a machine where the binary was present and healthy.
+ * It has to stay above the slowest per-attempt step, which is now the account probe
+ * ({@link ACCOUNT_PROBE_TIMEOUT_MS}, 60s), otherwise the budget expires while the first candidate is still
+ * legitimately starting and *every* installation reports CODEX_START_TIMEOUT. That is not hypothetical: the
+ * Codex desktop app ships a ~319 MB `codex.exe` whose cold start plus handshake measured 5.3s on the
+ * development machine, so the old 5s budget made the whole Codex domain permanently unavailable - no Codex
+ * settings, no Codex workspaces - on a machine where the binary was present and healthy.
  */
-const CODEX_START_BUDGET_MS = 20_000
+const CODEX_START_BUDGET_MS = 90_000
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
 const CODEX_HISTORY_PAGE_LIMIT = 25
@@ -102,17 +121,40 @@ export class CodexRemoteDomain {
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
   private restartAttempt = 0
+  /** Whether the "fast ladder is spent, retrying slowly" line has been logged for this outage. */
+  private slowRestartLogged = false
   private available = false
   private closed = false
+  /**
+   * The last availability announced to peers, or undefined before the first announcement.
+   *
+   * Announcements are transitions, not states: the Host tells clients *when* Codex came or went, never "your
+   * session is gone". Announcing on every restart made switching Codex **on** read as a loss, and the client
+   * answered a loss with a fresh recovery - which pulled back a view the user had just cancelled.
+   */
+  private announcedAvailable?: boolean
+  /**
+   * Bumped by every restart() and close().
+   *
+   * A launch that began before the switch was flipped can finish after it, and its completion used to write
+   * `available = true` onto a Codex the user had switched off - which made the next "switch on" look like a
+   * transition out of availability and produced the false loss notice. Work from an older generation is discarded.
+   */
+  private generation = 0
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
   private unavailableCode?: string
 
   constructor(
-    readonly config: ResolvedCodexConfig,
+    config: ResolvedCodexConfig,
     private readonly logger: SafeLogger,
     private readonly createAppServer: AppServerFactory = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger),
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
-  ) {}
+  ) {
+    this.config = config
+  }
+
+  /** The live configuration; replaced in place by {@link restart}. */
+  config: ResolvedCodexConfig
 
   async start(): Promise<void> {
     if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
@@ -375,8 +417,31 @@ export class CodexRemoteDomain {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.generation += 1
     await this.teardown()
     this.state = this.config.enabled ? 'unavailable' : 'disabled'
+  }
+
+  /**
+   * State the Codex capability to every attached connection - and only when it actually changed.
+   *
+   * This is the fact, not the conclusion: an unavailable Codex means "the session you are watching is gone" to a
+   * client that is watching one, and means nothing to a client that is not. Sending it only on a real transition
+   * is what keeps "switch Codex on" from being reported as a loss.
+   * @returns when every attached connection has been told.
+   */
+  private async announceCapability(): Promise<void> {
+    const available = this.isAvailable()
+    // The first observation seeds the state without publishing: a client that attaches later reads availability
+    // from the capability probe, and announcing the state it is joining adds nothing but noise.
+    if (this.announcedAvailable === undefined) {
+      this.announcedAvailable = available
+      return
+    }
+    if (available === this.announcedAvailable) return
+    this.announcedAvailable = available
+    this.logger.info('Codex capability changed; telling every attached connection', { available })
+    await Promise.all([...this.peers.values()].map(peer => peer.notifyCapability(available).catch(() => undefined)))
   }
 
   /**
@@ -385,13 +450,36 @@ export class CodexRemoteDomain {
    * Deliberately not close()+start(): close() is terminal, so that pair left the domain dead for the rest of the
    * process (the bug behind "the switch never comes back"). This shares close()'s teardown without setting the
    * terminal flag, and a disabled configuration simply stops - no launch, state `disabled`.
+   *
+   * The per-connection bridges are deliberately *kept*. They are the attached Remote clients' only handle on
+   * this Host's Codex, and tearing them down here is what left every one of them holding a closed bridge:
+   * the reported "The Codex connection is closed" that no refresh could clear, because nothing short of a full
+   * transport reconnect could get a working bridge again. Everything the App Server owns - live streams, turn
+   * leases, approvals, permission snapshots - is released instead, which is exactly what a crash already did.
+   * @param config - the configuration to apply, when the caller changed it.
    * @returns when the replacement attempt finished.
    */
-  async restart(): Promise<void> {
+  async restart(config?: ResolvedCodexConfig): Promise<void> {
     if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
-    await this.teardown()
+    if (config !== undefined) this.config = config
+    // This restart retires the App Server that is answering right now, so any launch still in flight belongs to the
+    // previous generation and must not write state when it lands.
+    this.generation += 1
+    const peers = [...this.peers.values()]
+    await Promise.all(peers.map(peer => peer.failStreams('failed')))
+    // An explicit restart replaces the App Server on purpose, but not out from under a launch that is still
+    // answering its account probe: closing that one produced a `CODEX_CLOSED` probe failure and left the domain
+    // reporting a closed Codex. Let the launch settle, then release what it produced.
+    await this.launching?.catch(() => undefined)
+    await this.releaseAppServer()
+    // Switching Codex *off* stops serving: one transition, told once. Replacing the App Server while Codex stays
+    // enabled is not a loss - the replacement is on its way, and if it never arrives the failure path says so.
+    // Announcing the gap of a replacement made the client start a recovery nobody asked for (switching Codex on
+    // restarts the domain, so "Codex came back" arrived as "Codex just vanished").
+    if (!this.config.enabled) await this.announceCapability()
     this.unavailableCode = undefined
     this.restartAttempt = 0
+    this.slowRestartLogged = false
     if (!this.config.enabled) {
       this.state = 'disabled'
       return
@@ -399,14 +487,26 @@ export class CodexRemoteDomain {
     await this.start()
   }
 
-  /** Release every live resource; shared by close() (terminal) and restart() (not). */
+  /** Release every live resource; shared by close() (terminal) and used by close() alone. */
   private async teardown(): Promise<void> {
-    this.available = false
-    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
-    this.restartTimer = undefined
+    // Peers first: closing a bridge is what tells the App Server to decline its pending approvals, so the
+    // process has to still be there.
     for (const bridge of [...this.peers.values()]) await bridge.closeAll()
     this.peers.clear()
     this.peerDeviceIds.clear()
+    await this.releaseAppServer()
+  }
+
+  /**
+   * Release everything that belongs to the App Server, keeping the per-connection bridges.
+   *
+   * Shared by restart() and by a crash: in both cases the bridges must outlive the process so an attached
+   * client's next call simply reaches the replacement instead of failing for good.
+   */
+  private async releaseAppServer(): Promise<void> {
+    this.available = false
+    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+    this.restartTimer = undefined
     this.turnOwners.clear()
     this.permissionPresets.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
@@ -421,6 +521,29 @@ export class CodexRemoteDomain {
   }
 
   /**
+   * The launch in flight, if any.
+   *
+   * Two overlapping launches fight over `this.appServer`, and whichever finishes first disposes the other's App
+   * Server - which is answering its account probe at that moment, so the probe fails with `CODEX_CLOSED` and the
+   * domain reports a closed Codex on a machine where nothing was closed. One launch at a time, and
+   * `restart()` waits for it instead of closing it out from under the probe.
+   */
+  private launching?: Promise<void>
+
+  /**
+   * Launch once, joining the launch already in flight instead of starting a second one.
+   * @returns when this launch settled (either way).
+   */
+  private launchAppServerOnce(): Promise<void> {
+    if (this.launching !== undefined) return this.launching
+    const launch = this.launchAppServer().finally(() => {
+      if (this.launching === launch) this.launching = undefined
+    })
+    this.launching = launch
+    return launch
+  }
+
+  /**
    * Launch the App Server within {@link CODEX_START_BUDGET_MS}.
    *
    * The losing side of the race keeps running until the disposal in start()'s catch stops it, so
@@ -430,7 +553,7 @@ export class CodexRemoteDomain {
    */
   private async launchWithinBudget(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    const attempt = this.launchAppServer()
+    const attempt = this.launchAppServerOnce()
     attempt.catch(() => undefined)
     try {
       await Promise.race([
@@ -448,20 +571,36 @@ export class CodexRemoteDomain {
   }
 
   private async launchAppServer(): Promise<void> {
+    let firstError: unknown
     let lastError: unknown
+    let index = 0
     for (const binary of codexBinaryCandidates(this.config.binary)) {
+      index += 1
       try {
         await this.launchAppServerCandidate(binary)
         return
       } catch (error) {
+        // One line per candidate, by index and code only (never the path): the last candidate's failure used to
+        // be the only one reported, so a missing PATH entry (`ENOENT spawn codex`) hid whatever the bundle the
+        // installer actually shipped failed with - and sent the reader after the wrong cause entirely.
+        this.logger.warn('Codex App Server candidate failed', { candidate: index, code: errorCode(error) })
+        firstError ??= error
         lastError = error
         if (!canTryNextBinary(error)) throw error
       }
     }
-    throw lastError ?? new RpcError('CODEX_START_FAILED', 'Codex App Server could not be started.')
+    // Report the failure that means something. The candidates after the first are fallbacks - on Windows and
+    // macOS the last one is the bare `codex` PATH entry, which this machine does not have - so letting its
+    // `CODEX_BINARY_UNAVAILABLE` stand in for a real cause made an unreachable account read as a missing
+    // binary, both in the panel and in the field report that started this.
+    const chosen = errorCode(lastError) === 'CODEX_BINARY_UNAVAILABLE' && firstError !== undefined ? firstError : lastError
+    throw chosen ?? new RpcError('CODEX_START_FAILED', 'Codex App Server could not be started.')
   }
 
   private async launchAppServerCandidate(binary: string): Promise<void> {
+    // The generation this launch belongs to. A switch flipped while it runs makes it stale, and a stale launch must
+    // not write state - that is what let a Codex the user had switched off report itself available again.
+    const generation = this.generation
     const appServer = this.createAppServer(binary, this.logger)
     this.appServer = appServer
     this.unsubscribeInbound = appServer.onInbound(message => {
@@ -478,11 +617,18 @@ export class CodexRemoteDomain {
       await appServer.start()
       let account: unknown
       try {
-        account = await appServer.call('account/read', { refreshToken: false }, 15_000)
+        account = await appServer.call('account/read', { refreshToken: false }, ACCOUNT_PROBE_TIMEOUT_MS)
       } catch (error) {
         // The account probe is a gate: its failure decides whether Codex exists at all in the UI, so a raw
         // CODEX_UPSTREAM_ERROR made a region-blocked account look like a deleted feature. Classify it instead -
-        // only the classification travels, never the upstream text.
+        // only the classification travels, never the upstream text. The raw code (and the upstream's own error
+        // code, when it is an identifier) is logged, because the classification folds "blocked by region", "the
+        // account did not answer in time" and "upstream refused" into one word and those need different answers.
+        const upstreamCode = (error as { upstreamCode?: unknown }).upstreamCode
+        this.logger.warn('Codex account probe failed', {
+          code: errorCode(error),
+          ...(upstreamCode === undefined ? {} : { upstreamCode: String(upstreamCode) }),
+        })
         throw classifyAccountProbeFailure(error)
       }
       if (!accountCanRun(account)) {
@@ -492,11 +638,26 @@ export class CodexRemoteDomain {
         await appServer.close().catch(() => undefined)
         return
       }
+      // The user may have switched Codex off (or restarted it) while this candidate was starting. A launch that
+      // outlived that must not mark the domain available: doing so made the *next* "switch on" announce a lost
+      // domain for a session nobody had, and it advertised Codex on a Host that had it off.
+      if (generation !== this.generation || !this.config.enabled) {
+        this.logger.info('Codex App Server started after the domain moved on; releasing it', {
+          generation: this.generation - generation,
+          enabled: this.config.enabled,
+        })
+        await this.disposeAppServer(appServer)
+        this.available = false
+        this.state = this.config.enabled ? 'restarting' : 'disabled'
+        return
+      }
       this.available = true
       this.state = 'ready'
       this.restartAttempt = 0
       this.unavailableCode = undefined
       this.logger.info('Codex Remote domain ready')
+      // Codex is serving: one transition, told once - and `available: true` is never a loss for anyone.
+      await this.announceCapability()
     } catch (error) {
       await this.disposeAppServer(appServer)
       throw error
@@ -514,15 +675,35 @@ export class CodexRemoteDomain {
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
     await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
+    // The App Server is gone, so every attached client has lost its session - state the fact once, and the same
+    // recovery puts it back once the replacement answers.
+    await this.announceCapability()
     await this.disposeAppServer(appServer)
     this.scheduleRestart()
   }
 
   private scheduleRestart(): void {
     if (this.closed || this.restartTimer !== undefined) return
+    if (!this.config.enabled) return
     if (this.restartAttempt >= this.restartDelaysMs.length) {
+      // The fast ladder is spent, but the cause is usually transient - the Codex app replacing its binary, a
+      // region that comes back, a proxy the user just switched on. Stopping here for good is what left the
+      // panel reading "unavailable" until the settings were re-written by hand, so keep a slow retry instead.
+      // The state stays `unavailable`: that is the truth right now, and the retry is not a promise.
       this.state = 'unavailable'
-      this.logger.warn('Codex App Server restart attempts exhausted', { attempts: this.restartAttempt })
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = undefined
+        void this.restartAfterFailure()
+      }, CODEX_SLOW_RETRY_MS)
+      this.restartTimer.unref?.()
+      // Once per outage, not once per minute: a machine without Codex must not fill the log.
+      if (!this.slowRestartLogged) {
+        this.slowRestartLogged = true
+        this.logger.warn('Codex App Server restart attempts exhausted; retrying every ' + String(CODEX_SLOW_RETRY_MS) + 'ms', {
+          attempts: this.restartAttempt,
+          code: this.unavailableCode,
+        })
+      }
       return
     }
     const delayMs = Math.max(0, this.restartDelaysMs[this.restartAttempt] ?? 0)
@@ -537,9 +718,17 @@ export class CodexRemoteDomain {
   }
 
   private async restartAfterFailure(): Promise<void> {
-    if (this.closed) return
+    // A rung scheduled before the user switched Codex off can still fire after it. Launching then would mark the
+    // disabled domain available again - and the next "switch on" would announce a lost domain for a session that
+    // nobody had, which the client turned into a fresh recovery on top of the user's own cancel.
+    if (this.closed || !this.config.enabled) return
     try {
-      await this.launchAppServer()
+      await this.launchAppServerOnce()
+      if (!this.config.enabled) {
+        // Switched off while this launch was running: nothing about it may be left serving.
+        await this.releaseAppServer()
+        this.state = 'disabled'
+      }
     } catch (error) {
       this.available = false
       this.state = 'restarting'

@@ -118,8 +118,13 @@ interface CodexDirectoryListing {
   truncated: boolean
 }
 
+/** What noticed that the remote Codex session is gone; logged so a report is answerable without a rerun. */
+export type CodexSessionLossTrigger = 'call-failed' | 'stream-closed' | 'domain-notice'
+
 interface CodexClientLike {
   request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown>
+  /** Optional: the Host's domain-level "my Codex is gone" notice. */
+  watchCapability?(handler: (available: boolean) => void): () => void
   subscribe(
     threadId: string,
     onFrame: (frame: { method: string; params: unknown }) => void,
@@ -309,9 +314,16 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     private readonly hostCarrier?: RemoteTypertGatewayTarget,
   ) {
     this.api = this.createApiProxy()
+    // The Host states whether Codex is available; whether that costs this client its session is decided here,
+    // because only this side knows what is on screen. `available: true` is never a loss - it is Codex coming back,
+    // and a session that still needs restoring is put back by the retry ladder, not by the announcement.
+    this.stopCapabilityWatch = this.client.watchCapability?.((available) => {
+      if (!available) this.onSessionLost?.('domain-notice')
+    })
   }
 
-  private onSessionLost?: () => void
+  private onSessionLost?: (trigger: CodexSessionLossTrigger) => void
+  private readonly stopCapabilityWatch?: () => void
 
   /**
    * Register what to do when a Codex call fails because the session is gone.
@@ -319,10 +331,10 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
    * Set after construction rather than passed in, so neither the constructor nor the static factory signature has to
    * change: the runtime hooks its reconnect entry point here. The Host replacing or switching off its Codex domain
    * closes the bridges, and the next call would otherwise just be shown as an error.
-   * @param handler - called once per detected loss, before the failure is returned.
+   * @param handler - called once per detected loss, with what detected it, before the failure is returned.
    * @returns nothing.
    */
-  watchCodexSessionLost(handler: () => void): void {
+  watchCodexSessionLost(handler: (trigger: CodexSessionLossTrigger) => void): void {
     this.onSessionLost = handler
   }
 
@@ -379,7 +391,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     for (const sessionId of candidates) {
       const threadId = nativeThreadId(sessionId)
       try {
-        const thread = await this.fetchThread(threadId, signal)
+        await this.fetchThread(threadId, signal)
         return sessionId
       } catch {
         // A currently active or concurrently changing CodeX Thread may reject
@@ -476,7 +488,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         }
       }
     } catch (error) {
-      if (isCodexSessionLoss(error)) this.onSessionLost?.()
+      if (isCodexSessionLoss(error)) this.onSessionLost?.('call-failed')
       return failFrom(error)
     }
   }
@@ -512,6 +524,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.stopCapabilityWatch?.()
     for (const stream of this.workspaceStreams) stream.close()
     for (const stream of this.controlStreams) stream.close()
     for (const stream of this.eventStreams.values()) stream.close()
@@ -822,7 +835,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         threadId,
         frame => this.acceptCodexFrame(follow, frame),
         signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow),
+        reason => this.noteRemoteStreamClosed(follow, reason),
       )
       follow.close = () => stream.close()
     } catch (error) {
@@ -1704,7 +1717,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         threadId,
         frame => this.acceptCodexFrame(follow, frame),
         controller.signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow),
+        reason => this.noteRemoteStreamClosed(follow, reason),
       )
       follow.close = async () => {
         controller.abort()
@@ -1727,6 +1740,25 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.follows.delete(follow)
     follow.queue.close()
     this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
+  }
+
+  /**
+   * The Host closed a Codex stream this client was following.
+   *
+   * `failed` and `peer-disconnected` mean the Codex session behind it is gone - the Host switched Codex off,
+   * replaced its domain, or its App Server died. That is a lost session like any other, so the runtime is told
+   * now, which is what puts "reconnecting" on screen immediately instead of leaving the user to discover it as
+   * an error the next time they touch the session. A stream we closed ourselves, or one that simply ended,
+   * says nothing about the session.
+   * @param follow - the projection that was following it.
+   * @param reason - why the peer closed the stream.
+   */
+  private noteRemoteStreamClosed(
+    follow: FollowState,
+    reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected',
+  ): void {
+    if (reason === 'failed' || reason === 'peer-disconnected') this.onSessionLost?.('stream-closed')
+    this.closeFollowAfterRemoteStreamClosed(follow)
   }
 
   private async refreshAndPublishWorkspaces(): Promise<void> {

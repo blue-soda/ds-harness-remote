@@ -111,7 +111,7 @@
       }
     },
     {
-      "name": "reject-client-device-with-harness-version",
+      "name": "accept-device-registration-with-optional-harness-version",
       "operation": "parseDeviceRegistrationRequest",
       "input": {
         "v": 1,
@@ -126,7 +126,18 @@
         }
       },
       "expect": {
-        "accepted": false
+        "accepted": true,
+        "value": {
+          "v": 1,
+          "device": {
+            "deviceId": "0198f7c0-1234-7abc-8def-0123456789ab",
+            "name": "Android phone",
+            "platform": "android",
+            "identityKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "clientVersion": "0.4.9",
+            "harnessVersion": "0.1.2-rc.1"
+          }
+        }
       }
     },
     {
@@ -168,7 +179,7 @@
       }
     },
     {
-      "name": "reject-client-registration-with-host-code",
+      "name": "accept-registration-code-request-with-legacy-role",
       "operation": "parseHostRegistrationCodeRequest",
       "input": {
         "v": 1,
@@ -183,7 +194,18 @@
         }
       },
       "expect": {
-        "accepted": false
+        "accepted": true,
+        "value": {
+          "v": 1,
+          "code": "ABCD-EFGH",
+          "device": {
+            "deviceId": "0198f7c0-1234-7abc-8def-0123456789ab",
+            "name": "Android phone",
+            "platform": "android",
+            "identityKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "clientVersion": "0.4.9"
+          }
+        }
       }
     },
     {

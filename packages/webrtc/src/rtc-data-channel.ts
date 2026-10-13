@@ -17,7 +17,7 @@ import {
   type RtcStats,
   type RtcStatsEntry,
 } from './rtc-adapter.js'
-import { RtcChunkCodec, RTC_CHUNK_MAX_MESSAGE_BYTES } from './rtc-chunking.js'
+import { RtcChunkCodec } from './rtc-chunking.js'
 
 export type RtcRole = 'initiator' | 'responder'
 export type RtcSelectedTransport = 'lan' | 'p2p' | 'turn'

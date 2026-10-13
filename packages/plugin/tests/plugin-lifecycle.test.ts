@@ -253,7 +253,10 @@ describe('Cordis plugin lifecycle', () => {
 
     await fiber.dispose()
     await ctx.fiber.dispose()
-  })
+    // Activation really launches the Codex domain (which fails on a machine without a usable Codex) and its
+    // teardown can wait up to two seconds for a child that ignores SIGTERM, so a loaded machine used to tip this
+    // over the five-second default. Nothing here waits on the network.
+  }, 20_000)
 
   it('disables legacy loader entries during startup', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-legacy-loader-'))

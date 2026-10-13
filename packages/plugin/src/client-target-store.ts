@@ -17,6 +17,20 @@ export interface ClientTargetRecord {
   hostDeviceId?: string
   /** Display name of the Host, so a restore can name it before any connection exists. */
   hostName?: string
+  /**
+   * The workspace the user was watching on that Host.
+   *
+   * A recovery has to return the user to the *same* session, and after a process restart nothing else
+   * remembers whether that was a DSH workspace or a Codex one - restoring the wrong kind is the failure
+   * mode this field exists to prevent. `workspacePath` is the durable identity of a Codex workspace,
+   * because a restarted Codex domain renumbers its projects.
+   */
+  workspace?: {
+    workspaceId: string
+    kind: 'harness' | 'codex'
+    workspacePath?: string
+    sessionId?: string
+  }
   savedAt: number
 }
 
@@ -56,6 +70,7 @@ export class ClientTargetStore {
       if (record.mode === 'remote' && (typeof record.hostDeviceId !== 'string' || record.hostDeviceId.length === 0)) {
         return undefined
       }
+      const workspace = parseWorkspace(record.workspace)
       return {
         schemaVersion: 1,
         mode: record.mode,
@@ -64,6 +79,7 @@ export class ClientTargetStore {
           ? { hostDeviceId: record.hostDeviceId }
           : {}),
         ...(typeof record.hostName === 'string' && record.hostName.length > 0 ? { hostName: record.hostName } : {}),
+        ...(workspace === undefined ? {} : { workspace }),
         savedAt: typeof record.savedAt === 'number' ? record.savedAt : 0,
       }
     } catch {
@@ -72,13 +88,21 @@ export class ClientTargetStore {
   }
 
   /** Record the current target. Failures reach the caller so a boot can log them. */
-  async save(target: { mode: 'local' | 'remote'; serverUrl?: string; hostDeviceId?: string; hostName?: string }): Promise<void> {
+  async save(target: {
+    mode: 'local' | 'remote'
+    serverUrl?: string
+    hostDeviceId?: string
+    hostName?: string
+    workspace?: ClientTargetRecord['workspace']
+  }): Promise<void> {
+    const workspace = parseWorkspace(target.workspace)
     const value: ClientTargetRecord = {
       schemaVersion: 1,
       mode: target.mode,
       ...(target.serverUrl === undefined ? {} : { serverUrl: target.serverUrl }),
       ...(target.hostDeviceId === undefined ? {} : { hostDeviceId: target.hostDeviceId }),
       ...(target.hostName === undefined ? {} : { hostName: target.hostName }),
+      ...(workspace === undefined ? {} : { workspace }),
       savedAt: Date.now(),
     }
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
@@ -88,5 +112,28 @@ export class ClientTargetStore {
     await chmod(temporary, 0o600)
     await replaceFile(temporary, this.file)
     await chmod(this.file, 0o600)
+  }
+}
+
+/**
+ * Read a persisted workspace selection.
+ *
+ * Tolerant on purpose: a field this build does not understand is dropped rather than failing the whole
+ * record, so an older or newer file still restores the Host it names.
+ * @param value - the raw `workspace` field.
+ * @returns the selection, or undefined when it cannot identify a workspace.
+ */
+function parseWorkspace(value: unknown): ClientTargetRecord['workspace'] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as Partial<NonNullable<ClientTargetRecord['workspace']>>
+  if (typeof record.workspaceId !== 'string' || record.workspaceId.length === 0) return undefined
+  if (record.kind !== 'harness' && record.kind !== 'codex') return undefined
+  return {
+    workspaceId: record.workspaceId,
+    kind: record.kind,
+    ...(typeof record.workspacePath === 'string' && record.workspacePath.length > 0
+      ? { workspacePath: record.workspacePath }
+      : {}),
+    ...(typeof record.sessionId === 'string' && record.sessionId.length > 0 ? { sessionId: record.sessionId } : {}),
   }
 }

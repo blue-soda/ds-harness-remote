@@ -34,7 +34,7 @@ import { CodexRemoteDomain } from './codex/domain.js'
 import { AcpGateway, StdioAcpAdapter } from './acp.js'
 import { execFileSync } from 'node:child_process'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
-import { RpcError } from './safe-error.js'
+import { RpcError, safeErrorCode } from './safe-error.js'
 import { CodexWorkspaceBridge, CodexWorkspaceState, type RemoteTerminalSpawner } from './codex-workspace-bridge.js'
 
 export interface HostConnectedClient {
@@ -128,7 +128,7 @@ export class HostPluginRuntime {
             this.harnessVersion,
             new TerminalPolicy(() => this.terminalEnabled, context.peerDeviceId, this.terminalOwners),
             new CodexWorkspaceBridge(
-              (threadId, signal) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+              threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
               () => this.terminalEnabled,
               this.codexWorkspaceState,
               this.terminalSpawner,
@@ -264,9 +264,15 @@ export class HostPluginRuntime {
    * user who only wants to stop being remotely reachable would have to authorize
    * again and would consume a device identity. Pausing closes the connection and
    * keeps both.
+   *
+   * The Server's own flag is written here as well, not only by the panel's authorization endpoint:
+   * it is what makes the device read as "not accepting control" to other clients and what makes the
+   * Server refuse the next `role=host` hello. Leaving it to one entry point is how a device could
+   * look online and controlling while its switch said off.
    */
   async pauseHostConnection(): Promise<void> {
     this.paused = true
+    await this.recordHostControl(false)
     await this.serverConnection?.stop()
     this.logger.info('Host connection paused')
   }
@@ -275,8 +281,26 @@ export class HostPluginRuntime {
   async resumeHostConnection(): Promise<void> {
     const wasPaused = this.paused
     this.paused = false
+    // The flag first: the Server refuses a host hello while it still believes control is off, so
+    // resuming before it knows would only get the connection refused.
+    await this.recordHostControl(true)
     this.serverConnection?.resume()
     if (wasPaused) this.logger.info('Host connection resumed')
+  }
+
+  /**
+   * Mirror the control switch onto the Server.
+   *
+   * A machine that is signed out has no credential to write it with, and that is not an error: the
+   * local pause still holds, and the next sign-in writes the flag from the switch.
+   * @param enabled - whether this machine accepts control.
+   */
+  private async recordHostControl(enabled: boolean): Promise<void> {
+    try {
+      await this.serverApi?.setHostControl(enabled)
+    } catch (error) {
+      this.logger.warn('could not record the control switch on the Server', { code: errorCode(error) })
+    }
   }
 
   /** Re-read this device's credentials from disk, so a sign-in is picked up without a restart. */
@@ -284,22 +308,32 @@ export class HostPluginRuntime {
     this.serverApi?.reloadCredentials()
   }
 
-  /** Record whether this machine accepts control, on the Server, keeping identity and credentials. */
+  /**
+   * Record whether this machine accepts control, on the Server.
+   *
+   * This is the explicit, failing form, used when the panel asks for the switch and must be told if the
+   * Server refused. {@link pauseHostConnection} and {@link resumeHostConnection} write the same flag
+   * best-effort, so the two stay consistent whichever entry point the caller used.
+   */
   async setHostControl(enabled: boolean): Promise<void> {
     await this.serverApi?.setHostControl(enabled)
     this.logger.info(enabled ? 'Host control enabled' : 'Host control disabled')
   }
-
-  isPaused(): boolean { return this.paused }
 
   reconnectHost(): void {
     if (this.closed) throw new Error('remote runtime is closed')
     if (this.serverConnection === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before reconnecting.', false)
     }
-    // Asking to reconnect is explicit: it lifts a pause rather than being
-    // swallowed by it, so the button always has an effect.
-    this.paused = false
+    // A pause is the user's own decision, not a broken connection. Reconnecting used to lift it, which
+    // made "this machine does not accept control" quietly untrue - the switch is the only way back.
+    if (this.paused) {
+      throw new ServerApiError(
+        'CONTROL_DISABLED',
+        'This device is not accepting control. Turn on "Allow control of this device" first.',
+        false,
+      )
+    }
     this.serverConnection.reconnect()
   }
 
@@ -384,20 +418,18 @@ export class HostPluginRuntime {
   /**
    * Restart the Codex connection so a changed setting can apply without restarting DSH.
    *
-   * NOT WIRED YET, and deliberately so: `CodexRemoteDomain.close()` is terminal - it sets `closed` and every
-   * later start is a no-op - so close()+start() leaves the domain dead instead of restarting it. A working
-   * version needs the domain to support reopening; until then a settings change waits for a DSH restart.
+   * The domain is restarted in place, which keeps every connection's Codex bridge alive across the change.
+   * Replacing the instance instead (close the old, build a new one) left each attached client holding a bridge
+   * that belonged to a retired domain: every later Codex call answered "The Codex connection is closed" until
+   * that client happened to reconnect on its own - and nothing in the panel could bring it back.
    * @returns when the restart attempt finished.
    */
   async restartCodex(config: ResolvedCodexConfig): Promise<void> {
-    // The configuration is injected at construction and read all over the domain, so applying it means
-    // replacing the instance rather than mutating it: the previous one is closed (which drops its Codex peers,
-    // exactly what a disabled or redirected Codex should do) and a fresh one starts from the new configuration.
-    // Every other reference goes through `this.codex`, so nothing else has to be rebuilt.
-    const previous = this.codex
-    this.codex = new CodexRemoteDomain(config, this.logger)
-    await previous.close().catch(() => undefined)
-    await this.codex.start().catch(() => undefined)
+    await this.codex.restart(config)
+    this.logger.info('Codex Remote domain restarted', {
+      enabled: config.enabled,
+      available: this.codex.isAvailable(),
+    })
   }
 
   codexStatus(): ReturnType<CodexRemoteDomain['status']> {
@@ -536,6 +568,15 @@ export class HostPluginRuntime {
 }
 
 function shortId(value: string): string { return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}` }
+
+/** The stable code of a failure, including the Server API's own errors. Identifier only - never a message. */
+function errorCode(error: unknown): string {
+  const own = error !== null && typeof error === 'object' && 'code' in error
+    && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
+  return own ?? safeErrorCode(error)
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

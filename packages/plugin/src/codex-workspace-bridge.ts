@@ -133,10 +133,6 @@ export class CodexWorkspaceBridge {
     this.spawnTerminal = spawnTerminal
   }
 
-  isCodeXScope(value: unknown): boolean {
-    return parseCodexSessionId(value) !== undefined
-  }
-
   async call(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult | undefined> {
     const args = argsOf(payload)
     const scope = args.workspaceFileScopeId

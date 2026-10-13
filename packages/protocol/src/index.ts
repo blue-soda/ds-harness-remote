@@ -137,6 +137,15 @@ export const remoteEvents = [
   'harness.remote.stream.closed',
   'codex.app.frame',
   'codex.app.stream.closed',
+  /**
+   * The Host's Codex capability changed state (it was switched on or off, or its App Server came and went).
+   *
+   * The Host states the *fact* - availability - and never the conclusion: only a client knows which session it is
+   * showing, so only it can decide whether an unavailable Codex means "the session I am watching is gone" (start
+   * the recovery ladder) or "a feature I am not using went away" (do nothing). An announcement must be sent only
+   * on a real transition, so switching Codex *on* can never read as a loss.
+   */
+  'codex.app.capability',
   'acp.session.update',
   'acp.session.request_permission',
   'acp.session.closed',
@@ -647,6 +656,11 @@ export interface CodexAppFrameData {
 export interface CodexAppStreamClosedData {
   streamId: string
   reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected'
+}
+
+/** Payload of `codex.app.capability`: whether the Host can serve Codex right now. */
+export interface CodexAppCapabilityData {
+  available: boolean
 }
 
 export interface CodexAppTransferOpenParams {

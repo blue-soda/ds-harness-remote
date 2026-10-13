@@ -159,28 +159,30 @@ REST/Control JSON 中的 key、nonce、handshake 和 ciphertext 使用无 paddin
 {
   "deviceId": "01K...",
   "name": "Workstation",
-  "role": "host",
   "platform": "linux",
   "identityKey": "base64url-x25519-public-key",
-  "clientVersion": "0.1.0"
+  "clientVersion": "0.1.0",
+  "harnessVersion": "0.1.2-rc.1"
 }
 ```
 
 规则：
 
-- `role` 仅为 `host` 或 `client`。
+- 只有一种描述符形状（`AccountDeviceDescriptor`）。一台设备一份身份，**描述符里没有 `role`**：唯一的角色是
+  连接角色（`hello` 里声明），设备身份与"能不能被控制"无关。契约见
+  [`config-and-role.md`](config-and-role.md)。
+- 描述符 schema **故意不严格**：旧安装多发的 `role` 被**忽略**而不是被拒收，否则它们连注册都会失败。
 - `deviceId` 必须是 ULID 或 UUID。新设备应该使用 UUIDv7 或 ULID。
 - `name` 必须包含可见文本。UTF-8 编码后不得超过 128 字节。
 - `platform` 必须匹配 `[a-z0-9][a-z0-9._-]*`。长度不得超过 64 字节。
 - `identityKey` 是 Noise static X25519 public key。
 - `identityKey` 必须是 32 字节公钥的规范无 padding Base64URL。编码长度必须是 43 个字符。
 - `clientVersion` 和 `harnessVersion` 的 UTF-8 编码长度必须是 1 到 64 字节。
-- Host 可在注册时携带 `harnessVersion`，Server 必须接受；Host 也会从 Harness
-  `host.describe` 读取运行中版本并在首次 `hello` 中刷新上报。
-- Client descriptor 禁止携带 `harnessVersion`。
+- `harnessVersion` 是**可选**的：任何设备在注册时都可以携带，Server 必须接受；能提供 Harness 的设备
+  还会从 Harness `host.describe` 读取运行中版本并在首次 `hello` 中刷新上报。
 - `name` 是不可信显示字符串，限制长度并转义。
 - Server 禁止接受同一 deviceId 替换为不同 identityKey。
-- Descriptor 和注册 envelope 禁止包含未定义字段。
+- 注册 envelope 本身是严格的：未知的顶层字段仍然必须被拒绝（只有描述符对 `role` 宽容）。
 
 ## 8. 设备注册与 Token
 
@@ -205,7 +207,6 @@ WebSocket 不得跨域混用。注册成功后，Server 为同一账号下的 Ho
   "device": {
     "deviceId": "01K...",
     "name": "Chrome on Pixel",
-    "role": "client",
     "platform": "web",
     "identityKey": "...",
     "clientVersion": "0.1.0"
@@ -1070,6 +1071,22 @@ Android Client 可在相同 capability 探测后直接消费该 `codex.app.*` ca
 - `codex.app.call`、`codex.app.respond`；
 - `codex.app.stream.open`、`codex.app.stream.close`；
 - `codex.app.transfer.open|chunk|commit|read|close`。
+
+事件固定为 `codex.app.frame`、`codex.app.stream.closed`（`{ streamId, reason }`，reason 属于
+`cancelled | completed | failed | peer-disconnected`）与 **`codex.app.capability`**（`{ available: boolean }`）。
+
+`codex.app.capability` 是 Host 对 Codex **可用性变化**的声明，向**每条连接**发送，与是否正在跟随某个 thread
+无关。它必须**只在真实翻转时**发送（可用→不可用、不可用→可用），且 Host 只陈述**事实**，不下结论：
+
+- 只依赖"跟随中的流被关闭"是不够的：停在历史页的会话不跟随任何流，那样只能在下一次调用失败时才发觉，
+  用户看到的就是一条错误而不是重连；
+- 但 Host 也**不得**把"Codex 被打开"报成"会话丢失"。判定权在 Client：只有它知道自己在看什么。Client 必须
+  把 `available: false` 当作"当前 Codex 会话已丧失"（走与其他丧失完全相同的恢复路径），而 `available: true`
+  **永远不是丧失**——仍在恢复中的会话由重试阶梯接回，不需要额外路径；
+- 首次观察到的状态不必发送：后加入的连接通过 capability 探测自行读取当前可用性。
+
+这条事件把"域开关"与"链路事件"分开：一条链路同时承载 DSH 会话、终端、文件预览等，Codex 只是可选域，因此
+关闭 Codex **不得**表现为链路断开（那会误伤同一链路其它会话）。
 
 `codex.app.call` envelope 为 `{ "method": string, "params": unknown }`，但它不是通用 JSON-RPC
 代理。Host 编译期 allowlist 仅包含 `account/read`、`model/list`、`project/list`、`project/create`、`thread/list`、

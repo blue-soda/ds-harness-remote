@@ -1,7 +1,7 @@
 import { connectionFailureDetail } from './server-connection.js'
 import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { CodexAppFrameData, CodexAppStreamClosedData } from '@dsh-remote/protocol'
+import type { CodexAppCapabilityData, CodexAppFrameData, CodexAppStreamClosedData } from '@dsh-remote/protocol'
 import { CodexRemoteClient, RemoteClientCore } from '@dsh-remote/client-core'
 import {
   AdaptiveTransport,
@@ -27,6 +27,7 @@ import {
   CodexVirtualHarness,
   discoverCodexVirtualWorkspaces,
   sameWorkspaceRoot,
+  type CodexSessionLossTrigger,
   type CodexVirtualWorkspaceView,
 } from './codex/virtual-harness.js'
 import {
@@ -82,6 +83,9 @@ export const HOST_AUTHORIZATION_ERRORS = new Set([
   'TOKEN_EXPIRED',
 ])
 
+/** What noticed that the remote Codex session is gone; logged so "the banner did not show up" is answerable. */
+type RemoteCodexLossTrigger = CodexSessionLossTrigger | 'capability-missing' | 'list-failed' | 'project-create-failed'
+
 type TransportAttempt = 'direct' | 'turn' | 'relay'
 
 interface ConnectionProgressState {
@@ -126,6 +130,26 @@ interface RemoteWorkspaceSelection {
 }
 
 type HarnessRemoteTransport = 'remoteGateway' | 'apiProxy'
+
+/** Which of a Host's two carriers the user is watching. */
+export type RemoteSessionKind = 'harness' | 'codex'
+
+/**
+ * The session a recovery has to put back.
+ *
+ * A device plus a kind plus a workspace directory: everything else (project id, session id, carrier) is
+ * re-derived on the way back, because a Host that replaced its Codex domain renumbers all of it.
+ */
+export interface RemoteSessionTarget {
+  deviceId: string
+  kind: RemoteSessionKind
+  workspaceId: string
+  workspacePath?: string
+  sessionId?: string
+}
+
+/** Why a remote session is being recovered. Logged as-is; never shown to the user as a reason. */
+export type RemoteSessionLossReason = 'transport-closed' | 'link-dropped' | 'codex-closed' | 'manual'
 
 export interface RemoteDeviceView {
   deviceId: string
@@ -194,7 +218,10 @@ export interface HostAuthorizationControl {
   codexRespond?(input: unknown, signal?: AbortSignal): Promise<{ resolved: true }>
   codexOpenStream?(
     input: unknown,
-    publish: (event: 'codex.app.frame' | 'codex.app.stream.closed', data: CodexAppFrameData | CodexAppStreamClosedData) => Promise<void>,
+    publish: (
+      event: 'codex.app.frame' | 'codex.app.stream.closed' | 'codex.app.capability',
+      data: CodexAppFrameData | CodexAppStreamClosedData | CodexAppCapabilityData,
+    ) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<unknown>
   codexCloseStream?(input: unknown): Promise<unknown>
@@ -230,8 +257,14 @@ const QUICK_RECONNECT_WINDOW_MS = 10_000
 const QUICK_RECONNECT_RETRY_DELAY_MS = 5_000
 /** The quick window skips the WebRTC ladder: relay is the only path measured under five seconds. */
 const QUICK_RECONNECT_FORCE_RELAY = true
-/** Steady retries at the end of the fallback schedule before the loop gives up and stays local. */
-const FALLBACK_STEADY_ATTEMPTS = 5
+/**
+ * The background ladder that runs once the quick window is spent.
+ *
+ * Five seconds after the fallback, then 10, 20, and a steady 30 for the rest: seven attempts in total, after
+ * which the loop stops and the user stays in the local shell until they act. Both the disconnect recovery and
+ * a boot restore share it - only the first rung differs, because a boot has no quick window behind it.
+ */
+const BACKGROUND_RETRY_DELAYS_MS: readonly number[] = [5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000]
 
 
 
@@ -241,6 +274,16 @@ export class ClientModeRuntime {
   private preview?: LoopbackPreview
   private identity?: HostIdentity
   private connected?: ConnectedRemote
+  /**
+   * The connection the Remote panel browses a Host with.
+   *
+   * Deliberately separate from {@link connected}: opening the panel, connecting to a Host and looking at or
+   * picking its workspaces is *not* a remote session. Nothing here may become "what the user is watching",
+   * arm a reconnect, or survive as something a later boot would restore - the user is still in the local
+   * shell until they actually open a workspace. Keeping it in this field is what enforces that: the recovery
+   * path only ever looks at {@link connected}.
+   */
+  private browsing?: ConnectedRemote
   /**
    * Set when a remote session dropped and the runtime fell back to local.
    *
@@ -318,6 +361,21 @@ export class ClientModeRuntime {
    * stops as soon as the user asks for local.
    */
   private reconnecting?: { targetDeviceId: string; targetName?: string; phase: 'restore' | 'fast' | 'fallback' }
+  /**
+   * What the recovery is putting back, for the header.
+   *
+   * The window has to be able to say *which* session is coming back while the carriers are already local - a
+   * Codex recovery that fell back to the local shell used to read "remote DSH, reconnecting", which describes
+   * a different thing than the one being restored. The kind comes from the remembered selection, so it stays
+   * right for the whole window without a second copy of the state to keep in sync.
+   * @returns the payload the status carries for a running recovery.
+   */
+  private reconnectState(): { targetDeviceId: string; targetName?: string; phase: 'restore' | 'fast' | 'fallback'; kind?: RemoteSessionKind } {
+    const state = this.reconnecting
+    if (state === undefined) return { targetDeviceId: '', phase: 'restore' }
+    const kind = this.sessionTargetFor(state.targetDeviceId)?.kind
+    return { ...state, ...(kind === undefined ? {} : { kind }) }
+  }
   /** Periodic proof of life for the live remote session; absent while nothing is connected. */
   private closed = false
 
@@ -400,7 +458,7 @@ export class ClientModeRuntime {
       ...targetStatus,
       connected: this.connected !== undefined,
       fellBackToLocal: this.fellBackToLocal,
-      ...(this.reconnecting === undefined ? {} : { reconnecting: { ...this.reconnecting } }),
+      ...(this.reconnecting === undefined ? {} : { reconnecting: this.reconnectState() }),
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -533,6 +591,7 @@ export class ClientModeRuntime {
     this.connected = undefined
     this.connectionProgress = undefined
     this.pendingWorkspaceSelection = undefined
+    this.closeBrowsing()
     await this.closeCodexVirtual()
     this.proxySwitch?.selectLocal()
     await this.closePreview()
@@ -561,6 +620,7 @@ export class ClientModeRuntime {
     // The Server has already torn the connection down with the row, so only local session state is left.
     this.connected = undefined
     this.connectionProgress = undefined
+    this.closeBrowsing()
     this.reconnecting = undefined
     this.fellBackToLocal = false
     this.remoteReconnectRun += 1
@@ -600,6 +660,8 @@ export class ClientModeRuntime {
       this.pendingWorkspaceSelection = undefined
       // The user asked for local, so the next remote session starts from a fresh workspace choice.
       this.lastWorkspaceSelection = undefined
+      // Browsing was also for the session they just left; there is nothing left for it to serve.
+      this.closeBrowsing()
       await this.closeCodexStreams(previous?.client)
       await previous?.client.close().catch(() => undefined)
       // Returning to local is the answer to a dropped session, so the record of
@@ -616,7 +678,11 @@ export class ClientModeRuntime {
     if (targetDeviceId === undefined || targetDeviceId.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'A targetDeviceId is required for remote mode.')
     }
-    const next = await this.connectWithReason(targetDeviceId, signal)
+    // The panel may already hold a browse connection to this Host, and the Server keeps one control connection
+    // per device and role: that link becomes the session instead of a second one being opened.
+    const browsingHere = this.browsing?.target.deviceId === targetDeviceId ? this.browsing : undefined
+    if (browsingHere !== undefined) this.browsing = undefined
+    const next = browsingHere ?? await this.connectWithReason(targetDeviceId, signal)
     try {
       this.assertRemoteCompatible(next)
     } catch (error) {
@@ -631,6 +697,7 @@ export class ClientModeRuntime {
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
     this.selectRemoteTarget(next)
+    this.closeBrowsing()
     // A fresh remote session clears the record of an earlier dropped one.
     this.fellBackToLocal = false
     this.reconnecting = undefined
@@ -670,7 +737,6 @@ export class ClientModeRuntime {
       await this.closeCodexStreams(previous.client)
       await previous.client.close().catch(() => undefined)
       this.supersededClient = undefined
-      this.finishReconnect('link re-established')
       return true
     } catch (error: unknown) {
       this.supersededClient = undefined
@@ -679,7 +745,7 @@ export class ClientModeRuntime {
       // closed socket. Without them every cause reads the same.
       this.logger.warn('fast reconnect attempt failed', {
         targetDeviceId: shortId(targetDeviceId),
-        code: safeErrorCode(error),
+        code: failureCode(error),
         ...connectionFailureDetail(error),
       })
       return false
@@ -689,6 +755,91 @@ export class ClientModeRuntime {
   private rememberWorkspaceSelection(selection: RemoteWorkspaceSelection): void {
     this.pendingWorkspaceSelection = selection
     this.lastWorkspaceSelection = { ...selection }
+    // Record the workspace with the Host as soon as it is chosen, so a process that is reclaimed before the
+    // next reconnect still knows what the user was looking at.
+    const connected = this.connected
+    if (connected?.target.deviceId === selection.targetDeviceId) {
+      void this.rememberTarget({
+        mode: 'remote',
+        hostDeviceId: selection.targetDeviceId,
+        hostName: connected.target.name,
+      })
+    }
+  }
+
+  /**
+   * What the user is watching, reduced to the only thing a recovery has to restore.
+   *
+   * A lost session is always "this device, this kind of workspace, this directory". Deriving that once -
+   * instead of letting each recovery path re-read `lastWorkspaceSelection` and decide for itself - is what
+   * keeps a Codex session from being restored onto the peer's DeepSeek carrier, which is exactly the bug the
+   * reconnect used to produce.
+   * @param targetDeviceId - the Host the lost session belonged to.
+   * @returns the target, or undefined when nothing on that Host is being watched.
+   */
+  private sessionTargetFor(targetDeviceId: string): RemoteSessionTarget | undefined {
+    const selection = this.lastWorkspaceSelection
+    if (selection === undefined || selection.targetDeviceId !== targetDeviceId) return undefined
+    return {
+      deviceId: targetDeviceId,
+      kind: selection.backend === 'codex' ? 'codex' : 'harness',
+      workspaceId: selection.workspaceId,
+      ...(selection.workspacePath === undefined ? {} : { workspacePath: selection.workspacePath }),
+      ...(selection.sessionId === undefined ? {} : { sessionId: selection.sessionId }),
+    }
+  }
+
+  /**
+   * Put the session the user was watching back in place on the current link.
+   *
+   * The one step every recovery path ends with, whichever way the link came back: the retry schedule, the
+   * quick window, or a boot restore. A Codex target rebuilds the Codex carrier - never the peer's Harness
+   * workspace - and a Harness target republishes its workspace selection so the native UI re-reads its list.
+   * @param target - the session to restore.
+   * @param fallbackToLocal - whether a failed Codex rebuild may hand the view to the local shell. The quick
+   * window passes false: its whole point is to keep the user looking at the session while it is rescued.
+   * @returns true when the user is looking at that session again.
+   */
+  private async restoreSession(
+    target: RemoteSessionTarget,
+    options: { fallbackToLocal?: boolean } = {},
+  ): Promise<boolean> {
+    if (target.kind === 'codex') {
+      const restored = await this.restoreCodexCarrier(target, options.fallbackToLocal !== false)
+      if (restored) {
+        this.logger.info('remote Codex session restored', {
+          targetDeviceId: shortId(target.deviceId),
+          kind: 'codex',
+          path: target.workspacePath ?? '(unknown)',
+        })
+      }
+      return restored
+    }
+    this.restoreWorkspaceSelection(target.deviceId)
+    this.logger.info('remote DSH session restored', {
+      targetDeviceId: shortId(target.deviceId),
+      kind: 'harness',
+    })
+    return true
+  }
+
+  /**
+   * Clear the recovery flag once the user is back on the session they were watching.
+   *
+   * The header reads this flag to show "reconnecting", so it must be cleared exactly when the recovery
+   * succeeded - not when a transport happened to come back, and not while a Codex workspace is still missing.
+   * @param targetDeviceId - the Host the recovery was about.
+   * @param reason - what brought the session back, for the log.
+   * @param kind - which carrier was restored.
+   */
+  private finishRecovery(targetDeviceId: string, reason: string, kind: RemoteSessionKind): void {
+    this.reconnecting = undefined
+    this.fellBackToLocal = false
+    this.logger.info('remote session recovered', {
+      targetDeviceId: shortId(targetDeviceId),
+      kind,
+      reason,
+    })
   }
 
   /**
@@ -714,44 +865,51 @@ export class ClientModeRuntime {
    * A reconnect leaves the carrier holding a transfer channel bound to a transport that no longer exists, and the
    * first use fails with "remote transport closed" while the UI still looks connected - the reported symptom:
    * Codex sessions vanish and clicking one errors. Rebuilding the carrier is what lets an open Codex workspace
-   * survive a reconnect; when the Host no longer offers Codex the rebuild fails, is logged, and the UI keeps its
-   * ordinary empty state.
-   * @param targetDeviceId - the Host the reconnect finished against.
+   * survive a reconnect.
+   *
+   * The workspace is matched by directory, not by id: a Host that replaced its Codex domain renumbers the very
+   * same directories, so an id that misses is retried once by root before the workspace is given up on.
+   * @param target - the Codex session to restore.
+   * @param fallbackToLocal - whether a failure may hand the view to the client's own shell. The quick window
+   * passes false so the user keeps looking at the session for the whole window.
+   * @returns true when the Codex carrier is back on the given workspace.
    */
-  private restoreCodexCarrier(targetDeviceId: string): void {
-    const selection = this.lastWorkspaceSelection
-    if (!shouldRestoreCodexCarrier(selection, targetDeviceId) || selection === undefined) return
-    void this.openCodexWorkspace(targetDeviceId, selection.workspaceId).then(() => {
-      // Only now may the UI re-read: the Codex carrier is the one that answers it.
-      this.restoreWorkspaceSelection(targetDeviceId)
-    }).catch(async error => {
-      const code = safeErrorCode(error)
-      // The Host replaced its Codex domain: the same directories come back under new project ids, so the remembered
-      // id is unknown while the workspace is still there. Look it up by root before giving up on it.
-      if (selection.workspacePath !== undefined) {
-        const recovered = await this.codexWorkspaceIdForPath(targetDeviceId, selection.workspacePath).catch(() => undefined)
-        if (recovered !== undefined && recovered !== selection.workspaceId) {
+  private async restoreCodexCarrier(target: RemoteSessionTarget, fallbackToLocal = true): Promise<boolean> {
+    try {
+      try {
+        await this.openCodexWorkspace(target.deviceId, target.workspaceId)
+      } catch (error) {
+        const root = target.workspacePath
+        if (root === undefined) throw error
+        const recovered = await this.codexWorkspaceIdForPath(target.deviceId, root)
+        if (recovered === undefined) throw error
+        if (recovered !== target.workspaceId) {
           this.logger.info('CodeX workspace restored under a new id', {
-            targetDeviceId: shortId(targetDeviceId),
-            path: selection.workspacePath,
+            targetDeviceId: shortId(target.deviceId),
+            path: root,
           })
-          await this.openCodexWorkspace(targetDeviceId, recovered).catch(() => undefined)
-          this.restoreWorkspaceSelection(targetDeviceId)
-          return
         }
+        await this.openCodexWorkspace(target.deviceId, recovered)
       }
-      this.logger.warn('CodeX workspace could not be restored after a reconnect', {
-        targetDeviceId: shortId(targetDeviceId),
-        code,
+      // Only now may the UI re-read: the Codex carrier is the one that answers it.
+      this.restoreWorkspaceSelection(target.deviceId)
+      return true
+    } catch (error) {
+      this.logger.warn('CodeX workspace could not be restored', {
+        targetDeviceId: shortId(target.deviceId),
+        code: failureCode(error),
+        path: target.workspacePath ?? '(unknown)',
+        ...connectionFailureDetail(error),
       })
       // A Codex session that cannot be brought back must not leave the user in this Host's Harness workspace: the
       // agreed fallback is the client's own shell, with the retry schedule still trying the Codex workspace.
-      this.fallBackToLocalForCodex()
-      // The memory is deliberately kept: a Host that has just come back can report no Codex capability for a few
-      // seconds while its domain starts, and forgetting the selection on that first answer left the client with
-      // nothing to restore - it settled on the Host's Harness view instead of retrying the Codex workspace. The
-      // reconnect schedule keeps trying, and only an explicit choice by the user replaces the selection.
-    })
+      if (fallbackToLocal) await this.fallBackToLocalForCodex()
+      // The remembered selection is deliberately kept: a Host that has just come back can report no Codex
+      // capability for a few seconds while its domain starts, and forgetting the selection on that first answer
+      // would leave the client with nothing to restore - it would settle on the Host's Harness view instead of
+      // retrying the Codex workspace. Only an explicit choice by the user replaces the selection.
+      return false
+    }
   }
 
   /**
@@ -775,34 +933,47 @@ export class ClientModeRuntime {
    * works locally.
    * @returns nothing.
    */
-  private fallBackToLocalForCodex(): void {
-    void this.closeCodexVirtual()
+  private async fallBackToLocalForCodex(): Promise<void> {
+    await this.closeCodexVirtual()
     this.proxySwitch?.selectLocal()
     this.gatewaySwitch.selectLocal()
     this.fellBackToLocal = true
-  }
-
-  private finishReconnect(reason: string): void {
-    const target = this.reconnecting?.targetDeviceId
-    if (target === undefined) return
-    this.reconnecting = undefined
-    // A Codex session must not have its workspace selection republished on its own: the native UI would re-read it
-    // through the Harness carrier and settle in this Host's DeepSeek workspace, which is the behaviour that was ruled
-    // out. restoreCodexCarrier publishes the selection itself once the Codex carrier is back.
-    if (!shouldRestoreCodexCarrier(this.lastWorkspaceSelection, target)) this.restoreWorkspaceSelection(target)
-    this.restoreCodexCarrier(target)
-    this.logger.info('remote Harness reconnect finished', { targetDeviceId: shortId(target), reason })
   }
 
   /**
    * The Codex session is gone while the transport is still up (the Host replaced or switched off its Codex
    * domain). Deliberately the same entry point as a lost link, so both carriers take one path: quick reconnect,
    * local fallback and the retry schedule.
+   *
+   * The trigger is logged, because "the banner did not appear" is otherwise indistinguishable between "no
+   * signal arrived" and "the signal arrived but the UI did not show it".
+   * @param trigger - what noticed it.
    * @returns nothing; the reconnect runs in the background.
    */
-  noteCodexSessionLost(): void {
+  noteCodexSessionLost(trigger: RemoteCodexLossTrigger): void {
     const connected = this.connected
-    if (connected === undefined || this.reconnecting !== undefined) return
+    if (connected === undefined || this.reconnecting !== undefined) {
+      this.logger.info('Codex session loss ignored', {
+        targetDeviceId: connected === undefined ? undefined : shortId(connected.target.deviceId),
+        trigger,
+        reason: connected === undefined ? 'not-connected' : 'recovery-already-running',
+      })
+      return
+    }
+    // Only a Codex session the user is actually watching is lost here. A Host whose Codex went away while the
+    // user is in its DSH workspace must not turn into a recovery: that would move a session nobody asked to move.
+    if (this.sessionTargetFor(connected.target.deviceId)?.kind !== 'codex') {
+      this.logger.info('Codex session loss ignored', {
+        targetDeviceId: shortId(connected.target.deviceId),
+        trigger,
+        reason: 'watching-another-session',
+      })
+      return
+    }
+    this.logger.warn('remote Codex session lost', {
+      targetDeviceId: shortId(connected.target.deviceId),
+      trigger,
+    })
     void this.handleRemoteTransportLost(connected.client, connected.target.deviceId, 'codex-closed')
   }
 
@@ -821,33 +992,64 @@ export class ClientModeRuntime {
   }
 
   /**
-   * Rebuild the link inside one quick window, keeping the user's view.
+   * Re-read the connected Host's capabilities.
    *
-   * The session is left exactly as it is - same Workspace, same Session list, no reload - while the link
-   * is rebuilt over relay. Only the Session data is refreshed once it is back, and the caller falls back
-   * to the local shell when the window runs out.
-   * @param targetDeviceId - the Host to rebuild the link to.
-   * @returns whether a session is in place again.
+   * A Host that switches Codex (or the terminal) on or off changes what it advertises, and the cached feature
+   * set used to be refreshed only when a workspace list happened to be requested - which is why the Remote card
+   * could describe a Host it no longer matched. One round trip, no business payload, so the card can poll it.
+   * @returns the connected Host's fresh feature set, or `{ connected: false }`.
    */
-  private async quickReconnect(targetDeviceId: string): Promise<boolean> {
-    if (this.reconnecting !== undefined) return false
-    this.reconnecting = { targetDeviceId, phase: 'fast' }
-    this.logger.warn('remote Harness link needs rebuilding; trying a quick reconnect', {
-      targetDeviceId: shortId(targetDeviceId),
-      attempts: QUICK_RECONNECT_ATTEMPTS,
-      windowMs: QUICK_RECONNECT_WINDOW_MS,
-    })
-    const deadline = Date.now() + QUICK_RECONNECT_WINDOW_MS
-    for (let attempt = 1; attempt <= QUICK_RECONNECT_ATTEMPTS; attempt += 1) {
-      if (await this.reestablish(targetDeviceId, QUICK_RECONNECT_FORCE_RELAY)) return true
-      if (attempt === QUICK_RECONNECT_ATTEMPTS) break
-      const wait = Math.min(QUICK_RECONNECT_RETRY_DELAY_MS, Math.max(0, deadline - Date.now()))
-      if (wait === 0) break
-      await new Promise<void>(resolve => { setTimeout(resolve, wait) })
+  async probeRemoteFeatures(): Promise<Record<string, unknown>> {
+    const remote = this.connected
+    if (remote === undefined) return { connected: false }
+    try {
+      remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
+    } catch (error) {
+      const code = failureCode(error)
+      this.logger.warn('remote capability probe failed', {
+        targetDeviceId: shortId(remote.target.deviceId),
+        code,
+      })
+      return { connected: true, targetDeviceId: remote.target.deviceId, features: remote.features, error: code }
     }
-    this.reconnecting = undefined
-    return false
+    return { connected: true, targetDeviceId: remote.target.deviceId, features: remote.features }
   }
+
+  /**
+   * Re-establish the session the user is watching, without changing which session that is.
+   *
+   * What the Remote card's Refresh does for a live session: the transport may have died, the peer's Codex may
+   * have come back, or a previous recovery may have given up. This never selects another Host and never another
+   * kind of workspace - the remembered selection is the only thing it works from.
+   * @returns the status after the attempt.
+   */
+  async recoverCurrentSession(): Promise<Record<string, unknown>> {
+    const selection = this.lastWorkspaceSelection
+    if (selection === undefined) return this.status()
+    // One recovery at a time: a running schedule (or quick window) already targets the same session.
+    if (this.reconnecting !== undefined) return this.status()
+    const target = this.sessionTargetFor(selection.targetDeviceId)
+    const connected = this.connected
+    if (connected === undefined) {
+      this.reconnecting = { targetDeviceId: selection.targetDeviceId, phase: 'fallback' }
+      void this.reconnectRemoteSession(selection.targetDeviceId, target)
+      return this.status()
+    }
+    // The user has since chosen a different Host; Refresh must not move them back.
+    if (connected.target.deviceId !== selection.targetDeviceId) return this.status()
+    // Ask the Host one cheap question. An answer means the link is alive and only the session behind it may be
+    // missing; silence means the link itself is gone and the ordinary ladder - quick window, then the retry
+    // schedule - has to rebuild it. Deliberately not a periodic probe: it runs on the user's own Refresh.
+    const probe = await this.probeRemoteFeatures()
+    if (probe.connected === true && probe.error === undefined) {
+      if (target !== undefined) await this.restoreSession(target)
+      return this.status()
+    }
+    if (probe.error === undefined) return this.status()
+    await this.handleRemoteTransportLost(connected.client, connected.target.deviceId, 'manual')
+    return this.status()
+  }
+
 
   /**
    * Shared cleanup for a session whose transport is gone.
@@ -859,98 +1061,331 @@ export class ClientModeRuntime {
    * @param client - the client that was connected.
    * @param targetDeviceId - the Host it was bound to.
    */
+  /**
+   * A user's explicit workspace choice supersedes a recovery that is still in flight.
+   *
+   * The retry schedule belongs to the session the user was watching. When they pick another workspace, that
+   * schedule must not land later and move the view again: the reported failure was a Codex ladder restoring its
+   * own workspace over the DSH workspace the user had just opened - "the user's own choice is the only thing
+   * that changes which session is on screen" was broken by a background timer. Only the panel's open endpoints
+   * call this; the recovery restores through the internal open paths, so it never cancels itself.
+   */
+  private supersedeRemoteRecovery(): void {
+    if (this.reconnecting === undefined && !this.fellBackToLocal) return
+    this.logger.info('a workspace was opened; stopping the recovery in flight', {
+      phase: this.reconnecting?.phase ?? 'fallback',
+    })
+    this.reconnecting = undefined
+    this.fellBackToLocal = false
+    this.remoteReconnectRun += 1
+  }
+
+  /**
+   * Whether the user still wants the session a recovery is putting back.
+   *
+   * The user's own choice is the record, not a counter: cancelling clears `lastWorkspaceSelection` (and writes
+   * `local` to the target file), and opening another workspace points the selection somewhere else. A recovery is
+   * work the user asked for *earlier*, so it may only adopt its result while that is still what they want. The
+   * reported failure was an attempt that landed after the answer - it reconnected and put the session back on
+   * screen, because nothing re-read the user's intent once the attempt was in flight.
+   * @param targetDeviceId - the Host the recovery is restoring.
+   * @returns true while the remembered target is still that Host.
+   */
+  private recoveryStillWanted(targetDeviceId: string): boolean {
+    if (this.reconnecting === undefined) return false
+    return this.lastWorkspaceSelection?.targetDeviceId === targetDeviceId
+  }
+
+  /**
+   * Undo a recovery the user answered while it was landing: their choice wins over work already in flight.
+   * @param targetDeviceId - the Host the recovery was restoring.
+   */
+  private async abandonRecovery(targetDeviceId: string): Promise<void> {
+    this.logger.info('the user answered while the recovery was landing; returning to the local shell', {
+      targetDeviceId: shortId(targetDeviceId),
+    })
+    // Exactly what the user's own cancel does: close it, select the local carriers, forget the selection. The
+    // session this attempt just restored goes with it.
+    await this.setMode('local')
+  }
+
   private async handleRemoteTransportLost(
     client: RemoteClientCore,
     targetDeviceId: string,
-    reason: 'transport-closed' | 'link-dropped' | 'codex-closed',
+    reason: RemoteSessionLossReason,
   ): Promise<void> {
+    const browsing = this.browsing?.client === client ? this.browsing : undefined
+    if (browsing !== undefined && this.connected?.client !== client) {
+      // The panel's browse connection is not a session: nothing here may move the view or start a recovery.
+      // It must, however, be forgotten. It lives outside `connected`, so the guard below dropped its close on
+      // the floor and every later request was handed the dead client - the Remote card then answered "the
+      // authenticated Noise channel is not connected" until the plugin was restarted, even though the Host was
+      // healthy and accepting control. Dropping it here makes the next request open a fresh connection.
+      this.browsing = undefined
+      this.clearConnectionProgress(browsing.progressRunId)
+      this.logger.info('browsing connection closed; the panel will open a new one', {
+        targetDeviceId: shortId(targetDeviceId),
+        reason,
+      })
+      void browsing.client.close().catch(() => undefined)
+      return
+    }
     if (this.connected?.client !== client) return
     this.supersededClient = undefined
     const targetName = this.connected.target.name
-    // Every trigger tries the quick window first: the Server closes the replaced peer's links together
-    // with the connection, so the session needs a new link either way, and rebuilding in place keeps the
-    // user's view, Workspace and Session list. Only when that window runs out is the session handed back
-    // to the local shell and the retry loop.
-    if (this.reconnecting === undefined && await this.quickReconnect(targetDeviceId)) {
-      // The session keeps its view, but a Codex carrier kept its old transfer channel: rebuild it onto the new link
-      // before anyone can click a session and hit "remote transport closed".
-      this.restoreCodexCarrier(targetDeviceId)
-      this.logger.info('remote Harness session kept its view through a quick reconnect', {
+    const target = this.sessionTargetFor(targetDeviceId)
+    const kind: RemoteSessionKind = target?.kind ?? 'harness'
+    if (target === undefined) {
+      // No workspace was ever opened on this Host, so there is no session here - only the panel's browsing link
+      // (which lives elsewhere) or an open attempt that failed. Losing it must leave the user in the local
+      // shell: no quick window, no fallback, no retry schedule, and never a switch to this Host's workspace.
+      this.logger.info('connection closed with no remote session to recover; staying local', {
         targetDeviceId: shortId(targetDeviceId),
+        reason,
       })
+      const previous = this.connected
+      this.connected = undefined
+      this.connectionProgress = undefined
+      await this.closeCodexStreams(previous?.client)
+      await previous?.client.close().catch(() => undefined)
       return
     }
+    // A Caller that already probed the link reports 'manual'; the close notice and the Server's link-dropped
+    // notice are the transport-level signals. Only a Codex-only loss arrives with a link that is known to be up.
+    const transportLost = reason !== 'codex-closed'
+    if (this.reconnecting === undefined) {
+      // Phase 1 - the quick window. Two attempts inside ten seconds, and the view is deliberately NOT touched:
+      // the same Workspace and Session list stay on screen while the session is rescued. A Codex-only loss needs
+      // no new link (the transport is fine), so its attempts rebuild the carrier in place instead; a lost
+      // transport has to be rebuilt first, and only then can the session be put back on it.
+      //
+      // The run id is captured here so the window's own continuation can tell whether the user answered while it
+      // ran: cancelling (`mode.set local`) and opening another workspace both bump it. Without this check a
+      // cancel during the window was ignored - the handler still fell back and started the ladder, and the first
+      // rung put the remote session back on screen seconds after the user had asked for local.
+      const run = this.remoteReconnectRun
+      this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fast' }
+      this.logger.warn('remote session lost; trying the quick window', {
+        targetDeviceId: shortId(targetDeviceId),
+        kind,
+        reason,
+        attempts: QUICK_RECONNECT_ATTEMPTS,
+        windowMs: QUICK_RECONNECT_WINDOW_MS,
+      })
+      const rescued = await this.quickReconnectSession(targetDeviceId, target, transportLost, run)
+      if (run !== this.remoteReconnectRun) {
+        this.logger.info('the user answered during the quick window; the recovery stops here', {
+          targetDeviceId: shortId(targetDeviceId),
+          kind,
+        })
+        return
+      }
+      if (rescued) {
+        this.finishRecovery(targetDeviceId, 'quick-window', kind)
+        this.logger.info('remote session kept its view through a quick reconnect', {
+          targetDeviceId: shortId(targetDeviceId),
+          kind,
+        })
+        return
+      }
+    }
+    // Phase 2 - the window is spent. The session is handed back to the client's own shell (the view switches to
+    // the local workspaces, which is what the tenth second is for) and phase 3 takes over.
+    await this.fallBackToLocalShell(targetDeviceId, targetName, reason, kind, transportLost)
+    // Phase 3 - background retries on the same ladder for every kind of loss.
+    void this.reconnectRemoteSession(targetDeviceId, target)
+  }
+
+  /**
+   * The quick window: rescue the same session without disturbing the view.
+   *
+   * At most {@link QUICK_RECONNECT_ATTEMPTS} attempts inside {@link QUICK_RECONNECT_WINDOW_MS}, spaced by
+   * {@link QUICK_RECONNECT_RETRY_DELAY_MS}. Nothing here falls back to the local shell or republishes a
+   * workspace - the user keeps looking at the session they were in, and the caller decides what happens once the
+   * window is spent. A lost transport is rebuilt first, over relay only (the one path measured under five
+   * seconds); a Codex-only loss already has its link, so its attempts only rebuild the carrier.
+   * @param targetDeviceId - the Host the session was bound to.
+   * @param target - the session to put back.
+   * @param transportLost - whether the link itself has to be rebuilt.
+   * @param run - the recovery run this window belongs to; the user answering bumps it.
+   * @returns true when the session is on screen again.
+   */
+  private async quickReconnectSession(
+    targetDeviceId: string,
+    target: RemoteSessionTarget,
+    transportLost: boolean,
+    run: number,
+  ): Promise<boolean> {
+    let linkUp = !transportLost
+    const deadline = Date.now() + QUICK_RECONNECT_WINDOW_MS
+    for (let attempt = 1; attempt <= QUICK_RECONNECT_ATTEMPTS; attempt += 1) {
+      // The user's answer ends the window at once. Without this the second attempt still ran - and by then the
+      // peer was often back, so it restored the very session the user had just cancelled.
+      if (!this.recoveryStillWanted(targetDeviceId) || run !== this.remoteReconnectRun) return false
+      if (!linkUp) linkUp = await this.reestablish(targetDeviceId, QUICK_RECONNECT_FORCE_RELAY)
+      if (!this.recoveryStillWanted(targetDeviceId) || run !== this.remoteReconnectRun) return false
+      // Once the link is up there is no reason to rebuild it again: what is still missing is the session, and a
+      // second rebuild would close the peer's fresh link for nothing.
+      if (linkUp && await this.restoreSession(target, { fallbackToLocal: false })) {
+        // The restore takes seconds, and the user can answer inside it. Their answer outranks it: put the local
+        // shell back instead of leaving a session on screen that they had already left.
+        if (!this.recoveryStillWanted(targetDeviceId) || run !== this.remoteReconnectRun) {
+          await this.abandonRecovery(targetDeviceId)
+          return false
+        }
+        return true
+      }
+      if (attempt === QUICK_RECONNECT_ATTEMPTS) break
+      const wait = Math.min(QUICK_RECONNECT_RETRY_DELAY_MS, Math.max(0, deadline - Date.now()))
+      if (wait === 0) break
+      await sleep(wait)
+    }
+    if (!this.recoveryStillWanted(targetDeviceId) || run !== this.remoteReconnectRun) return false
+    // Hold the view for the rest of the window even when both attempts have already failed. The window is a
+    // length of time as much as a pair of attempts: the local fallback belongs at its end, not at the moment an
+    // attempt happens to fail, or a peer that refuses instantly would change the view five seconds early.
+    const remaining = deadline - Date.now()
+    if (remaining > 0) await sleep(remaining)
+    // The window is over and the caller owns the flag from here: it either finishes the recovery or hands the
+    // session to the local shell, which re-claims it as the fallback phase.
+    this.reconnecting = undefined
+    return false
+  }
+
+  /**
+   * Hand the session back to the client's own shell.
+   *
+   * Phase two of the ladder, and the same for every kind of loss. A link that broke is closed here; one that is
+   * still up (a Codex-only loss) is kept, because the retry schedule needs it and dropping a healthy link only to
+   * open it again five seconds later is churn the user pays for. Switching the carriers to local is what makes
+   * the view fall back - the point of this step.
+   * @param targetDeviceId - the Host the session was bound to.
+   * @param targetName - its display name, kept for the header while the reconnect runs.
+   * @param reason - why the session was lost, for the log.
+   * @param kind - which carrier was lost.
+   * @param transportLost - whether the link itself is gone.
+   */
+  private async fallBackToLocalShell(
+    targetDeviceId: string,
+    targetName: string | undefined,
+    reason: RemoteSessionLossReason,
+    kind: RemoteSessionKind,
+    transportLost: boolean,
+  ): Promise<void> {
     void this.closePreview()
-    this.connected = undefined
     this.connectionProgress = undefined
     this.pendingWorkspaceSelection = undefined
-    void this.closeCodexVirtual()
+    await this.closeCodexVirtual()
     this.proxySwitch?.selectLocal()
     this.gatewaySwitch.selectLocal()
     this.fellBackToLocal = true
     this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fallback' }
-    void client.close().catch(() => undefined)
-    this.logger.warn('remote Harness transport lost; reconnecting', {
+    if (transportLost) {
+      const previous = this.connected
+      this.connected = undefined
+      await this.closeCodexStreams(previous?.client)
+      void previous?.client.close().catch(() => undefined)
+    }
+    // One line per loss, with the identifiers and the outcome of the window that just failed: "why did it move"
+    // is answerable from the log alone, without guessing at which trigger fired.
+    this.logger.warn('remote session lost; falling back to the local shell and retrying', {
       targetDeviceId: shortId(targetDeviceId),
+      kind,
       reason,
     })
-    void this.reconnectRemoteSession(targetDeviceId)
   }
 
   /**
-   * Re-establish a remote session whose transport closed.
+   * The background retry ladder, shared by every way a session can be recovered.
    *
-   * The UI keeps rendering the remote session after the transport is gone, so
-   * without this the user faces a session that silently ignores everything and has
-   * to exit and pick the Host again — which is what a suspended and resumed client
-   * used to require every time. Retry the same Host with backoff; a loop that is
-   * superseded, or one whose session came back another way, stops quietly.
-   * @param targetDeviceId - the Host the dropped session was bound to.
+   * It runs after the quick window has been spent (the caller has already fallen back to the local shell), or
+   * straight away for a boot restore, which has no window behind it. Every attempt targets the same session; on
+   * success the workspace and the session data are re-read, and when the ladder is spent the reconnect flag is
+   * cleared so the user is simply local. A loop that is superseded, or one whose session came back another way,
+   * stops quietly.
+   * @param targetDeviceId - the Host the lost session was bound to.
+   * @param target - the session to put back.
+   * @param immediateFirstAttempt - true for a boot restore, which should not wait five seconds to start.
    */
-  private async reconnectRemoteSession(targetDeviceId: string): Promise<void> {
+  private async reconnectRemoteSession(
+    targetDeviceId: string,
+    target: RemoteSessionTarget | undefined = this.sessionTargetFor(targetDeviceId),
+    immediateFirstAttempt = false,
+  ): Promise<void> {
     const run = ++this.remoteReconnectRun
+    const kind: RemoteSessionKind = target?.kind ?? 'harness'
+    if (target === undefined) {
+      // There is no session to put back: the connection that dropped was the panel browsing a Host, or an open
+      // attempt that never completed. The user is still in the local shell, so nothing may be re-established
+      // here - forcing remote mode would show that Host's DSH workspace without anybody asking for it.
+      this.reconnecting = undefined
+      this.fellBackToLocal = false
+      this.logger.info('no remote session to restore; staying in the local shell', {
+        targetDeviceId: shortId(targetDeviceId),
+      })
+      return
+    }
     // Fast attempts first, then a steady low rate. Timers do not run while a
     // client is suspended, so a pending wait simply lands when it comes back —
     // which is what makes a backgrounded phone reconnect on its own. Keeping the
     // loop alive matters for the other order too: attempts spent while the network
     // was down must not leave the session dead until the user acts.
-    // One attempt straight away, then 5s, 5s, 10s and 20s, then a steady 30s. The steady rate stops after
-    // FALLBACK_STEADY_ATTEMPTS so a Host that stays away leaves the user in the local shell instead of
-    // retrying forever; the header's cancel button supersedes the loop at any point.
-    const delays = [0, 5_000, 5_000, 10_000, 20_000]
+    // The quick window already spent its two attempts, so this ladder starts at 5s and is the same for every
+    // kind of loss; when it is spent the user stays in the local shell instead of the loop retrying forever.
+    // The header's cancel button supersedes the loop at any point.
+    const delays: readonly number[] = immediateFirstAttempt
+      ? [0, ...BACKGROUND_RETRY_DELAYS_MS]
+      : BACKGROUND_RETRY_DELAYS_MS
     let attempt = 0
     for (;;) {
-      if (attempt - delays.length >= FALLBACK_STEADY_ATTEMPTS) {
+      if (attempt >= delays.length) {
         // The schedule is spent, so stop advertising a reconnect: the header reads this flag, and leaving
         // it set made a session that had already settled in the local shell show "reconnecting" forever.
         // The user can still reconnect by hand from the Remote panel.
         this.reconnecting = undefined
-        this.logger.warn('remote Harness reconnect gave up; staying in the local shell', {
+        this.logger.warn('remote session recovery gave up; staying in the local shell', {
           targetDeviceId: shortId(targetDeviceId),
+          kind,
           attempts: attempt,
         })
         return
       }
-      const wait = delays[attempt] ?? 30_000
-      if (wait > 0) await new Promise<void>(resolve => { setTimeout(resolve, wait) })
+      const wait = delays[attempt] ?? BACKGROUND_RETRY_DELAYS_MS[BACKGROUND_RETRY_DELAYS_MS.length - 1]!
+      if (wait > 0) await sleep(wait)
       attempt += 1
       if (run !== this.remoteReconnectRun) return
-      if (this.connected !== undefined) return
+      const reconnecting = this.reconnecting
+      // No recovery in progress means the user cancelled it (or signed out): the run id usually covers
+      // that too, but the flag is the user's own decision and is honoured first.
+      if (reconnecting === undefined) return
       try {
-        await this.setMode('remote', targetDeviceId)
-        this.restoreWorkspaceSelection(targetDeviceId)
-        this.logger.info('remote Harness session reconnected', { targetDeviceId: shortId(targetDeviceId) })
+        if (this.connected?.target.deviceId !== targetDeviceId) {
+          await this.setMode('remote', targetDeviceId)
+          // setMode ends a recovery as its own decision; this loop owns the flag until the session is really back.
+          this.reconnecting = reconnecting
+        }
+        // The same step whichever kind it is: a Harness session republishes its workspace selection, a Codex
+        // session rebuilds its carrier. A connected transport is not by itself the session the user left.
+        if (target !== undefined && !await this.restoreSession(target)) continue
+        // Restoring takes seconds, and the user can answer inside it (cancel, or pick another workspace). Their
+        // answer outranks an attempt that was already in flight.
+        if (!this.recoveryStillWanted(targetDeviceId)) {
+          await this.abandonRecovery(targetDeviceId)
+          return
+        }
+        this.finishRecovery(targetDeviceId, 'retry-schedule', kind)
         return
       } catch (error) {
-        const code = safeErrorCode(error)
+        const code = failureCode(error)
         // Credentials that are missing or refused cannot be fixed by waiting, and a boot restore
         // would otherwise retry an unauthorized connection forever. Stop and let the user sign in.
-        if (code !== undefined && CREDENTIAL_FAILURE_CODES.has(code)) {
-          this.logger.warn('remote Harness reconnect stopped: authorization is required', {
+        if (CREDENTIAL_FAILURE_CODES.has(code)) {
+          this.reconnecting = undefined
+          this.logger.warn('remote session recovery stopped: authorization is required', {
             targetDeviceId: shortId(targetDeviceId),
+            kind,
             code,
           })
-          this.reconnecting = undefined
           return
         }
         // Report the early attempts, then only occasionally: a Host that stays
@@ -961,10 +1396,11 @@ export class ClientModeRuntime {
           // `code` here is only the error's class - INTERNAL_ERROR when nothing matched - while the connect path's
           // own code (HOST_OFFLINE, CAPABILITY_MISSING, ...) is what actually says why. That one is logged as the
           // code, and the prose stays a detail so it does not read like a verdict about the peer.
-          this.logger.warn('remote Harness reconnect attempt failed', {
+          this.logger.warn('remote session recovery attempt failed', {
             targetDeviceId: shortId(targetDeviceId),
+            kind,
             attempt,
-            code: systemCode ?? code ?? 'UNKNOWN',
+            code: systemCode ?? code,
             ...detail,
           })
         }
@@ -982,10 +1418,23 @@ export class ClientModeRuntime {
    */
   private async rememberTarget(target: { mode: 'local' | 'remote'; hostDeviceId?: string; hostName?: string }): Promise<void> {
     if (this.targetStore === undefined) return
+    // The workspace is recorded with the Host, not instead of it: a restarted process can rebuild the same
+    // Codex workspace (its directory) or the same DSH workspace, instead of coming back to an empty shell.
+    const selection = target.mode === 'remote' && target.hostDeviceId !== undefined
+      ? this.sessionTargetFor(target.hostDeviceId)
+      : undefined
     try {
       await this.targetStore.save({
         ...target,
         ...(this.config.serverUrl === undefined ? {} : { serverUrl: this.config.serverUrl }),
+        ...(selection === undefined ? {} : {
+          workspace: {
+            workspaceId: selection.workspaceId,
+            kind: selection.kind,
+            ...(selection.workspacePath === undefined ? {} : { workspacePath: selection.workspacePath }),
+            ...(selection.sessionId === undefined ? {} : { sessionId: selection.sessionId }),
+          },
+        }),
       })
     } catch (error: unknown) {
       this.logger.warn('could not record the remote target', { code: safeErrorCode(error) })
@@ -1012,20 +1461,39 @@ export class ClientModeRuntime {
       })
       return false
     }
+    // Only a session is restored. A record that names a Host but no workspace means the user was still browsing
+    // when the process ended - they had not opened anything, so they belong in the local shell.
+    if (record.workspace === undefined) {
+      this.logger.info('the recorded target has no workspace; staying in the local shell', {
+        targetDeviceId: shortId(record.hostDeviceId),
+      })
+      return false
+    }
     this.reconnecting = {
       targetDeviceId: record.hostDeviceId,
       ...(record.hostName === undefined ? {} : { targetName: record.hostName }),
       phase: 'restore',
     }
+    // Seed what the recovery is for before the first attempt: without the kind, a Codex session would come back
+    // as this Host's DSH workspace, which is the one thing the recovery must never do.
+    this.lastWorkspaceSelection = {
+      targetDeviceId: record.hostDeviceId,
+      workspaceId: record.workspace.workspaceId,
+      ...(record.workspace.kind === 'codex' ? { backend: 'codex' as const } : {}),
+      ...(record.workspace.workspacePath === undefined ? {} : { workspacePath: record.workspace.workspacePath }),
+      ...(record.workspace.sessionId === undefined ? {} : { sessionId: record.workspace.sessionId }),
+    }
     this.logger.info('restoring the remote target of the previous run', {
       targetDeviceId: shortId(record.hostDeviceId),
+      kind: record.workspace.kind,
     })
-    void this.reconnectRemoteSession(record.hostDeviceId)
+    // No quick window ran for a boot, so the first attempt is immediate; the rest of the ladder is identical.
+    void this.reconnectRemoteSession(record.hostDeviceId, this.sessionTargetFor(record.hostDeviceId), true)
     return true
   }
 
   async listRemoteDirectory(targetDeviceId: string, path?: string, signal?: AbortSignal): Promise<RemoteDirectoryListing> {
-    const remote = await this.ensureConnected(targetDeviceId, signal)
+    const remote = await this.ensureBrowsing(targetDeviceId, signal)
     if (remote.features.remoteGateway) {
       const value = await new RemoteTypertGateway(remote.client).invoke({
         namespace: 'directoryPicker',
@@ -1044,7 +1512,7 @@ export class ClientModeRuntime {
   }
 
   async listRemoteWorkspaces(targetDeviceId: string, signal?: AbortSignal): Promise<RemoteWorkspaceView[]> {
-    const remote = await this.ensureConnected(targetDeviceId, signal)
+    const remote = await this.ensureBrowsing(targetDeviceId, signal)
     if (remote.features.remoteGateway) {
       return readRemoteWorkspaceBaseline(new RemoteTypertGateway(remote.client), signal)
     }
@@ -1085,22 +1553,48 @@ export class ClientModeRuntime {
     return { ...this.status(), workspace }
   }
 
+  /**
+   * The refusal to report when a Host is not offering Codex right now.
+   *
+   * Two different facts hid behind one generic code, so the panel could not tell a user who had switched Codex
+   * off from a Host that never had it. Which one it is comes from this client's own memory: a Host whose Codex
+   * workspace was opened before has Codex, so its absence now means it was switched off (or is still starting);
+   * a Host that never offered one simply does not provide it.
+   *
+   * A Codex that disappeared is also a lost session, so this hands it to the same recovery every other loss
+   * uses before reporting it - a switched-off Codex that is switched back on is then restored on its own.
+   * @param targetDeviceId - the Host the caller was talking to.
+   * @returns the error to throw.
+   */
+  private remoteCodexUnavailable(targetDeviceId: string): ClientModeError {
+    const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
+      || this.codexHostsSeen.has(targetDeviceId)
+    if (expected) this.noteCodexSessionLost('capability-missing')
+    return expected
+      ? new ClientModeError('CODEX_DISABLED', 'Codex is switched off or unavailable on the selected Host.')
+      : new ClientModeError('CODEX_NOT_PROVIDED', 'The selected Host does not provide CodeX workspaces.')
+  }
+
   async listCodexWorkspaces(targetDeviceId: string, signal?: AbortSignal): Promise<CodexVirtualWorkspaceView[]> {
-    const remote = await this.ensureConnected(targetDeviceId, signal)
+    const remote = await this.ensureBrowsing(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
-      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
-      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
-      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
-        || this.codexHostsSeen.has(targetDeviceId)
-      if (expected) this.noteCodexSessionLost()
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
-        ? 'Codex is switched off or unavailable on the selected Host.'
-        : 'The selected Host does not provide CodeX workspaces.')
+      throw this.remoteCodexUnavailable(targetDeviceId)
     }
-    const workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
+    let workspaces: CodexVirtualWorkspaceView[]
+    try {
+      workspaces = await discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal)
+    } catch (error) {
+      // A Codex call that failed because the session behind it is gone is a lost session like any other, and it
+      // has to be said out loud: this used to fail silently, so the panel kept a stale error on screen and
+      // nothing ever tried to bring the workspace list back.
+      this.logger.warn('Codex workspaces could not be listed', {
+        targetDeviceId: shortId(targetDeviceId),
+        code: failureCode(error),
+      })
+      if (isCodexSessionLoss(error)) this.noteCodexSessionLost('list-failed')
+      throw error
+    }
     this.lastCodexListing.set(targetDeviceId, workspaces)
     for (const item of workspaces) {
       this.codexWorkspaceRoots.set(`${targetDeviceId}|${item.workspaceId}`, item.path)
@@ -1124,16 +1618,7 @@ export class ClientModeRuntime {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
-      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
-      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
-      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
-        || this.codexHostsSeen.has(targetDeviceId)
-      if (expected) this.noteCodexSessionLost()
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
-        ? 'Codex is switched off or unavailable on the selected Host.'
-        : 'The selected Host does not provide CodeX workspaces.')
+      throw this.remoteCodexUnavailable(targetDeviceId)
     }
     this.assertLocalHarnessCarrierAvailable()
     const virtual = CodexVirtualHarness.remote(remote.client, {
@@ -1142,7 +1627,7 @@ export class ClientModeRuntime {
     }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway(remote.client))
     // A Codex call that fails because the session is gone goes through the same reconnect entry point as a lost link,
     // instead of being shown as an error the user cannot act on.
-    virtual.watchCodexSessionLost(() => this.noteCodexSessionLost())
+    virtual.watchCodexSessionLost(trigger => this.noteCodexSessionLost(trigger))
     let workspace: CodexVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
@@ -1223,26 +1708,31 @@ export class ClientModeRuntime {
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
     if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', 'A CodeX project directory is required.')
-    const remote = await this.ensureConnected(targetDeviceId, signal)
+    // Registering a project is still browsing: the session only starts once the workspace is actually opened,
+    // which promotes this same connection in openCodexWorkspace().
+    const remote = await this.ensureBrowsing(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features.codex) {
-      // The peer's Codex is gone rather than never there when this client still remembers a Codex workspace on it:
-      // that is a lost session like any other, so hand it to the reconnect flow (quick reconnect, local fallback,
-      // retry schedule) before reporting it. Without this the panel showed an error with nothing retrying, the
-      // carrier was never rebuilt, and the workspace list could not come back when Codex did.
-      const expected = shouldRestoreCodexCarrier(this.lastWorkspaceSelection, targetDeviceId)
-        || this.codexHostsSeen.has(targetDeviceId)
-      if (expected) this.noteCodexSessionLost()
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', expected
-        ? 'Codex is switched off or unavailable on the selected Host.'
-        : 'The selected Host does not provide CodeX workspaces.')
+      throw this.remoteCodexUnavailable(targetDeviceId)
     }
     this.assertLocalHarnessCarrierAvailable()
-    const result = record(await new CodexRemoteClient(remote.client).request('project/create', {
-      name: remoteWorkspaceTitle(trimmedPath),
-      roots: [{ path: trimmedPath }],
-      idempotencyKey: uuidV7(),
-    }, signal))
+    let result: Record<string, unknown>
+    try {
+      result = record(await new CodexRemoteClient(remote.client).request('project/create', {
+        name: remoteWorkspaceTitle(trimmedPath),
+        roots: [{ path: trimmedPath }],
+        idempotencyKey: uuidV7(),
+      }, signal))
+    } catch (error) {
+      // Same rule as the listing: a Codex call that failed because the session is gone is a lost session, and
+      // it is logged so "why did it move" is answerable without a rerun.
+      this.logger.warn('CodeX project could not be registered', {
+        targetDeviceId: shortId(targetDeviceId),
+        code: failureCode(error),
+      })
+      if (isCodexSessionLoss(error)) this.noteCodexSessionLost('project-create-failed')
+      throw error
+    }
     const project = record(result.project)
     if (typeof project.id !== 'string' || project.id.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'The Host returned an invalid CodeX project.')
@@ -1273,6 +1763,7 @@ export class ClientModeRuntime {
     this.gatewaySwitch.selectLocal()
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
+    this.closeBrowsing()
     await this.closeCodexStreams(this.connected?.client)
     await this.connected?.client.close().catch(() => undefined)
     this.connected = undefined
@@ -1365,10 +1856,13 @@ export class ClientModeRuntime {
   }
 
   private readonly publishLocalCodexFrame = async (
-    event: 'codex.app.frame' | 'codex.app.stream.closed',
-    data: CodexAppFrameData | CodexAppStreamClosedData,
+    event: 'codex.app.frame' | 'codex.app.stream.closed' | 'codex.app.capability',
+    data: CodexAppFrameData | CodexAppStreamClosedData | CodexAppCapabilityData,
   ): Promise<void> => {
-    const streamId = data.streamId
+    // A capability announcement is one of the events the peer bridge may publish, but this path only carries the
+    // frames of streams this runtime opened for its own module; there is nothing local to tell.
+    if (event === 'codex.app.capability') return
+    const streamId = (data as CodexAppFrameData).streamId
     const stream = this.codexStreams.get(streamId)
     if (stream === undefined || stream.target.kind !== 'local') return
     if (event === 'codex.app.frame') {
@@ -1689,13 +2183,64 @@ export class ClientModeRuntime {
     }
   }
 
+  /**
+   * Connect for a read-only panel request.
+   *
+   * Browsing a Host is not a session. This connection never becomes {@link connected}, so a later drop is
+   * ignored by the recovery path and the window stays where the user left it. The session's own link is
+   * reused when it already points at that Host, because the Server keeps only one control connection per
+   * device and role.
+   * @param targetDeviceId - the Host being browsed.
+   * @param signal - aborts the connection attempt.
+   * @returns the connection to read through.
+   */
+  private async ensureBrowsing(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+    if (this.connected?.target.deviceId === targetDeviceId) return this.connected
+    if (this.browsing?.target.deviceId === targetDeviceId) return this.browsing
+    const next = await this.connectWithReason(targetDeviceId, signal)
+    const previous = this.browsing
+    this.browsing = next
+    this.clearConnectionProgress(next.progressRunId)
+    await previous?.client.close().catch(() => undefined)
+    return next
+  }
+
+  /**
+   * Drop the panel's browsing connection.
+   *
+   * Called whenever the user's own decision makes the browse stale: returning to local, signing out, or
+   * opening a session somewhere else. A browsing connection is never kept for later.
+   * @param except - a browsing connection to keep (the one just promoted to a session).
+   */
+  private closeBrowsing(except?: ConnectedRemote): void {
+    const browsing = this.browsing
+    if (browsing === undefined || browsing === except) return
+    this.browsing = undefined
+    void browsing.client.close().catch(() => undefined)
+  }
+
   private async ensureConnected(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
-    const next = await this.connectWithReason(targetDeviceId, signal)
     const previous = this.connected
+    // The user just opened a workspace on the Host they were browsing: that connection becomes the session
+    // instead of a second one being opened for the same device (the Server would replace one of them).
+    if (this.browsing?.target.deviceId === targetDeviceId) {
+      const next = this.browsing
+      this.browsing = undefined
+      await this.closePreview()
+      this.connected = next
+      await previous?.client.close().catch(() => undefined)
+      return next
+    }
+    const next = await this.connectWithReason(targetDeviceId, signal)
     await this.closePreview()
     this.connected = next
     this.clearConnectionProgress(next.progressRunId)
+    // The carriers are deliberately NOT re-selected here. `ensureConnected` also serves the open paths before
+    // they prove they can succeed, and re-selecting would hand the window this Host's DSH workspace - a view
+    // switch nobody asked for. Only the explicit open, or the recovery restoring the session the user was
+    // actually watching, may change what is on screen.
+    this.closeBrowsing()
     await previous?.client.close().catch(() => undefined)
     return next
   }
@@ -1742,6 +2287,10 @@ export class ClientModeRuntime {
       // reacts only to a session it already knows is gone, because the Server's link-dropped notice and
       // a failed write are what actually prove a link ended.
       if (endpoint === 'client.connection.verify') return ok(await this.verifyRemoteConnection())
+      // The Remote card polls the first while a Host is selected (its capability set is the Host's truth, not
+      // this process's memory of it) and calls the second for "Refresh, and fix what can be fixed".
+      if (endpoint === 'remote.features.probe') return ok(await this.probeRemoteFeatures())
+      if (endpoint === 'remote.session.recover') return ok(await this.recoverCurrentSession())
       if (endpoint === 'client.device.revoke') {
         await this.revokeCurrentDevice()
         return ok(this.status())
@@ -1799,6 +2348,7 @@ export class ClientModeRuntime {
         if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'A Host and working directory are required.')
         }
+        this.supersedeRemoteRecovery()
         return ok(await this.openRemoteWorkspace(value.targetDeviceId, value.path, signal))
       }
       if (endpoint === 'codex.workspace.open') {
@@ -1806,6 +2356,7 @@ export class ClientModeRuntime {
         if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'A Host and CodeX Workspace are required.')
         }
+        this.supersedeRemoteRecovery()
         return ok(await this.openCodexWorkspace(value.targetDeviceId, value.workspaceId, signal))
       }
       if (endpoint === 'codex.workspace.create') {
@@ -1961,9 +2512,16 @@ export function offlineConnectionError(hostControl: boolean | undefined): Client
 /**
  * Whether a Codex RPC failure means the remote session is gone, rather than the request being wrong.
  *
- * Closing the Codex switch on the Host replaces its domain, which closes every Codex bridge: the next call from
- * this client fails with CODEX_CONNECTION_CLOSED even though the transport is still up. That is a session loss like
- * any other - the same fast reconnect, local fallback and retry schedule - and not an error to show and forget.
+ * Turning the Codex switch off on the Host ends the session in one of two ways, and both are a lost session
+ * like any other - the same quick rebuild, local fallback and retry schedule - not an error to show and forget:
+ *
+ *  - the bridge itself was closed, which answers `CODEX_CONNECTION_CLOSED` / `CODEX_CLOSED`;
+ *  - the domain is still there but has no App Server to answer with (switched off, starting, or restarting),
+ *    which answers `CODEX_UNAVAILABLE`.
+ *
+ * The second one is what a switched-off Codex looks like now that the Host keeps a client's bridge across the
+ * change, and leaving it out is why the top bar never said "reconnecting" for that switch while it did for the
+ * whole-device one - the same thing happening to the user, reported two different ways.
  * The codes are stable on purpose; the prose is not matched against.
  * @param error - whatever the Codex call threw.
  * @returns true when the remote Codex session should be treated as lost.
@@ -1975,7 +2533,7 @@ export function isCodexSessionLoss(error: unknown): boolean {
     ? (error as { code?: unknown }).code
     : undefined
   const code = typeof own === 'string' ? own : safeErrorCode(error)
-  return code === 'CODEX_CONNECTION_CLOSED' || code === 'CODEX_CLOSED'
+  return code === 'CODEX_CONNECTION_CLOSED' || code === 'CODEX_CLOSED' || code === 'CODEX_UNAVAILABLE'
 }
 
 export function shouldRestoreCodexCarrier(
@@ -2122,6 +2680,27 @@ function fail(error: unknown): RpcResult<unknown> {
 }
 
 function shortId(value: string): string { return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}` }
+
+/**
+ * The stable code of a failure, including this runtime's own errors.
+ *
+ * `safeErrorCode` only recognises the shared error types, so a `ClientModeError` - which is what every
+ * deliberate refusal in this file is - read as INTERNAL_ERROR in the log. The code is a plain identifier
+ * (never a message, token or payload), which is exactly what the log is allowed to carry.
+ * @param error - whatever was thrown.
+ * @returns the code to log.
+ */
+function failureCode(error: unknown): string {
+  const own = error !== null && typeof error === 'object' && 'code' in error
+    && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
+  return own ?? safeErrorCode(error)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>(resolve => { setTimeout(resolve, ms) })
+}
 
 /** Conservative feature profile for Hosts that predate fine-grained capability discovery. */
 export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {

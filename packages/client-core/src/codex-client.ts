@@ -94,9 +94,37 @@ const MAX_DISPLAY_ITEM_TEXT = 256 * 1024
 const CODEX_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u
 
+/**
+ * The Host's statement that its Codex capability changed state.
+ *
+ * A Host can switch its Codex off (or lose its App Server) while every transport stays healthy, and a client is
+ * only told through the streams it happens to be following. A session sitting on its history page follows
+ * nothing, so it used to learn the news from a failing call - the reported "no reconnecting anywhere, then the
+ * history load failed". The Host now states the *fact* - available or not - to every attached connection; what an
+ * unavailable Codex means is the client's call, because only the client knows which session it is showing.
+ */
+export const CODEX_CAPABILITY_EVENT = 'codex.app.capability'
+
 /** Shared Web/Android client for the independent Codex domain in Remote. */
 export class CodexRemoteClient {
   constructor(private readonly core: RemoteClientCore) {}
+
+  /**
+   * Listen for the Host's Codex availability changes.
+   *
+   * Fires whether or not this client is following any thread, which is what makes "the peer switched Codex off"
+   * reach the session on screen immediately instead of at the next failing call. The Host sends this only on a
+   * real transition, so `available: true` never means "you lost something".
+   * @param handler - called with the new availability.
+   * @returns an unsubscribe function.
+   */
+  watchCapability(handler: (available: boolean) => void): () => void {
+    return this.core.onEvent(event => {
+      if (event.event !== CODEX_CAPABILITY_EVENT) return
+      if (!isRecord(event.data) || typeof event.data.available !== 'boolean') return
+      handler(event.data.available)
+    })
+  }
 
   /** Low-level allowlisted request used by the Desktop Web loopback facade. */
   request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {

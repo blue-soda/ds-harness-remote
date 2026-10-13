@@ -19,8 +19,6 @@ import type {
   HarnessApiTransferReadResult,
 } from '@dsh-remote/protocol'
 import {
-  createRpcResponse,
-  encodeMessage,
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
   MAX_HARNESS_API_TRANSFER_BYTES,
@@ -304,7 +302,7 @@ export class HarnessApiBridge {
   private readonly answer: ApiProxy['respond']
 
   constructor(
-    private readonly api: ApiProxy,
+    api: ApiProxy,
     private readonly publish: PublishFrame,
     private readonly maxStreams = 8,
     private readonly logger?: SafeLogger,

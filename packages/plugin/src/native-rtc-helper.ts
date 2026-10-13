@@ -6,7 +6,6 @@ import type {
   RtcDataChannel,
   RtcDataChannelInit,
   RtcIceCandidateInit,
-  RtcIceServer,
   RtcPeerConnection,
   RtcPeerConnectionConfiguration,
   RtcPeerConnectionFactory,
@@ -14,7 +13,6 @@ import type {
   RtcStats,
   RtcStatsEntry,
 } from '@dsh-remote/webrtc'
-import { normalizeSdpMLineIndex } from '@dsh-remote/protocol'
 
 interface HelperResponse {
   id: number

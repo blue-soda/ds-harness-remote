@@ -10,7 +10,7 @@ import {
   type HostConnectionHandle,
   type HostAuthorizationControl,
 } from './client-runtime.js'
-import { IdentityStore, ensureDeviceDirectory, serverStorageDirectory } from './identity-store.js'
+import { IdentityStore, ensureDeviceDirectory } from './identity-store.js'
 import { ClientServerApi, HostServerApi, type DeviceAuthorization } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'

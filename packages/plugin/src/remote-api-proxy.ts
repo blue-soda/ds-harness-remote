@@ -440,15 +440,6 @@ function base64ToBytes(value: string): Uint8Array {
  * @returns the response with byte-valued fields restored.
  */
 /** Shapes only: what a byte field looks like where it crosses a seam (never the content). */
-function describeBytes(data: unknown): Record<string, unknown> {
-  return {
-    dataIsBytes: data instanceof Uint8Array,
-    dataType: typeof data,
-    dataKeys: typeof data === 'object' && data !== null ? Object.keys(data).length : 0,
-    preview: typeof data === 'string' ? data.slice(0, 12) : undefined,
-  }
-}
-
 function normalizeByteResult(method: string, response: NativeResponse): NativeResponse {
   if (method !== 'workspaceFiles.readBytes') return response
   const result = response.result

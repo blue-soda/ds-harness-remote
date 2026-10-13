@@ -244,7 +244,11 @@ export class CodexAppServerClient implements CodexAppServerLike {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(new CodexAppServerError('CODEX_UPSTREAM_ERROR', safeUpstreamError(value.error)))
+        const upstreamCode = safeUpstreamCode(value.error)
+        pending.reject(Object.assign(
+          new CodexAppServerError('CODEX_UPSTREAM_ERROR', safeUpstreamError(value.error)),
+          upstreamCode === undefined ? {} : { upstreamCode },
+        ))
       } else {
         pending.resolve(value.result)
       }
@@ -264,7 +268,16 @@ export class CodexAppServerClient implements CodexAppServerLike {
     const child = this.process
     this.process = undefined
     child?.kill('SIGTERM')
-    this.logger?.warn('Codex App Server communication failed', { code })
+    // The cause is the whole reason this line is worth reading - "unavailable" with no errno sent a day of
+    // debugging after the wrong suspect. Only identifiers: a spawn error's message carries the binary path,
+    // which rule 7 keeps out of logs, but its errno/syscall identify the failure just as well.
+    const failure = cause as NodeJS.ErrnoException
+    this.logger?.warn('Codex App Server communication failed', {
+      code,
+      causeCode: failure.code ?? 'none',
+      ...(failure.errno === undefined ? {} : { errno: failure.errno }),
+      ...(failure.syscall === undefined ? {} : { syscall: failure.syscall }),
+    })
     if (!this.closed) this.notifyUnavailable(code)
   }
 
@@ -296,6 +309,24 @@ function safeUpstreamError(value: unknown): string {
   return message.includes('not initialized')
     ? 'Codex App Server is not initialized.'
     : 'Codex App Server rejected the request.'
+}
+
+/**
+ * The upstream error's own code, when it looks like an identifier.
+ *
+ * Discarding the message is right - it carries paths and prompt fragments - but discarding the code along with it
+ * is what made "the account probe failed" unanswerable: every upstream failure collapsed into the same generic
+ * string, so a rate limit, an expired token and a rejected region all looked identical. A code is an enum, not
+ * payload, so it is kept when it is short and made of identifier characters.
+ * @param value - the `error` member of a JSON-RPC error response.
+ * @returns the code, or undefined when there is nothing safe to keep.
+ */
+function safeUpstreamCode(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  const raw = isRecord(value.data) && value.data.code !== undefined ? value.data.code : value.code
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
+  if (typeof raw !== 'string') return undefined
+  return /^[A-Za-z0-9_.:-]{1,48}$/u.test(raw) ? raw : undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

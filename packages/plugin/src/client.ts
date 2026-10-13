@@ -1,4 +1,3 @@
-import QRCode from 'qrcode'
 import {
   REMOTE_FILE_SAVE_AS_MAX_BYTES,
   createRemoteFileContentProvider,
@@ -32,7 +31,16 @@ const gptWorkspaceIcon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABA
 interface ControlResult<T = unknown> {
   ok: boolean
   value?: T
-  error?: { message?: string }
+  error?: {
+    message?: string
+    /**
+     * The plugin's own code for the refusal.
+     *
+     * The envelope's `message` is prose written for a log, not for a user, and it is not localised. The code
+     * is what lets the panel choose the sentence - and the next action - the user can actually act on.
+     */
+    details?: { remoteCode?: string; retryable?: boolean }
+  }
 }
 
 interface FileViewerClientServiceLike {
@@ -60,7 +68,18 @@ interface RemoteStatus {
   fellBackToLocal?: boolean
   connectedTargetDeviceId?: string
   /** Recovery in progress: `restore` from the last run, `fast` keeps the session, `fallback` returns to local. */
-  reconnecting?: { targetDeviceId: string; targetName?: string; phase: 'restore' | 'fast' | 'fallback' }
+  reconnecting?: {
+    targetDeviceId: string
+    targetName?: string
+    phase: 'restore' | 'fast' | 'fallback'
+    /**
+     * Which session is being put back.
+     *
+     * The header has to name the recovering session, not the live carrier: a Codex recovery falls back to the
+     * local shell, and reading the kind off `backend` then said "remote DSH, reconnecting" for a Codex session.
+     */
+    kind?: 'harness' | 'codex'
+  }
   transport?: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'
   preferredTransports?: RemoteTransportPreference[]
   connectionProgress?: {
@@ -152,19 +171,6 @@ const QR_LOGIN_ENABLED = false
 type EnabledQrProvider = (typeof ENABLED_QR_PROVIDERS)[number]
 type LoginMethod = OAuthProvider | 'password'
 
-/** `as const` keeps each value a literal locale key rather than a plain string. */
-const QR_PROVIDER_LABELS = {
-  wechat: 'wechatLogin',
-  github: 'githubLogin',
-  zhihu: 'zhihuLogin',
-} as const satisfies Record<OAuthProvider, LocaleKey>
-
-const QR_PROVIDER_SCAN_LABELS = {
-  wechat: 'scanWithWeChat',
-  github: 'scanWithGitHub',
-  zhihu: 'scanWithZhihu',
-} as const satisfies Record<OAuthProvider, LocaleKey>
-
 const defaultQrProvider: OAuthProvider = ENABLED_QR_PROVIDERS[0] ?? 'wechat'
 
 /** Whether this build offers the given provider; the panel must not select one it cannot render. */
@@ -194,6 +200,15 @@ interface RemoteWorkspaceView {
   workspaceId: string
   path: string
   title: string
+}
+
+/** What `remote.features.probe` answers: the connected Host's own capability set. */
+interface RemoteFeatureProbe {
+  connected: boolean
+  targetDeviceId?: string
+  features?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean }
+  /** Set when the probe itself failed, which means the link - not the feature - is the problem. */
+  error?: string
 }
 
 interface CodexWorkspaceView extends RemoteWorkspaceView {
@@ -297,13 +312,6 @@ interface PluginAssociation {
   account?: string
 }
 
-interface PluginConfigureResult {
-  status: 'authorized'
-  role: 'host' | 'client'
-  account?: string
-  settings: PluginSettingsView
-}
-
 const localeNamespace = 'ds-harness-remote'
 
 const en = {
@@ -365,6 +373,9 @@ const en = {
   codexStarting: 'Starting the Codex connection...',
   codexUnavailableNoCode: 'Codex is unavailable on this host.',
   codexRecheck: 'Re-check',
+  codexRemoteOff: 'Codex is switched off on that device.',
+  codexRemoteNotProvided: 'That device does not provide Codex.',
+  codexRemoteUnavailable: 'Codex is currently unavailable on that device.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -395,7 +406,7 @@ const en = {
   noRemoteHosts: 'No authorized remote Host for this account.',
   online: 'Online',
   offline: 'Offline',
-  connectionControlDisabled: 'This device is not accepting control right now.',
+  connectionControlDisabled: 'That device is not accepting control. Turn on "Allow control" on it.',
   connectionHostOffline: 'The selected Host is offline.',
   hostRefusesControl: 'Not accepting control',
   thisMachineHost: 'This machine as Remote Host',
@@ -639,6 +650,9 @@ const zh: Record<keyof typeof en, string> = {
   codexStarting: '正在启动 Codex 连接…',
   codexUnavailableNoCode: '这台 Host 上的 Codex 当前不可用。',
   codexRecheck: '重新检查',
+  codexRemoteOff: '该设备的 Codex 已关闭。',
+  codexRemoteNotProvided: '该设备不提供 Codex。',
+  codexRemoteUnavailable: '该设备的 Codex 当前不可用。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -669,7 +683,7 @@ const zh: Record<keyof typeof en, string> = {
   noRemoteHosts: '此账号没有已授权的远程 Host。',
   online: '在线',
   offline: '离线',
-  connectionControlDisabled: '该设备当前不接受控制。',
+  connectionControlDisabled: '该设备当前不接受控制，请在它上面打开「允许控制」。',
   connectionHostOffline: '所选 Host 当前离线。',
   hostRefusesControl: '不接受控制',
   thisMachineHost: '将此设备作为远程 Host',
@@ -937,14 +951,6 @@ function shortDeviceId(value: string): string {
   return value.length <= 14 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`
 }
 
-function serverHostname(value: string): string {
-  try {
-    return new URL(value).hostname
-  } catch {
-    return value
-  }
-}
-
 function transportLabel(value: RemoteTransportPreference, t: Translate): string {
   if (value === 'lan') return t('remoteNetworkLan')
   if (value === 'p2p') return t('remoteNetworkP2p')
@@ -1057,6 +1063,71 @@ function connectionErrorMessage(code: string, t: Translate): string {
   if (code === 'INVALID_MESSAGE') return t('connectionInvalidResponse')
   if (code === 'CONNECTION_FAILED' || code === 'SERVER_NOT_CONFIGURED') return t('connectionReachability')
   return t('connectionUnexpected')
+}
+
+/**
+ * Codes whose sentence this build can say in the user's own language.
+ *
+ * Anything else keeps the envelope's prose: the panel must never invent a reason it does not know.
+ */
+const localisedRemoteCodes = new Set([
+  'ACCOUNT_AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'TOKEN_EXPIRED',
+  'MEMBERSHIP_REQUIRED',
+  'CONNECTION_REPLACED',
+  'CONTROL_DISABLED',
+  'HOST_OFFLINE',
+  'SERVER_CREDENTIALS_BUSY',
+  'DEVICE_REVOKED',
+  'DEVICE_OWNERSHIP_REQUIRED',
+  'RATE_LIMITED',
+  'UNSUPPORTED_VERSION',
+  'CONNECTION_FAILED',
+  'SERVER_NOT_CONFIGURED',
+  'CODEX_DISABLED',
+  'CODEX_NOT_PROVIDED',
+  'CODEX_UNAVAILABLE',
+])
+
+/**
+ * Turn a refused control call into an Error that still carries the plugin's own code.
+ *
+ * Without the code the panel could only print the envelope's prose - written for a log, not localised - which is
+ * how "传输未授权" replaced the real reason a device refused control.
+ * @param error - the failed envelope's error field.
+ * @param t - the panel's translator.
+ * @returns the error to throw.
+ */
+function controlFailure(error: ControlResult['error'], t: Translate): Error {
+  const code = error?.details?.remoteCode
+  return Object.assign(new Error(error?.message ?? t('remoteRequestFailed')), {
+    ...(code === undefined ? {} : { code }),
+    retryable: error?.details?.retryable === true,
+  })
+}
+
+/**
+ * The sentence to show for a failed control call.
+ *
+ * A code this build knows is translated and names the next action; anything else falls back to the failure's
+ * own message, which is at least true even when it is not translated.
+ * @param reason - whatever the control call rejected with.
+ * @param t - the panel's translator.
+ * @returns the text to render.
+ */
+function remoteErrorMessage(reason: unknown, t: Translate): string {
+  const code = reason instanceof Error && 'code' in reason && typeof (reason as { code?: unknown }).code === 'string'
+    ? (reason as { code: string }).code
+    : undefined
+  if (code !== undefined) {
+    if (code === 'MEMBERSHIP_REQUIRED') return t('connectionOwnershipRequired')
+    if (code === 'CODEX_DISABLED') return t('codexRemoteOff')
+    if (code === 'CODEX_NOT_PROVIDED') return t('codexRemoteNotProvided')
+    if (code === 'CODEX_UNAVAILABLE') return t('codexRemoteUnavailable')
+    if (localisedRemoteCodes.has(code)) return connectionErrorMessage(code, t)
+  }
+  return reason instanceof Error ? reason.message : String(reason)
 }
 
 /**
@@ -1221,8 +1292,6 @@ window.__ModuleLoader__.load({
       const [codexBinary, setCodexBinary] = React.useState('codex')
       const [portsBusy, setPortsBusy] = React.useState(false)
       const [previewPorts, setPreviewPorts] = React.useState('')
-      const role = 'host' as const
-      const [registrationCode, setRegistrationCode] = React.useState('')
       const [associations, setAssociations] = React.useState<Partial<Record<'host' | 'client', PluginAssociation>>>({})
       const [loaded, setLoaded] = React.useState(false)
       const [writable, setWritable] = React.useState(false)
@@ -1316,7 +1385,6 @@ window.__ModuleLoader__.load({
         try {
           const view = await props.control<PluginSettingsView & { deepseekSignedOut?: boolean }>('settings.logout')
           applyView(view)
-          setRegistrationCode('')
           setNotice({ key: view.deepseekSignedOut === true ? 'signedOutDeepseek' : 'signedOut' })
         } catch (reason) {
           setError(messageOf(reason))
@@ -1485,7 +1553,6 @@ window.__ModuleLoader__.load({
 
       const discard = (): void => {
         if (settingsView !== undefined) applyView(settingsView)
-        setRegistrationCode('')
         setNotice(undefined)
         setError(undefined)
       }
@@ -1641,7 +1708,9 @@ window.__ModuleLoader__.load({
           React.createElement('button', {
             type: 'button',
             className: 'dshRemoteReconnect',
-            disabled: reconnectBusy || hostStatus?.configured === false,
+            // A paused Host is not a broken one: there is nothing to reconnect, and the switch is the
+            // only control that may turn reachability back on.
+            disabled: reconnectBusy || hostStatus?.configured === false || hostStatus?.paused === true,
             onClick: () => void reconnectHost(),
           }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))),
         hostStatus?.error === undefined || hostStatus.online
@@ -1715,6 +1784,22 @@ window.__ModuleLoader__.load({
       const [connectingHost, setConnectingHost] = React.useState<RemoteDevice | undefined>(undefined)
       const [workspaces, setWorkspaces] = React.useState<RemoteWorkspaceView[]>([])
       const [codexWorkspaces, setCodexWorkspaces] = React.useState<CodexWorkspaceView[]>([])
+      /**
+       * Why the selected Host shows no Codex workspaces.
+       *
+       * An unavailable Codex must not look like an empty list: "no workspaces yet" and "this device has Codex
+       * switched off" are different facts and the user can only act on the second one.
+       */
+      const [codexNotice, setCodexNotice] = React.useState<string | undefined>(undefined)
+      /**
+       * Whether the Host selected in this panel offers Codex right now.
+       *
+       * Kept per panel rather than read from the status: the status describes whatever Host the session is
+       * connected to, which is not necessarily the one whose workspaces this list is showing.
+       */
+      const [codexAvailable, setCodexAvailable] = React.useState(false)
+      /** Last capability answer seen for the selected Host, so a poll only reloads on a real change. */
+      const codexProbeAvailable = React.useRef(false)
       // The Codex connection details, reachable from this panel: some DSH builds never render the plugin's own
       // settings form, so this is where the switch and command field have to live.
       const [codexOpen, setCodexOpen] = React.useState(false)
@@ -1741,8 +1826,6 @@ window.__ModuleLoader__.load({
        * milliseconds rather than a network timeout.
        */
       const [authorizationResolved, setAuthorizationResolved] = React.useState(false)
-      const [email, setEmail] = React.useState('')
-      const [password, setPassword] = React.useState('')
       const [loginServerUrl, setLoginServerUrl] = React.useState(DEFAULT_REMOTE_SERVER_URL)
       // The address is a property of the deployment, not something every sign-in
       // should re-read: show it, and only open the editor when asked.
@@ -1754,12 +1837,10 @@ window.__ModuleLoader__.load({
        * the user a link to click instead of a silent no-op.
        */
       const [pendingAuthorizeUrl, setPendingAuthorizeUrl] = React.useState<string | undefined>(undefined)
-      const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(
+      const [loginMethod] = React.useState<LoginMethod>(
         isEnabledQrProvider(props.preferredQrProvider) ? props.preferredQrProvider : defaultQrProvider,
       )
-      const [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(false)
       const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
-      const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
       const [qrExpired, setQrExpired] = React.useState(false)
       const [progress, setProgress] = React.useState<RemoteConnectionProgress | undefined>(undefined)
       const progressRun = React.useRef(0)
@@ -1855,14 +1936,8 @@ window.__ModuleLoader__.load({
         setQrExpired(false)
         try {
           const session = await props.control<OAuthQrSession>('client.account.qr.start', { provider })
-          const image = await QRCode.toDataURL(session.scanUrl, {
-            width: 184,
-            margin: 1,
-            errorCorrectionLevel: 'L',
-          })
           if (run !== qrFlowRun.current) return
           setQrSession(session)
-          setQrImage(image)
         } catch (reason) {
           if (run === qrFlowRun.current) setError(messageOf(reason))
         } finally {
@@ -1908,7 +1983,6 @@ window.__ModuleLoader__.load({
               } finally {
                 if (run === qrFlowRun.current) {
                   setQrSession(undefined)
-                  setQrImage(undefined)
                   setBusy(false)
                 }
               }
@@ -1917,7 +1991,6 @@ window.__ModuleLoader__.load({
               if (timer !== undefined) window.clearInterval(timer)
               setQrExpired(true)
               setQrSession(undefined)
-              setQrImage(undefined)
             }
           }).catch(reason => {
             if (active && !settled && run === qrFlowRun.current) setError(messageOf(reason))
@@ -1933,41 +2006,12 @@ window.__ModuleLoader__.load({
         }
       }, [open, loginMethod, qrSession])
 
-      React.useEffect(() => {
-        if (loginMethodManuallySelected || loginMethod === props.preferredQrProvider) return
-        qrFlowRun.current += 1
-        setLoginMethod(props.preferredQrProvider)
-        setQrSession(undefined)
-        setQrImage(undefined)
-        setQrExpired(false)
-        setError(undefined)
-      }, [props.preferredQrProvider, loginMethodManuallySelected])
-
-      const selectLoginMethod = (method: LoginMethod): void => {
-        setLoginMethodManuallySelected(true)
-        if (method === loginMethod) return
-        qrFlowRun.current += 1
-        setLoginMethod(method)
-        setQrSession(undefined)
-        setQrImage(undefined)
-        setQrExpired(false)
-        setError(undefined)
-      }
-
-      const orderedQrProviders: readonly OAuthProvider[] = ENABLED_QR_PROVIDERS
-
-      const qrLoginTab = (provider: OAuthProvider): unknown => React.createElement('button', {
-        key: provider, type: 'button', role: 'tab', id: `dsh-remote-${provider}-tab`,
-        'aria-selected': loginMethod === provider, 'aria-controls': `dsh-remote-${provider}-panel`,
-        className: loginMethod === provider ? 'isActive' : '', disabled: busy,
-        onClick: () => selectLoginMethod(provider),
-      }, t(QR_PROVIDER_LABELS[provider]))
-
       const selectHost = async (host: RemoteDevice): Promise<void> => {
         setBusy(true)
         setError(undefined)
         setConnectingHost(host)
         setCodexWorkspaces([])
+        setCodexNotice(undefined)
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
         try {
@@ -1985,17 +2029,24 @@ window.__ModuleLoader__.load({
               const nextWorkspaces = await props.control<RemoteWorkspaceView[]>('workspaces.list', {
                 targetDeviceId: host.deviceId,
               })
+              let codexReason: string | undefined
               const nextCodexWorkspaces = await props.control<CodexWorkspaceView[]>('codex.workspaces.list', {
                 targetDeviceId: host.deviceId,
-              }).catch(() => [])
+              }).catch((reason: unknown) => {
+                codexReason = remoteErrorMessage(reason, t)
+                return []
+              })
               const nextStatus = await props.control<RemoteStatus>('status').catch(() => undefined)
               if (nextStatus !== undefined) setStatus(nextStatus)
+              setCodexNotice(codexReason)
               return { workspaces: nextWorkspaces, codexWorkspaces: nextCodexWorkspaces, status: nextStatus }
             },
             result => connectedProgress(result.status),
           )
           setWorkspaces(result.workspaces)
           setCodexWorkspaces(result.codexWorkspaces)
+          setCodexAvailable(result.status?.remoteFeatures?.codex === true)
+          codexProbeAvailable.current = result.status?.remoteFeatures?.codex === true
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
           setSelectedHost(host)
@@ -2003,12 +2054,41 @@ window.__ModuleLoader__.load({
           setAddingWorkspace(false)
           setDirectory(undefined)
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
         } finally {
           // A failed attempt expands the full Host list again; a successful one
           // is represented by `selectedHost`.
           setConnectingHost(undefined)
           setBusy(false)
+        }
+      }
+
+      /** Re-read one Host's DSH workspaces, reporting a failure the same way the panel always does. */
+      async function loadHarnessWorkspaces(host: RemoteDevice): Promise<void> {
+        try {
+          setWorkspaces(await props.control<RemoteWorkspaceView[]>('workspaces.list', { targetDeviceId: host.deviceId }))
+        } catch (reason) {
+          setError(remoteErrorMessage(reason, t))
+        }
+      }
+
+      /**
+       * Re-read one Host's Codex workspaces.
+       *
+       * A failure is not an empty list: the refusal's code becomes the sentence the user sees, so "this device
+       * has Codex switched off" is never rendered as "no workspaces yet".
+       */
+      async function loadCodexWorkspaces(host: RemoteDevice): Promise<void> {
+        try {
+          setCodexWorkspaces(await props.control<CodexWorkspaceView[]>('codex.workspaces.list', {
+            targetDeviceId: host.deviceId,
+          }))
+          setCodexNotice(undefined)
+          setCodexAvailable(true)
+        } catch (reason) {
+          setCodexWorkspaces([])
+          setCodexNotice(remoteErrorMessage(reason, t))
+          setCodexAvailable(false)
         }
       }
 
@@ -2025,7 +2105,7 @@ window.__ModuleLoader__.load({
           setCodexWorkspaceId(undefined)
           setPath(listing.path)
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
         } finally {
           setBusy(false)
         }
@@ -2133,8 +2213,18 @@ window.__ModuleLoader__.load({
             setAddingWorkspace(false)
             setDirectory(undefined)
           }
+          // "Refresh" means "re-read the truth and fix what can be fixed": the Host list above is only half of
+          // it. The session the user is watching is re-established if its link or its Codex went away, and its
+          // workspace lists are re-read from the Host - otherwise the panel keeps describing a Host it no
+          // longer matches, which is how a switched-off Codex stayed on screen as a stale workspace list.
+          if (selectedHost !== undefined) {
+            await props.control<RemoteStatus>('remote.session.recover')
+              .then(next => setStatus(next))
+              .catch(() => undefined)
+            await Promise.all([loadHarnessWorkspaces(selectedHost), loadCodexWorkspaces(selectedHost)])
+          }
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
           // A failed status read must not leave the panel undecided forever.
           setAuthorizationResolved(true)
         } finally {
@@ -2157,10 +2247,41 @@ window.__ModuleLoader__.load({
         return props.statusFeed.subscribe(setStatus)
       }, [open, selectedHost])
 
+      /**
+       * Re-read the selected Host's capabilities while its workspace list is on screen.
+       *
+       * Codex on that Host can start, become ready, or be switched off at any moment, and the card renders that
+       * Host's capability set - not this process's memory of it. One capability round trip every few seconds is
+       * what turns "starting" into "ready", or into "switched off", without closing and reopening the panel.
+       */
+      React.useEffect(() => {
+        if (!open || selectedHost === undefined) return
+        let cancelled = false
+        const probe = async (): Promise<void> => {
+          const result = await props.control<RemoteFeatureProbe>('remote.features.probe').catch(() => undefined)
+          if (cancelled || result === undefined) return
+          // The probe answers for the Host the session is connected to. If that is not the Host this list is
+          // showing, its answer says nothing about what is on screen and must not repaint it.
+          if (result.targetDeviceId !== undefined && result.targetDeviceId !== selectedHost.deviceId) return
+          const nextStatus = await props.control<RemoteStatus>('status').catch(() => undefined)
+          if (cancelled) return
+          if (nextStatus !== undefined) setStatus(nextStatus)
+          const available = result.connected === true && result.features?.codex === true
+          if (available !== codexProbeAvailable.current) await loadCodexWorkspaces(selectedHost)
+          codexProbeAvailable.current = available
+        }
+        void probe()
+        const timer = window.setInterval(() => void probe(), 5_000)
+        return () => { cancelled = true; window.clearInterval(timer) }
+      }, [open, selectedHost])
+
       const chooseAnotherHost = (): void => {
         setSelectedHost(undefined)
         setWorkspaces([])
         setCodexWorkspaces([])
+        setCodexNotice(undefined)
+        setCodexAvailable(false)
+        codexProbeAvailable.current = false
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
         setWorkspaceBackend('harness')
@@ -2187,7 +2308,8 @@ window.__ModuleLoader__.load({
           ? new URL(transport.streamBaseUrl).origin
           : window.location.origin
         const result = await props.control<{ status?: string; authorizeUrl?: string }>('settings.configure', {
-          role: 'client',
+          // No `role`: a device has one identity, and the control writes only the Server address plus this
+          // sign-in. Sending a role here was the last thing that made one look like a runtime switch.
           serverUrl: loginServerUrl.trim(),
           provider: 'deepseek',
           callbackOrigin,
@@ -2248,12 +2370,11 @@ window.__ModuleLoader__.load({
           setStatus(await props.control<RemoteStatus>('status'))
           setNeedsAuthorization(false)
           setAuthorizationResolved(true)
-          setPassword('')
           // A message about a previous sign-out must not outlive a successful
           // sign-in: it would describe a state that no longer holds.
           setNotice(undefined)
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
         } finally {
           setAwaitingDeepSeek(false)
           setPendingAuthorizeUrl(undefined)
@@ -2268,7 +2389,7 @@ window.__ModuleLoader__.load({
           await props.control('mode.set', { mode: 'local' })
           window.location.reload()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
           setBusy(false)
         }
       }
@@ -2279,7 +2400,7 @@ window.__ModuleLoader__.load({
         try {
           setStatus(await setDeviceControl(props.control, enabled, status?.host?.authorized === true))
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
         } finally {
           setBusy(false)
         }
@@ -2296,7 +2417,7 @@ window.__ModuleLoader__.load({
       setNeedsAuthorization(true)
       setStatus(await props.control<RemoteStatus>('status'))
     } catch (reason) {
-      setError(messageOf(reason))
+      setError(remoteErrorMessage(reason, t))
     } finally {
       // The confirmation is a one-shot step: the outcome speaks for itself.
       setConfirmingRevoke(false)
@@ -2313,11 +2434,10 @@ window.__ModuleLoader__.load({
           setDevices([])
           setNeedsAuthorization(true)
           setQrSession(undefined)
-          setQrImage(undefined)
           setQrExpired(false)
           setStatus(await props.control<RemoteStatus>('status'))
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
         } finally {
           // The confirmation is a one-shot step: the outcome speaks for itself,
           // and a notice left behind would describe a state that no longer holds
@@ -2362,7 +2482,7 @@ window.__ModuleLoader__.load({
           }
           window.location.reload()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(remoteErrorMessage(reason, t))
           setBusy(false)
         }
       }
@@ -2372,7 +2492,6 @@ window.__ModuleLoader__.load({
         : t('remoteEntry')
       const visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3)
       const visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3)
-      const codexAvailable = status?.remoteFeatures?.codex === true
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),
@@ -2668,7 +2787,7 @@ window.__ModuleLoader__.load({
                               'aria-label': t('showAllWorkspaces'),
                               onClick: () => setShowAllWorkspaces(true),
                             }, React.createElement('span', { 'aria-hidden': true }, '…')))),
-                        !codexAvailable && codexWorkspaces.length === 0 ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                           React.createElement('div', {
                             id: codexWorkspaceHeadingId,
                             className: 'dshRemoteWorkspaceSourceHeading',
@@ -2689,7 +2808,10 @@ window.__ModuleLoader__.load({
                             className: 'dshRemoteDirectoryList dshRemoteCodexWorkspaceList',
                             'aria-labelledby': codexWorkspaceHeadingId,
                           }, visibleCodexWorkspaces.length === 0
-                            ? React.createElement('p', null, t('noCodexWorkspaces'))
+                            // An unavailable Codex is explained, not hidden and not shown as an empty list: the
+                            // two facts ("nothing here yet" and "you cannot use it right now") need different
+                            // sentences, and only the second one tells the user what to do.
+                            ? React.createElement('p', null, codexNotice ?? t('noCodexWorkspaces'))
                             : visibleCodexWorkspaces.map(workspace => React.createElement('button', {
                             type: 'button',
                             key: workspace.workspaceId,
@@ -2935,199 +3057,6 @@ function CodexConnectionDetails(props: {
           React.createElement('p', { className: error === undefined ? 'dshRemoteNotice' : 'dshRemoteError' }, error ?? '')))))
 }
 
-    function RemoteModeAction(props: {
-      wide: boolean
-      control: <T>(endpoint: string, payload?: unknown) => Promise<T>
-      statusFeed: StatusFeed<RemoteStatus>
-      t: Translate
-    }): unknown {
-      const { t } = props
-      const [open, setOpen] = React.useState(false)
-      const [status, setStatus] = React.useState<RemoteStatus | undefined>(undefined)
-      const [devices, setDevices] = React.useState<RemoteDevice[]>([])
-      const [hostRegistrationCode, setHostRegistrationCode] = React.useState('')
-      const [email, setEmail] = React.useState('')
-      const [password, setPassword] = React.useState('')
-      const [busy, setBusy] = React.useState(false)
-      const [progress, setProgress] = React.useState<RemoteConnectionProgress | undefined>(undefined)
-      const progressRun = React.useRef(0)
-      const [error, setError] = React.useState<string | undefined>(undefined)
-      const [supported, setSupported] = React.useState(true)
-
-      const refresh = async (): Promise<void> => {
-        const [nextStatus, nextDevices] = await Promise.all([
-          props.control<RemoteStatus>('status'),
-          props.control<RemoteDevice[]>('devices').catch(() => []),
-        ])
-        setStatus(nextStatus)
-        setDevices(nextDevices)
-      }
-
-      const refreshStatus = async (): Promise<void> => {
-        setStatus(await props.control<RemoteStatus>('status'))
-      }
-
-      React.useEffect(() => {
-        void refresh().catch(reason => {
-          setError(messageOf(reason))
-          setSupported(false)
-        })
-      }, [])
-
-      React.useEffect(() => {
-        // While the chooser is open the pushed status keeps the Host account
-        // line and the connection progress current; the subscription replays
-        // the latest status immediately, so no initial read is needed.
-        if (!open) return
-        return props.statusFeed.subscribe(setStatus)
-      }, [open])
-
-      const switchMode = async (mode: 'local' | 'remote', targetDeviceId?: string): Promise<void> => {
-        setBusy(true)
-        setError(undefined)
-        try {
-          const action = (): Promise<RemoteStatus> => props.control<RemoteStatus>('mode.set', { mode, ...(targetDeviceId === undefined ? {} : { targetDeviceId }) })
-          if (mode === 'remote' && targetDeviceId !== undefined) {
-            setStatus(await runConnectHostProgress(
-              status?.preferredTransports,
-              targetDeviceId,
-              props.control,
-              { label: 'remoteProgressSwitchingWorkspace', detail: 'remoteProgressSwitchingWorkspaceDetail' },
-              setProgress,
-              progressRun,
-              action,
-              connectedProgress,
-            ))
-          } else {
-            setStatus(await action())
-          }
-          window.location.reload()
-        } catch (reason) {
-          setError(messageOf(reason))
-          setBusy(false)
-        }
-      }
-
-      const loginHost = async (): Promise<void> => {
-        if (email.trim() === '' || password === '') return
-        setBusy(true)
-        setError(undefined)
-        try {
-          await props.control('host.account.login', { email: email.trim(), password })
-          await refreshStatus()
-        } catch (reason) {
-          setError(messageOf(reason))
-        } finally {
-          setPassword('')
-          setBusy(false)
-        }
-      }
-
-      const registerHostWithCode = async (): Promise<void> => {
-        if (hostRegistrationCode.trim() === '') return
-        setBusy(true)
-        setError(undefined)
-        try {
-          await props.control('host.registration-code.submit', { code: hostRegistrationCode.trim() })
-          setHostRegistrationCode('')
-          await refreshStatus()
-        } catch (reason) {
-          setError(messageOf(reason))
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      const label = status?.mode === 'remote'
-        ? t('remoteTarget', { name: status.target?.name ?? t('host') })
-        : t('local')
-      if (!supported) return null
-      return React.createElement(React.Fragment, null,
-        React.createElement('button', {
-          type: 'button',
-          className: 'dshRemoteModeButton',
-          title: t('switchTarget'),
-          'aria-label': t('switchTarget'),
-          onClick: () => setOpen(true),
-        }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
-          ? React.createElement('span', null, label)
-          : null),
-        open ? React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
-          React.createElement('section', {
-            className: 'dshRemoteDialog',
-            role: 'dialog',
-            'aria-modal': true,
-            'aria-label': t('harnessTarget'),
-          },
-          React.createElement('div', { className: 'dshRemoteHeader' },
-            React.createElement('strong', null, t('harnessTarget')),
-            React.createElement('button', { type: 'button', onClick: () => setOpen(false), 'aria-label': t('close') }, '×')),
-          React.createElement('button', {
-            type: 'button',
-            disabled: busy || status?.mode === 'local',
-            onClick: () => void switchMode('local'),
-          }, t('thisMachineLocal')),
-          React.createElement('div', { className: 'dshRemoteDevices' }, devices.length === 0
-            ? React.createElement('p', null, t('noRemoteHosts'))
-            : devices.map(device => React.createElement('button', {
-              type: 'button',
-              key: device.deviceId,
-              disabled: busy || !device.online || status?.target?.deviceId === device.deviceId,
-              onClick: () => void switchMode('remote', device.deviceId),
-            }, `${device.name} · ${[t(device.online ? 'online' : 'offline'), device.hostControl === false ? t('hostRefusesControl') : undefined].filter(Boolean).join(' · ')}`))),
-          React.createElement(RemoteProgressView, { progress, t }),
-          status?.hostAuthorizationAvailable && status.host !== undefined
-            ? React.createElement('div', { className: 'dshRemoteHostAccount' },
-              React.createElement('strong', null, t('thisMachineHost')),
-              React.createElement('p', null, status.host.online
-                ? status.host.account === undefined ? t('connected') : t('connectedAs', { account: status.host.account })
-                : status.host.accountRequired
-                  ? t('hostSignInHint')
-                  : status.host.error === undefined
-                    ? t('checkingHost')
-                    : t('hostUnavailable', { error: connectionErrorMessage(status.host.error, t) })),
-              status.host.accountRequired ? React.createElement('div', { className: 'dshRemoteLogin' },
-                React.createElement('input', {
-                  type: 'email',
-                  value: email,
-                  disabled: busy,
-                  autoComplete: 'username',
-                  placeholder: t('serverAccountEmail'),
-                  'aria-label': t('serverAccountEmail'),
-                  onChange: (event: Event) => setEmail((event.target as HTMLInputElement).value),
-                }),
-                React.createElement('input', {
-                  type: 'password',
-                  value: password,
-                  disabled: busy,
-                  autoComplete: 'current-password',
-                  placeholder: t('password'),
-                  'aria-label': t('serverAccountPassword'),
-                  onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
-                }),
-                React.createElement('button', {
-                  type: 'button',
-                  disabled: busy || email.trim() === '' || password === '',
-                  onClick: () => void loginHost(),
-                }, t(busy ? 'signingIn' : 'signInRegisterHost')),
-                React.createElement('input', {
-                  value: hostRegistrationCode,
-                  disabled: busy,
-                  autoComplete: 'one-time-code',
-                  placeholder: t('hostRegistrationCode'),
-                  'aria-label': t('hostRegistrationCode'),
-                  onChange: (event: Event) => setHostRegistrationCode((event.target as HTMLInputElement).value),
-                }),
-                React.createElement('button', {
-                  type: 'button',
-                  disabled: busy || hostRegistrationCode.trim() === '',
-                  onClick: () => void registerHostWithCode(),
-                }, t(busy ? 'registering' : 'useRegistrationCode'))) : null)
-            : null,
-          error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))
-          : null)
-    }
-
     function RemoteSessionHeaderAction(props: {
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
       statusFeed: StatusFeed<RemoteStatus>
@@ -3221,7 +3150,11 @@ function CodexConnectionDetails(props: {
           viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7,
           strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
         }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement('path', { d: 'M8 21h8M12 17v4' })),
-        React.createElement('span', { className: 'dshRemoteModePrefix' }, t(status.backend === 'codex' ? 'remoteModeCodex' : 'remoteModeDsh')),
+        // The label names the session being recovered when one is, because a Codex recovery has already
+        // switched the carriers to the local shell by then; reading the kind off `backend` alone said
+        // "remote DSH, reconnecting" for a Codex session.
+        React.createElement('span', { className: 'dshRemoteModePrefix' },
+          t((status.reconnecting?.kind ?? status.backend) === 'codex' ? 'remoteModeCodex' : 'remoteModeDsh')),
         React.createElement('span', { className: 'dshRemoteSessionTarget' },
           // While reconnecting the carriers may already describe the local shell, so its name must not
           // stand in for the target: name the Host the reconnect is about, or its short id.
@@ -3484,7 +3417,7 @@ function CodexConnectionDetails(props: {
           if (endpoint === 'status') return controlRouteUnavailableStatus() as T
           throw new ControlRouteUnavailableError(t('remoteControlUnavailable'))
         }
-        if (!result.ok) throw new Error(result.error?.message ?? t('remoteRequestFailed'))
+        if (!result.ok) throw controlFailure(result.error, t)
         return result.value as T
       }
       // One pushed status stream feeds every Host-status render in this page.

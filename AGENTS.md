@@ -66,7 +66,7 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 | 模块 | 状态 | 主要剩余工作 |
 | --- | --- | --- |
 | Plugin Host | 账号密码/主机匹配码接入、dsh-TUI 无 browser connection 时默认开启 Host、GitHub/知乎二维码授权与可点击 URL、原生 `/remote` login/status/logout 与 Tab 补全、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop/dsh-TUI 跨机 E2E 已验证；无自定义 Harness 业务适配层 | v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
-| Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、ApiProxy/Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测保留 legacy Host 降级并拒绝 ApiProxy/Typert 混连；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、进程回收后自动重连与周期存活检查的真机验收（插件侧已实现：持久化上次目标 + 启动退避重试 + 侧栏显式状态，认证失败即停止重试；**客户端不再探测业务路径**（每 30 秒 / 4 秒预算那套探测已删除：它排在会话自身流量之后，Host 推大历史时被误判为"没有应答"，实测形成"探测超时 → 快速重连 → 重开工作区 → 再次超时"的自激循环）。真正的断链信号只有两个：Server 通知链路已丢（对端离线 / 被顶替 / 协议失败），以及我们自己发现连接已死（写入吃 RST，约在 Server 判超时后 1 秒；或传输被关闭）。两者都先走**快速重连窗口**——10 秒内至多 **2 次**、两次都**强制 relay**（实测 relay 建链 2–3 秒，direct 协商单独就要 12 秒）、期间**不切视图 / 不刷新工作区 / 不重载**，成功后只刷新会话数据并重新发布工作区选择；窗口耗尽才**回退本地**，由重试日程接管（立即、5、5、10、20 秒，其后每 30 秒至多 5 次），走完即**停止并收起「重连中」**（`reconnect gave up; staying in the local shell`；手动重连不受限）。两种情况都由**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`；侧栏条目与目标对话框不再重复该状态）；页面重载只发生在真正回退与回退后的恢复；回前台由 `visibilitychange`/`focus` 触发 `client.connection.verify`**）、页面级导航接口、长期稳定性 |
+| Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、ApiProxy/Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测保留 legacy Host 降级并拒绝 ApiProxy/Typert 混连；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、进程回收后自动重连与周期存活检查的真机验收（插件侧已实现：持久化上次目标 + 启动退避重试 + 侧栏显式状态，认证失败即停止重试；**客户端不再探测业务路径**（每 30 秒 / 4 秒预算那套探测已删除：它排在会话自身流量之后，Host 推大历史时被误判为"没有应答"，实测形成"探测超时 → 快速重连 → 重开工作区 → 再次超时"的自激循环）。真正的断链信号只有两个：Server 通知链路已丢（对端离线 / 被顶替 / 协议失败），以及我们自己发现连接已死（写入吃 RST，约在 Server 判超时后 1 秒；或传输被关闭）。两者都先走**快速重连窗口**——10 秒内至多 **2 次**、两次都**强制 relay**（实测 relay 建链 2–3 秒，direct 协商单独就要 12 秒）、期间**不切视图 / 不刷新工作区 / 不重载**，成功后只刷新会话数据并重新发布工作区选择；窗口耗尽才**回退本地**，由重试日程接管（立即、5、5、10、20 秒，其后每 30 秒至多 5 次），走完即**停止并收起「重连中」**（`remote session recovery gave up; staying in the local shell`；手动重连不受限）。**恢复只还原"同一个会话"**（2026-10-10 重构）：恢复目标被归一为**设备 + 工作区种类 + 目录**（`sessionTargetFor` → `sessionTarget`），任何一条路径——快速窗口、重试日程、启动恢复——都调用同一个 `restoreSession`，所以 Codex 会话重连后仍然是 Codex，**不会**落回对端的 DSH 工作区；Codex 工作区的身份是**目录**而不是 id（对端重建 Codex 后 id 会变，按 root 重新匹配），并随目标一起写入 `client-target.json`（`workspace: { workspaceId, kind, workspacePath?, sessionId? }`），进程被回收后仍回到同一个 Codex 工作区；Codex 单独失效（对端关掉/替换 Codex 域）时**不重建健康传输**，只在现有链路上重建载体，失败才回退本地并由日程继续尝试——这条日程此前根本不启动，正是"Codex 关掉再打开回不来"的原因。两种情况都由**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`；侧栏条目与目标对话框不再重复该状态）；页面重载只发生在真正回退与回退后的恢复；回前台由 `visibilitychange`/`focus` 触发 `client.connection.verify`**）、页面级导航接口、长期稳定性 |
 | Android | 已迁移到 rc.2 ApiProxy / v0.1.2 Typert Remote 双数据面，并直接接入可选 `codex.app.*`：账号登录注册、成员设备列表与 identity key 固定、Adaptive transport + Noise、capability 探测、Harness/CodeX Workspace 与 Session、远端目录选择与 CodeX Project 注册、工作区收藏与首页快捷链接（点击直达该工作区最近会话）、分页 History/live frame、模型/权限、文字/图片 Prompt、interrupt 与审批，以及跟随系统/英文/简体中文界面；启动固定进入设备列表，`resolveAutoConnectDevice` 自动连接逻辑保留但不触发；rc.2/v0.1.2/CodeX 真机跨机 E2E、图片分块、重连和 WebRTC 已验证 | CodeX Project 新建跨设备 E2E、协议 conformance fixtures、长期稳定性与跨设备回归 |
 | VS Code | Extension 基础已实现：SecretStorage 身份/凭证、账号/扫码登录、Host 指纹固定、Adaptive transport + Noise、rc.2 ApiProxy / v0.1.2 Typert Remote Host→Workspace→Session 导航、Prompt、permission command 与编辑区会话面板 | Extension Host 跨机 E2E、实时流式更新、question 界面与重连恢复 |
 | Browser | Chrome/Edge MV3 轻量入口已实现：临时读取已登录 Web 的授权并换取隔离的 device credential，popup 展示在线 Host，点击后直接打开同源 Remote Web；不承载账号登录、Remote transport、ApiProxy 或会话 UI；unpacked 联调与 Web 授权跳转、独立 Server 合约联调已验证 | 随独立 Server 合约变化同步 |
@@ -75,7 +75,7 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 | Relay Transport | Protocol v1 control/relay 已实现 | 心跳、限制协商、断线状态传播 |
 | WebRTC | signaling、ICE、TURN、LAN/P2P/Relay 自适应路径基础已实现，Android 真机与 Host werift 互操作已验证 | 网络切换恢复和长期稳定性 |
 | Client Core | ApiProxy tunnel RPC/Event 关联基础已实现 | reconnect、pending call/stream 恢复 |
-| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证。**Codex 域后台启动且不阻塞 Host 就绪**：它需要外部二进制，失败只写状态。启动预算 **20 秒**（`CODEX_START_BUDGET_MS`）—— 它**必须大于**内层每次尝试的 15 秒超时（`APP_SERVER_START_TIMEOUT_MS`），否则预算会在第一个候选还在正常启动时就耗尽、**每台机器都报 `CODEX_START_TIMEOUT`**；实测本机 319 MB 的 `codex.exe` 冷启动+握手约 **5.3 秒**（旧值 5 秒正好卡死）。缺二进制、账号不可用或上游失败时变为 `unavailable`（`CODEX_START_TIMEOUT` / `CODEX_AUTH_REQUIRED` / `CODEX_UPSTREAM_ERROR`）。**注意**：`account/read` 是**门禁** —— 若 Codex 账号无法刷新（实测：403 `unsupported_country_region_territory`，或未签入），整个域就不可用，面板上 Codex 设置与工作区入口会**一起消失**，这不是插件故障 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
+| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证。**Codex 域后台启动且不阻塞 Host 就绪**：它需要外部二进制，失败只写状态。启动预算 **90 秒**（`CODEX_START_BUDGET_MS`）—— 它**必须大于**最慢的单步（现在是首次 `account/read` 探测的 **60 秒** `ACCOUNT_PROBE_TIMEOUT_MS`，与普通请求的 `APP_SERVER_REQUEST_TIMEOUT_MS` 同级），否则预算会在第一个候选还在正常启动时就耗尽、**每台机器都报 `CODEX_START_TIMEOUT`**；实测本机 319 MB 的 `codex.exe` 冷启动+握手约 **5.3 秒**，但**首次账号探测**在 Codex 状态较大时（本机 `thread_history` 库 427 MB）会明显超过旧的 15 秒，而超时会把真实回答（本机实测为 `CODEX_UPSTREAM_ERROR`）**掩盖**成"账号不可达"。缺二进制、账号不可用或上游失败时变为 `unavailable`（`CODEX_START_TIMEOUT` / `CODEX_AUTH_REQUIRED` / `CODEX_ACCOUNT_UNREACHABLE` / `CODEX_UPSTREAM_ERROR`）。域对外的状态码取**第一个（平台推荐）候选**的失败：曾经只抛最后一个候选（Windows 上是 PATH 里那个不存在的 `codex`），于是"二进制不可用"掩盖了"账号不可达"。上游返回错误时**保留其错误码**（`upstreamCode`，只收短标识符、不记文本）：本机实测 `account/read` 的上游是 **`-32603`（JSON-RPC internal error）**，而在此之前所有上游失败都塌缩成同一句通用文案，让限流、令牌过期与区域被拒看起来完全一样。**实测对应关系（2026-10-13）**：**VPN 未开启**时账号后端不可达，冷启动的 app-server 先表现为探测 15 秒超时、放宽到 60 秒后表现为 `-32603`；同一台机器 VPN 开着时域为 `ready`，关掉后重启即长期停在 `Starting`。所以"域不可用 + `CODEX_UPSTREAM_ERROR`/`-32603`"首先应怀疑这台机器的出网（VPN/代理），而不是 Codex 安装或插件——60 秒慢重试会在出网恢复后自行回到 `ready`，无需重写设置。**注意**：`account/read` 是**门禁** —— 若 Codex 账号无法刷新（实测：403 `unsupported_country_region_territory`，或未签入），整个域就不可用，面板上 Codex 设置与工作区入口会**一起消失**，这不是插件故障。**启动必须串行**：两个重叠的 launch 会互相抢 `this.appServer`，先失败的那个会把另一个**正在做账号探测**的 app-server 关掉（`CODEX_CLOSED`），所以 `restart()` 现在会先等飞行中的 launch 落定再释放 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
 | Mock Host | 旧 Android Remote RPC 联调工具，当前冻结 | 若恢复 Android 再迁移或替换 |
 | Desktop | Host 设置、Remote 工作区模态框、远程 Header、连接链路与加密状态已接入 Harness Web UI，Host status 由 loopback SSE 推送（无固定间隔的 status 轮询），原生窗口跨机 E2E 已验证 | 多窗口、休眠/唤醒和代理网络回归 |
 | 开源自部署 Server | `apps/server` 已实现多账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；账号间设备与令牌完全隔离，注册默认关闭（需显式配置注册码）；QR OAuth 端点已实现（`auto`/`github`/`wechat`/`mock`/`off`，账户密钥只存服务端）；**DeepSeek 账号登录已实现**（`DSH_SERVER_DEEPSEEK_LOGIN=on`，服务端自行向平台核对 grant 后即弃、不落盘，绑定键为平台稳定账号 ID，故同一 DeepSeek 用户必落同一账号；平台 WAF 强制要求浏览器 UA）；`DSH_SERVER_PASSWORD_LOGIN=off` 可关闭密码登录；建号默认关闭；provider 请求带硬超时且失败会将会话标记过期；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN。大陆部署需解决 `github.com` 出网：GeoDNS 给大陆返回的亚洲节点不可达，文档给出的 `/etc/hosts` 钉定实测**间歇可用**（同一 IP 曾 20/20 成功、随后 0/12 全败），可靠方案是境外部署或出站代理 | 出站代理或境外部署下的 GitHub 扫码验收、真实微信凭据与备案域名验收、账号自助注册与扫码登录的 Web 页面、Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
@@ -114,6 +114,43 @@ allowlist、Workspace authority 与历史读取在已安装版本上是否成立
 node --import tsx/esm scripts/codex-app-server-smoke.mts "<path-to-codex.exe>"
 ```
 
+脚本化的 Remote 端到端验收（`scripts/remote-e2e.mts`）：起一台 headless Host 与一台 headless Client，
+通过插件自己的 loopback 控制协议 `POST /ds-harness-remote/<endpoint>`（`control-route.ts`，面板调的就是
+它）拨动 Host 的「允许控制 / Codex 控制」并断言 Client 的运行时状态机与日志 —— 覆盖浏览≠会话、快速
+窗口保留视图、第 10 秒回退、重连日程、浏览连接死亡自愈等此前只能手测的流程。**不覆盖界面渲染**
+（顶部文案、页面重载）：状态机与日志之外的观感仍需人工确认：
+
+```bash
+node --import tsx/esm scripts/remote-e2e.mts --list                     # 全部场景（含 fast/slow 标注）
+node --import tsx/esm scripts/remote-e2e.mts --login-host               # 一次性授权 headless Host（打印 URL 并等待）
+node --import tsx/esm scripts/remote-e2e.mts --fast                     # 快速一半（约 6–10 分钟）
+node --import tsx/esm scripts/remote-e2e.mts control-off-codex:window   # 单个场景
+node --import tsx/esm scripts/remote-e2e.mts --against=<id|name> browse-codex   # 不需要拨开关的场景
+```
+
+矩阵（`--list` 是权威清单）：**两类会话 × 三种失去方式 × 三个阶段**——`harness`/`codex` 工作区分别
+被「控制开关」「Codex 开关」「冻结进程」打断，断言落在快速窗口内恢复 / 第 10 秒回退后由日程接回 /
+日程走完放弃且不再自启；另有 `browse-*`、`open-*`、`browsing-death`、`control-switch-semantics`、
+`cancel-during-window`、`codex-off-harness-session`（负例：Codex 关闭**不得**移动 DSH 会话）、
+`restart-client-*`（重启客户端后按记录恢复同一工作区）。`slow` 场景要等完整个日程或 Server 心跳判定
+（40–65 秒）才算"对端掉线"，因此单独跑更合适。冻结用 `NtSuspendProcess`（PowerShell P/Invoke）实现
+——那是"对端静默"这个路径唯一能从脚本制造的方式，拨开关是一次干净而立即的断开，两者不同。
+**不覆盖界面渲染**（顶部文案、页面重载时机）。
+
+结果分三类，末尾分别列出：**断言失败**与**场景抛错**都算产品问题；`environment-limited` 则被归因于
+这台机器到 Server 的链路（`CONNECTION_FAILED` / `This operation was aborted` / `Server rejected the
+connection`）或 Host 自身的前置条件（Codex 二进制/账号门禁导致 `CODEX_BINARY_UNAVAILABLE`——需要 Codex 的
+场景开跑前先探测，探测不过就跳过并写出宿主侧原因码），只报告、不计入失败。每个场景结束都会在 `finally`
+里复位 Host 的开关；上一次运行被打断而留下"控制已关闭"的 Host，脚本开跑前会自己把它重新打开，而不是让
+人去浏览器里找原因。Client 每次从**本地 shell** 起跑（否则它记着的上次目标会让首个场景与开机恢复赛跑，
+结果不可复现）。
+
+Host home 固定为 `C:\Workspace\.dsh-remote-e2e\host`（`DSH_REMOTE_E2E_HOST` 可覆盖，端口 63731），
+Identity 与授权持久保存，因此**只需一次性授权**：脚本检测到未上线时会打印该实例的 launch URL，
+在浏览器里用与 Client 同一账号登录并保持「允许其他用户控制本设备」打开即可；Client home 默认
+`C:\Workspace\.dsh-remote-client`（端口 63721）。未授权 Host 的场景会以 `--against` 方式跳过需要拨开关的
+用例，而不是给出无关的失败。
+
 Android 不能使用 Expo Go，因为 `react-native-webrtc` 依赖原生模块。
 
 开源自部署 Server 的独立验证命令：
@@ -133,22 +170,60 @@ Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-
 首次安装需 Windows 账户密码，禁止把密码写入 XML。服务与 CLI 共用固定 `DSH_HOME`，
 卸载保留 profile 和凭证，不清理旧全局 npm 环境。Windows 实机回归尚待完成。
 
+## 丧失的两种事实，与"用户想要什么"的权威（2026-10-14）
+
+**链路事件与域事件是两种事实，不能合并**：一条链路同时承载 DSH 远程会话、远程终端、文件预览、loopback
+预览与 ACP，而 Codex 只是可选域。因此"主机用户关掉 Codex"**不得**表现为链路断开——那会误伤同一链路上
+其它正在使用的会话与终端，而且是一条假消息。
+
+**Codex 的可用性走 `codex.app.capability {available}`，Host 只陈述事实、只在真实翻转时发送**（首次观察
+只记不发；替换式重启不算失去，只有真正停下来才算）。**判定权在 Client**：只有它知道自己在看什么——
+`available: false` 且正在看的会话属于该主机的 Codex 时，走**与其他丧失完全相同**的恢复阶梯；`available:
+true` **永远不是丧失**（正在恢复中的会话由阶梯接回，不需要第二条路径）。曾经把"Codex 被打开"也报成
+"你的会话丢了"，于是客户端起了第二条都想抢视图的路径，把用户的取消顶掉。
+
+**恢复是"用户此前提出的请求"，因此每一步之后都要重新核对用户现在想要什么**：权威是
+`lastWorkspaceSelection`（+ `client-target.json` 的 `mode`）——取消会清空它并写入 `local`，另选工作区会把
+它指向别处。`recoveryStillWanted()` 在每次尝试前后、以及**每次恢复动作落地之后**都要问一次；一次已经
+飞在路上的恢复若在落地时发现用户已回答（取消、或另选了工作区），必须**丢弃结果并回到本地**
+（`abandonRecovery` → `setMode('local')`），而不是把会话留在屏幕上。**这条对 DSH 与 Codex 是同一条共用
+路径**：两者都会出现"尝试在取消同一瞬间还在飞"的边界情况，实测 Codex 更容易复现只是因为它回来得快。
+回归用例：`tests/client-recovery.test.ts` 的"stops a recovery in flight when the user opens a workspace
+instead"、"discards a restore that lands after the user answered"，以及端到端场景
+`cancel-during-window`、`codex-off-harness-session`。
+
 ## Validation Baseline
 
-截至 2026-10-07（当前基线）：
+截至 2026-10-14（当前基线）：
 
-- workspace check 与 DSH bundle 校验通过；`git diff --check` 通过
-- Plugin 测试 **347 通过 / 1 环境失败**（38 个文件，348 个用例）。唯一失败是 `werift-rtc.test.ts` 的
-  `lan`/`p2p` 路径断言（`expected 'p2p' to be 'lan'`）：本机启用 Hyper-V 虚拟网卡（`vEthernet (Default Switch)`、
-  `Meta Tunnel`）且三档防火墙全开后稳定复现，与该测试导入的 `@dsh-remote/webrtc` 代码无关，也不是本仓库改动引入
-  （改动文件清单里没有任何 WebRTC 相关文件）。改回 345 用例前的基线见下一行；恢复环境后应能再次全绿。以**连跑两次一致**的结果为准：
-  2026-10-07 早先几次曾报告 37 个文件 / 332 个用例，属于少收集一个文件，不是用例缺失（磁盘 38 个文件均在版本控制内）
-- Server 测试 **43 个全部通过**（5 个文件，3.2s）；`pnpm -r check` 通过
+- workspace check、DSH bundle 校验与 `git diff --check` 通过；`pnpm -r test` **exit 0**（链条遇错即停）
+- Plugin 测试 **394 通过 / 46 文件**、Protocol **234 / 7**、Server **49 / 5**、Android **307**、
+  WebRTC 62、Client Core 39、VS Code 13、Browser 1、Crypto 7。2026-10-14 新增/扩展：恢复在采纳结果前
+  重新核对用户意图（`recoveryStillWanted` / `abandonRecovery`，2 条）、Codex 能力只在真实翻转时宣告
+  （1 条）、`watchCapability` 只把 `available:false` 当丧失（1 条）
+- **脚本化端到端矩阵**（`scripts/remote-e2e.mts`，2026-10-14）：**完整 21 场景 / 138 断言全绿**
+  （exit 0，1253 秒）—— 2 类会话 × 3 类失去（控制开关 / Codex 开关 / 冻结进程）× 3 个阶段（窗口 /
+  日程 / 放弃），外加浏览≠会话、浏览连接死亡自愈、控制开关语义、取消、Codex 负例、重启客户端后恢复；
+  `--fast` 为其中 11 个快速场景。**冻结必须真的挂起进程**（`foreach ($pid …)` 会因 PowerShell 只读自动
+  变量 `$PID` 而静默失败，"冻结"变成空操作——挂起失败现在会抛出），计数断言**按场景游标**统计且必须
+  按**字节**切片（日志含多字节的 `…`）
+- 真实设备验证（2026-10-14，Desktop 为 Host、隔离 web 为 Client）：功能全部正常；客户端日志
+  `trying the quick window` ×6 / `kept its view through a quick reconnect` ×3 /
+  `falling back to the local shell` ×3 / `remote session recovered` ×5 / `Codex session loss ignored` ×15，
+  `codex-closed` 与 `transport-closed`（含 `CONTROL_DISABLED`）两类丧失走同一条阶梯
+- **线上 Server 日志已核实（2026-10-14，冻结路径）**：真冻结对端后，Server 在 40–65 秒窗口内给出
+  `peer.offline … reason=heartbeat-timeout linksDropped=1` 并**通知了 client**，客户端据此进入快速窗口；
+  解冻后 `peer.online` → `link.created/accepted/ready` 恢复。e2e 等待期间客户端读到的 `online=true`
+  只是**超时未到**（不是缺陷）。当日安全类关键词 0；`AUTH_INVALID` 仅为 10-08/10-10 的旧事件
+- Codex 出网前提：**VPN/代理未开**时账号后端不可达，冷启动的 app-server 报 `CODEX_REQUEST_TIMEOUT`
+  或上游 `-32603`；出网恢复后 60 秒慢重试自行回到 `ready`（见上文实测对应关系）
+- `tests/werift-rtc.test.ts` 的 `lan`/`p2p` 断言依赖本机网卡环境（Hyper-V 虚拟网卡 + 三档防火墙全开时
+  会稳定失败，与本仓库代码无关）：2026-10-10 这次连跑全绿，恢复该环境后仍可能复现，以连跑两次一致为准
 - 平台的收敛必须继续：测试不得假设 POSIX 分隔符、点号即隐藏、或可无特权创建 symlink（`linkDirectory()`
   会回退到 junction）；`codexBinaryCandidates` 按**参数平台**拼接路径，而不是宿主
-- 新增测试：`tests/client-target-store.test.ts`（3）、`client-runtime.test.ts` 的启动恢复用例（1）、
-  `apps/server/tests/log.test.ts`（3）；此前一轮的 `tests/method-policy.test.ts`（6）、
-  `tests/harness-api-history.test.ts`（2）、`tests/atomic-file.test.ts`（4）保持通过
+- 跨仓库协议 fixture 中与实现冲突的两条（描述符携带 `role`、`harnessVersion`）已按"描述符故意不严格"
+  契约修正，`docs/protocol.md` §7 同步；§8.1.2 与 `docs/server.md` / `docs/plugin-integration.md`
+  仍在描述已删除的 `/api/v1/devices/register-owned-role`，属跨仓库契约，需与独立 Server 仓库一同确认
 - Codex App Server 版本基线 **0.160.0**（`generate-json-schema` 产物用于逐字段对照）；只读端到端自检
   脚本 `scripts/codex-app-server-smoke.mts`
 - 真实设备验证：Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC，以及

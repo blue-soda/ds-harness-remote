@@ -48,6 +48,31 @@ describe('ClientTargetStore', () => {
     expect((await store.load())?.hostDeviceId).toBeUndefined()
   })
 
+  it('round-trips the workspace a restart has to restore', async () => {
+    const store = new ClientTargetStore(await makeDirectory())
+
+    await store.save({
+      mode: 'remote',
+      hostDeviceId: 'host-1',
+      workspace: { workspaceId: 'codex-workspace:project:p1', kind: 'codex', workspacePath: '/srv/project' },
+    })
+    await expect(store.load()).resolves.toMatchObject({
+      workspace: { workspaceId: 'codex-workspace:project:p1', kind: 'codex', workspacePath: '/srv/project' },
+    })
+
+    // A workspace the record cannot identify must not make the whole record unreadable: the Host it names is
+    // still restorable, and restoring the wrong workspace kind is worse than restoring none.
+    await writeFile(store.file, JSON.stringify({
+      schemaVersion: 1,
+      mode: 'remote',
+      hostDeviceId: 'host-1',
+      workspace: { workspaceId: '', kind: 'codex' },
+      savedAt: 1,
+    }))
+    await expect(store.load()).resolves.toMatchObject({ hostDeviceId: 'host-1' })
+    expect((await store.load())?.workspace).toBeUndefined()
+  })
+
   it('reads a malformed or half-written record as no record at all', async () => {
     const directory = await makeDirectory()
     const store = new ClientTargetStore(directory)

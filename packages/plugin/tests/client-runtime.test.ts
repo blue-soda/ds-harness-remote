@@ -120,6 +120,16 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(runtime.restoreLastTarget()).resolves.toBe(false)
 
     await store.save({ mode: 'remote', hostDeviceId: 'host-1', serverUrl: config().serverUrl })
+    // A Host without a workspace is not a session: the user was still browsing, so the boot stays local.
+    await expect(runtime.restoreLastTarget()).resolves.toBe(false)
+    expect(runtime.status().reconnecting).toBeUndefined()
+
+    await store.save({
+      mode: 'remote',
+      hostDeviceId: 'host-1',
+      serverUrl: config().serverUrl,
+      workspace: { workspaceId: 'workspace-1', kind: 'harness' },
+    })
     await expect(runtime.restoreLastTarget()).resolves.toBe(true)
     // The window is told which Host is coming back before anything is connected.
     expect(runtime.status()).toMatchObject({ reconnecting: { targetDeviceId: 'host-1', phase: 'restore' } })
@@ -150,6 +160,11 @@ describe('ClientModeRuntime Host account control', () => {
       client,
       target: { deviceId: 'host-1', name: 'Host' },
       features: remoteHostFeatures(),
+    }
+    // A session exists only once a workspace was opened; the recovery is for that, and nothing else.
+    ;(runtime as unknown as { lastWorkspaceSelection: unknown }).lastWorkspaceSelection = {
+      targetDeviceId: 'host-1',
+      workspaceId: 'workspace-1',
     }
 
     // The Server closing the replaced peer's links reaches us as a lost transport. The quick window

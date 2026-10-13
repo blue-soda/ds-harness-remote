@@ -14,6 +14,13 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## 已完成基线
 
+- [x] 远程会话恢复重构成"同一个会话"模型（2026-10-10）：丢失后的恢复只看用户正在看的
+      **设备 + 工作区种类 + 目录**——Codex 会话重连后仍是 Codex（不再落回对端 DSH 工作区），Codex 关闭
+      再打开会由重试日程自动接回同一目录，Codex 单独失效不再白白重建健康的传输；"关闭整体控制 /
+      关闭 Codex"两条 host 开关都会立即生效并写下服务端标志，重启/重连不再让它看起来仍然可控；
+      卡片新增能力轮询（数秒自更新）、Refresh 会重读工作区并重新建立当前会话、拒绝原因用本地化真话
+      （CODEX_DISABLED / CODEX_NOT_PROVIDED / CONTROL_DISABLED / HOST_OFFLINE）；目标工作区种类与根
+      持久化到 `client-target.json`，进程被回收后仍回到原处
 - [x] Issue #70：Plugin 刷新跨进程互斥、握手恢复单次重试、重复 Host 连接停止抢占及授权恢复提示
 - [ ] Issue #70：Windows 双实例与异常退出遗留锁的实机回归（已有进程级锁与状态机测试）
 
@@ -46,11 +53,9 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
       （两个半边都由 `serverUrl + connection` 决定 ✓）、双角色注册来自 `authorizeHostByDefault()` ✓、
       `both` 为惰性值 ✓、唯一强制写角色的是**远程卡片的 DeepSeek 登录**（`client.ts:2129` 硬编码
       `role: 'client'` ✓）、其余控制写入与 CLI 都保留或不动 `role` ✓
-- [ ] 让 `both` 有一等语义：放开 `configure`（`control-runtime.ts:224`）与 `setRole`（`:312`）对 `both`
-      的校验，并定义行为（建议：以 host 身份授权后再补授权对侧，与"凭据按角色分目录"的既有模型一致），
-      附最小测试
-- [ ] 若发行版要"钉住"默认 `role`：允许声明"面板登录不改写 `role`"，或在写入前保留 patch 的原始
-      `role`；需先定语义（`both` 是否等于双份授权）再实现
+- [x] 上面这条调查的结论已经落地：`role` 现在是**只存在于连接上的概念**，配置、描述符、存储与面板写入里
+      都没有它（`settings.configure` 的 `role: 'client'` 也已删除），所以"`both` 的一等语义"与"钉住默认
+      `role`"这两条待办不再成立，已作废；契约见 `docs/config-and-role.md`
 
 ## P0：Plugin 可用链路
 

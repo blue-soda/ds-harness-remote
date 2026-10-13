@@ -128,11 +128,6 @@ export class ConnectionController {
     return peers.length === 1 ? peers[0] : undefined
   }
 
-  connectionMode(): 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected' {
-    const connection = this.active.values().next().value as ActiveConnection | undefined
-    return connection?.channel.mode ?? (connection === undefined ? 'Disconnected' : 'Relay')
-  }
-
   async send(message: RemoteMessage): Promise<void> {
     await Promise.all([...this.active.values()].map(connection => this.sendConnection(connection, message)))
   }
