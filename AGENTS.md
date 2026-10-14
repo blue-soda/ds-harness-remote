@@ -58,7 +58,8 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 3. 开启 2FA 后非交互式发布会在**最后一步**要求一次性密码（EOTP）：需人工在浏览器完成授权，或由人提供
    6 位码后加 `--otp=<码>`；该失败发生在真正上传之前，不会留下半成品。
 
-包名与上游归属、完整发版清单（含三处版本号必须一致）与两次发布的实测复盘见
+包名与上游归属、完整发版清单（**5 处版本号必须一致**：根与包的 `package.json`、两个 `dsh-plugin.json`、
+`packages/plugin/src/version.ts`）与三次发布的实测复盘见
 [`docs/release.md`](docs/release.md)。
 
 ## Current Status
@@ -66,7 +67,7 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 | 模块 | 状态 | 主要剩余工作 |
 | --- | --- | --- |
 | Plugin Host | 账号密码/主机匹配码接入、dsh-TUI 无 browser connection 时默认开启 Host、GitHub/知乎二维码授权与可点击 URL、原生 `/remote` login/status/logout 与 Tab 补全、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop/dsh-TUI 跨机 E2E 已验证；无自定义 Harness 业务适配层 | v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
-| Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、ApiProxy/Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测保留 legacy Host 降级并拒绝 ApiProxy/Typert 混连；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、进程回收后自动重连与周期存活检查的真机验收（插件侧已实现：持久化上次目标 + 启动退避重试 + 侧栏显式状态，认证失败即停止重试；**客户端不再探测业务路径**（每 30 秒 / 4 秒预算那套探测已删除：它排在会话自身流量之后，Host 推大历史时被误判为"没有应答"，实测形成"探测超时 → 快速重连 → 重开工作区 → 再次超时"的自激循环）。真正的断链信号只有两个：Server 通知链路已丢（对端离线 / 被顶替 / 协议失败），以及我们自己发现连接已死（写入吃 RST，约在 Server 判超时后 1 秒；或传输被关闭）。两者都先走**快速重连窗口**——10 秒内至多 **2 次**、两次都**强制 relay**（实测 relay 建链 2–3 秒，direct 协商单独就要 12 秒）、期间**不切视图 / 不刷新工作区 / 不重载**，成功后只刷新会话数据并重新发布工作区选择；窗口耗尽才**回退本地**，由重试日程接管（立即、5、5、10、20 秒，其后每 30 秒至多 5 次），走完即**停止并收起「重连中」**（`remote session recovery gave up; staying in the local shell`；手动重连不受限）。**恢复只还原"同一个会话"**（2026-10-10 重构）：恢复目标被归一为**设备 + 工作区种类 + 目录**（`sessionTargetFor` → `sessionTarget`），任何一条路径——快速窗口、重试日程、启动恢复——都调用同一个 `restoreSession`，所以 Codex 会话重连后仍然是 Codex，**不会**落回对端的 DSH 工作区；Codex 工作区的身份是**目录**而不是 id（对端重建 Codex 后 id 会变，按 root 重新匹配），并随目标一起写入 `client-target.json`（`workspace: { workspaceId, kind, workspacePath?, sessionId? }`），进程被回收后仍回到同一个 Codex 工作区；Codex 单独失效（对端关掉/替换 Codex 域）时**不重建健康传输**，只在现有链路上重建载体，失败才回退本地并由日程继续尝试——这条日程此前根本不启动，正是"Codex 关掉再打开回不来"的原因。两种情况都由**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`；侧栏条目与目标对话框不再重复该状态）；页面重载只发生在真正回退与回退后的恢复；回前台由 `visibilitychange`/`focus` 触发 `client.connection.verify`**）、页面级导航接口、长期稳定性 |
+| Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、ApiProxy/Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测保留 legacy Host 降级并拒绝 ApiProxy/Typert 混连；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、进程回收后自动重连与周期存活检查的真机验收（插件侧已实现：持久化上次目标 + 启动退避重试 + 侧栏显式状态，认证失败即停止重试；**客户端不再探测业务路径**（每 30 秒 / 4 秒预算那套探测已删除：它排在会话自身流量之后，Host 推大历史时被误判为"没有应答"，实测形成"探测超时 → 快速重连 → 重开工作区 → 再次超时"的自激循环）。真正的断链信号只有两个：Server 通知链路已丢（对端离线 / 被顶替 / 协议失败），以及我们自己发现连接已死（写入吃 RST，约在 Server 判超时后 1 秒；或传输被关闭）。两者都先走**快速重连窗口**——10 秒内至多 **2 次**、两次都**强制 relay**（实测 relay 建链 2–3 秒，direct 协商单独就要 12 秒）、期间**不切视图 / 不刷新工作区 / 不重载**，成功后只刷新会话数据并重新发布工作区选择；窗口耗尽才**回退本地**，由重试日程接管（**5、10、20、30、30、30、30 秒，7 次后停止**；只有开机按记录恢复会额外先做一次立即尝试），走完即**放弃并收起「重连中」**（`remote session recovery gave up; staying in the local shell`；此后不再自启，手动重连不受限）。**恢复只还原"同一个会话"**（2026-10-10 重构）：恢复目标被归一为**设备 + 工作区种类 + 目录**（`sessionTargetFor` → `sessionTarget`），任何一条路径——快速窗口、重试日程、启动恢复——都调用同一个 `restoreSession`，所以 Codex 会话重连后仍然是 Codex，**不会**落回对端的 DSH 工作区；Codex 工作区的身份是**目录**而不是 id（对端重建 Codex 后 id 会变，按 root 重新匹配），并随目标一起写入 `client-target.json`（`workspace: { workspaceId, kind, workspacePath?, sessionId? }`），进程被回收后仍回到同一个 Codex 工作区；Codex 单独失效（对端关掉/替换 Codex 域）时**不重建健康传输**，只在现有链路上重建载体，失败才回退本地并由日程继续尝试——这条日程此前根本不启动，正是"Codex 关掉再打开回不来"的原因。两种情况都由**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`；侧栏条目与目标对话框不再重复该状态）；页面重载只发生在真正回退与回退后的恢复；回前台由 `visibilitychange`/`focus` 触发 `client.connection.verify`**）、页面级导航接口、长期稳定性 |
 | Android | 已迁移到 rc.2 ApiProxy / v0.1.2 Typert Remote 双数据面，并直接接入可选 `codex.app.*`：账号登录注册、成员设备列表与 identity key 固定、Adaptive transport + Noise、capability 探测、Harness/CodeX Workspace 与 Session、远端目录选择与 CodeX Project 注册、工作区收藏与首页快捷链接（点击直达该工作区最近会话）、分页 History/live frame、模型/权限、文字/图片 Prompt、interrupt 与审批，以及跟随系统/英文/简体中文界面；启动固定进入设备列表，`resolveAutoConnectDevice` 自动连接逻辑保留但不触发；rc.2/v0.1.2/CodeX 真机跨机 E2E、图片分块、重连和 WebRTC 已验证 | CodeX Project 新建跨设备 E2E、协议 conformance fixtures、长期稳定性与跨设备回归 |
 | VS Code | Extension 基础已实现：SecretStorage 身份/凭证、账号/扫码登录、Host 指纹固定、Adaptive transport + Noise、rc.2 ApiProxy / v0.1.2 Typert Remote Host→Workspace→Session 导航、Prompt、permission command 与编辑区会话面板 | Extension Host 跨机 E2E、实时流式更新、question 界面与重连恢复 |
 | Browser | Chrome/Edge MV3 轻量入口已实现：临时读取已登录 Web 的授权并换取隔离的 device credential，popup 展示在线 Host，点击后直接打开同源 Remote Web；不承载账号登录、Remote transport、ApiProxy 或会话 UI；unpacked 联调与 Web 授权跳转、独立 Server 合约联调已验证 | 随独立 Server 合约变化同步 |
@@ -222,8 +223,13 @@ instead"、"discards a restore that lands after the user answered"，以及端�
 - 平台的收敛必须继续：测试不得假设 POSIX 分隔符、点号即隐藏、或可无特权创建 symlink（`linkDirectory()`
   会回退到 junction）；`codexBinaryCandidates` 按**参数平台**拼接路径，而不是宿主
 - 跨仓库协议 fixture 中与实现冲突的两条（描述符携带 `role`、`harnessVersion`）已按"描述符故意不严格"
-  契约修正，`docs/protocol.md` §7 同步；§8.1.2 与 `docs/server.md` / `docs/plugin-integration.md`
-  仍在描述已删除的 `/api/v1/devices/register-owned-role`，属跨仓库契约，需与独立 Server 仓库一同确认
+  契约修正，`docs/protocol.md` §7 同步。已删除的 `/api/v1/devices/register-owned-role` 现已在
+  `docs/protocol.md` §8.1.2、`docs/server.md` §7/§9、`docs/plugin-integration.md` §5.4 与
+  `docs/config-and-role.md` 里**带日期标注为已删除**（2026-10-14 文档清理）；仍存在的残留是
+  `packages/protocol` 的 `RegisterOwnedRoleRequest`/`registerOwnedRoleRequestSchema` 与一处测试桩
+  （无实现调用，属死代码），以及**浏览器授权交换** `POST /api/v1/auth/browser-authorizations/exchange`
+  的 bespoke 严格 schema 仍要求 `role: "client"`（跨仓库契约，通用描述符不含 role）——两者都要与独立
+  Server 仓库一同确认后再删
 - Codex App Server 版本基线 **0.160.0**（`generate-json-schema` 产物用于逐字段对照）；只读端到端自检
   脚本 `scripts/codex-app-server-smoke.mts`
 - 真实设备验证：Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC，以及
@@ -304,8 +310,8 @@ deviceId**（注册需要账号会话或注册码 ✓，从不只凭设备令牌
 的记录 ✓，因此被吊销的设备在重新登录前得到 `AUTH_INVALID` 而非 `DEVICE_REVOKED` ✓。此前那套"标记式吊销 +
 客户端轮换身份"是设备行翻倍的根源 ✓（一台手机曾留下**四对**身份 ✓），已整体删除 ✓。
 
-**`role` 只存在于连接上** ✗：它既不再是配置项 ✓（已从 config / schema / UI / 端点删除 ✓），也**不在描述符与
-存储里** ✓ —— `AccountDeviceDescriptor` 合并了原来的 host/client 两种形状、**没有 role** ✓，描述符 schema 故意
+**`role` 只存在于连接上** ✗：它**不再是有效的配置项** ✓（已从 schema / UI / 端点删除 ✓；`config.ts` 为升级
+兼容仍**接受并忽略**它，以免旧 profile 被拒 ✓），也**不在描述符与存储里** ✓ —— `AccountDeviceDescriptor` 合并了原来的 host/client 两种形状、**没有 role** ✓，描述符 schema 故意
 **不严格** ✓，所以旧安装多发的 role 被**忽略**而不是被拒收 ✓。唯一的角色是**连接角色** ✓：hello 里声明 ✓、
 服务端 peer 键为 `account + deviceId + role` ✓（同一身份可同时持有两条连接、互不顶替 ✓）、只有 client 连接能发起
 `connect.request` ✓、关闭控制时只拒绝 `role=host` 的连接 ✓ —— 这些**不是死代码** ✓，删掉它们就无法区分同一设备的

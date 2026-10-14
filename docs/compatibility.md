@@ -35,3 +35,5 @@ after either upstream is upgraded are recorded in
 [Codex Remote technical notes](codex-remote.md).
 
 `0.4.29` keeps the same compatibility targets and adds the Windows state-file retry described in the changelog.
+
+`0.5.0` keeps the same carrier generations (rc.2 `ApiProxy`; v0.1.2 alpha.1-rc.1, v0.1.5 rc.1, v0.1.6 alpha.1 and v0.2.0 rc.1 Session V3 Typert Remote) and changes recovery instead: every kind of loss now shares one ladder (ten-second quick window over Relay with the view kept, local fallback at the ten-second mark, then a bounded 5/10/20/30s schedule that gives up for good), recovery restores the same session (device + workspace kind + directory), the user's own cancel or workspace choice wins over a recovery that lands later, and the Codex domain states its availability with `codex.app.capability` only when it really changes - so switching Codex off no longer disturbs a Harness session on the same connection. Devices hold one identity (`role` exists only on a connection).

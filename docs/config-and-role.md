@@ -23,7 +23,7 @@
 - **迁移**：旧布局是**按角色**的两份身份（`.../host`、`.../client`）。首次运行会把 `host` 那份
   （服务端已有对应设备行、凭据一并带上）整目录复制到 `device/`，没有 `host` 时退回 `client`；
   **旧目录原样保留**作为备份，不删任何用户数据。
-- **可观测性**：设备行只存 `lastSeenAt` 与 `revoked`。要判断身份年龄可解码 deviceId 的 ULID 前缀
+- **可观测性**：设备行只存 `lastSeenAt`、`revoked` 与 `hostControl`。要判断身份年龄可解码 deviceId 的 ULID 前缀
   （前 10 个字符即创建毫秒）；`lastSeenAt` 对 client 行可能长期为 0，**不能**只按它判断在线。
 
 ## `role` 的现状

@@ -54,7 +54,7 @@ These patterns describe the source implementation; native-device appearance, key
 
 ## Layout and Navigation
 
-The Android MVP uses a shallow stack: Setup → Devices → Device → Sessions → Chat, with Settings reachable from Devices. Pairing is a focused flow opened from Devices. Preserve the selected device and session on reconnect. Avoid bottom navigation until there are multiple durable top-level destinations.
+The Android MVP uses a shallow stack: sign-in entry → Devices → Device → Workspaces → Sessions → Chat, with Settings reachable from Devices. There is no pairing flow: access is account sign-in plus membership, with an optional one-time host match code. Preserve the selected device and session on reconnect. Avoid bottom navigation until there are multiple durable top-level destinations.
 
 ## Motion
 

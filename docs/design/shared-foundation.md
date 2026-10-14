@@ -5,7 +5,7 @@
 ## 1. 目的
 
 统一 Desktop 双角色 Plugin 与外部 Server 的身份、加密、连接和传输边界。Harness 业务层以
-rc.2 官方 `ApiProxy`、v0.1.2 alpha.1–rc.1 或 v0.1.5 rc.1 Session V3 官方 Typert Remote Gateway 为唯一事实来源；可选文件预览以 `dsh-file-viewer` provider 为唯一授权来源，
+rc.2 官方 `ApiProxy`、v0.1.2 alpha.1–rc.1、v0.1.5 rc.1 / v0.1.6 alpha.1 / v0.2.0 rc.1 Session V3 官方 Typert Remote Gateway 为唯一事实来源；可选文件预览以 `dsh-file-viewer` provider 为唯一授权来源，
 不再维护平行的 Remote Session/Event 或文件系统协议。
 Android 与 VS Code Client 复用同一 capability 探测，在 rc.2 ApiProxy 和 v0.1.2 Typert Remote carrier 之间选择数据面。
 
@@ -35,10 +35,10 @@ Server 可以读取路由和连接元数据，但不能解密 Harness business p
 
 ## 4. 身份与账号授权
 
-每个 Host/Client 具有独立 deviceId、显示名、平台和 X25519 identity key。私钥只保存
-在设备本地。身份、device credential 和 trusted peer 按规范化 Server origin 与角色隔离。
+每台设备具有一份终身不变的身份（同一个 deviceId 复用于该设备的 Host 与 Client 连接）、显示名、平台和 X25519 identity key。私钥只保存
+在设备本地；登录/登出只清本地凭证，不轮换身份。身份、device credential 和 trusted peer 按规范化 Server origin 隔离；`role` 只存在于连接上（hello 声明，peer 键为 account + deviceId + role），不是配置项，也不在描述符与存储里。
 
-Host 和 Client 都必须归属站点账号；Server 为同账号异角色设备自动建立 membership。
+Host 和 Client 都必须归属站点账号；Server 为同账号设备自动建立 membership。
 Host 可使用账号密码，或使用网页生成的 8 位、10 分钟 TTL、单次消费主机匹配码接入。
 该码只授权 Host 加入账号，不是 Host/Client pairing。建立业务通道前，Client 从受
 membership 保护的详情固定 Host key；Host 对 `connect.incoming.authorization=account`
@@ -53,12 +53,19 @@ Secure channel 中只接受：
 - `harness.api.respond`
 - `harness.api.stream.open`
 - `harness.api.stream.close`
+- `harness.api.transfer.open` / `chunk` / `commit` / `read` / `close`
 - `harness.remote.call`
 - `harness.remote.stream.open`
 - `harness.remote.stream.close`
+- `harness.remote.transfer.open` / `chunk` / `commit` / `read` / `close`
 - `harness.transport.describe`
+- `loopback.call`（Host 授权 loopback 端口时）
 - `fileviewer.call`（Host 宣告 `fileviewer.read.v1` 时，仅 stat/readRange/list）
-- 对应 response/error 与 `harness.api.*`、`harness.remote.*` stream events
+- `codex.app.call` / `codex.app.respond`、`codex.app.stream.open|close`、`codex.app.transfer.open|chunk|commit|read|close`（Host 宣告 `codex.appserver.v1` 时）
+- `acp.initialize`、`acp.session.new|load|prompt|respond_permission|cancel|set_mode`（Host 宣告 `agent.acp.v1` 时）
+- 对应 response/error 与 `harness.api.*`、`harness.remote.*`、`codex.app.*` stream events
+
+该清单以 `packages/plugin/src/rpc-router.ts` 的 `apiMethods` 为准。
 
 Session、Message、Tool、Approval、Question、Workspace 和 Goal 的结构全部沿用对应版本
 的官方 ApiProxy 或 Typert Remote contract。Plugin 不复制其 schema，也不提供旧 `sessions.*`、
@@ -83,8 +90,8 @@ Client 与 Host Plugin 推荐安装同一发布物。对已经发布的 Host，�
 
 1. pending tunnel RPC 失败；
 2. 原生 mux/host stream 结束；
-3. Desktop `ApiProxySwitch` 或 `TypertGatewaySwitch` 立即回落 Local；
-4. 再次选择 Remote 时重新建 Noise channel，并由官方 UI 重新打开 stream、读取 history baseline。
+3. Desktop `ApiProxySwitch` 或 `TypertGatewaySwitch` 先进入 10 秒快速窗口（至多 2 次、强制 relay、不切视图 / 不刷新工作区），第 10 秒才回落 Local；
+4. 回退本地后由重试日程（5、10、20、30、30、30、30 秒，7 次后停止）重建 Noise channel，并由官方 UI 重新打开 stream、读取 history baseline；用户取消或另选工作区后落地的恢复会被丢弃。
 
 Plugin 不维护第二套 seq replay buffer 或 full-resync 机制。
 

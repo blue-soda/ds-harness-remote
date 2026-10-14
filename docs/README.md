@@ -7,7 +7,7 @@
 - DeepSeek Harness Plugin（常驻 Host + 本地 Remote 工作区入口，无用户可见的 Client 模式）
 - Android Client（账号授权 + Adaptive transport + rc.2 ApiProxy / v0.1.2 Typert Remote 双数据面 + 可选 Codex Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 Typert Remote 会话/Prompt）
-- `protocol`、`crypto`、`webrtc`、`client-core`、`ui` 等共享包
+- `protocol`、`crypto`、`webrtc`、`client-core` 等共享包
 - 用于客户端和插件联调的 Mock Host
 
 本仓库另提供 [最小自部署 Server](../apps/server/README.zh.md)：多账号（环境变量配置种子账号）鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
@@ -29,8 +29,11 @@
 - [端到端加密](end-to-end-encryption.md)：解释 Noise IK、设备身份固定、密钥生命周期、Server 可见元数据、重放保护与安全边界。
 - [网络与传输](network.md)：解释出站连接、Control/Data plane、LAN/P2P/TURN/Relay 选路、NAT、降级、断线恢复与当前验证状态。
 - [版本兼容说明](compatibility.zh.md)（[English](compatibility.md)）：记录 Plugin 与各版本 DeepSeek Harness 的 carrier、Session 和 Desktop 兼容范围。
-- [配置与 `role` 契约](config-and-role.md)：面向发行版集成者，说明 `role` 的真实作用、配置写回路径与 seed 默认值的存活条件。
+- [配置与 `role` 契约](config-and-role.md)：面向发行版集成者，说明 `role` 的真实作用（**只在连接上**）、配置写回路径与 seed 默认值的存活条件。
+- [发布与发版清单](release.md)：包名与归属、五处版本号必须一致、三条硬规则，以及历次发布的实测复盘。
+- [验证历史](validation-history.md)：按日期追加的构建、实机结论与尚未完成的验收边界（当前基线摘要见 [`AGENTS.md`](../AGENTS.md)）。
 - [排查记录](incidents/)：按需阅读的历史排查与验收过程（远程 Codex 打不开原生窗口、Android Files/Terminal 接入）；其中的**当前约束**已摘要进 [`AGENTS.md`](../AGENTS.md)。
+- [升级说明](upgrade-0.2.0.md)：从旧版本升级时的行为变化（[0.1.7 说明](upgrade-0.1.7.md)）。
 
 ## 阅读路径
 
@@ -41,6 +44,7 @@
 - **实现或审查 Plugin**：读[功能设计](design/plugin/functional-design.md)和[Host 接入指南](plugin-integration.md)。
 - **实现外部 Server**：以[协议](protocol.md)为线协议权威，再参考[Server 设计](server.md)。
 - **跟踪尚未完成的工作**：读[开发任务](../TODO.md)。
+- **改动恢复/Codex/身份行为之前**：先读 [`AGENTS.md`](../AGENTS.md) 的《丧失的两种事实，与"用户想要什么"的权威》与 **Validation Baseline**；端到端验收用 `node --import tsx/esm scripts/remote-e2e.mts`（两分钟到半小时，取决于是否含 `slow` 场景，用法见 AGENTS.md 的 Development 节）。
 
 文档优先级：`protocol.md` 的线协议约束高于示例代码；Server 设计发生变化时必须同步检查协议兼容性和版本号。
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-仅适用于 `apps/server/web/src`。沿用 `deepseek-harness-server/web/src` 的 React + Ant Design 界面，提供账号密码登录和设备状态。
+仅适用于 `apps/server/web/src`。沿用 `deepseek-harness-server/web/src` 的 React + Ant Design 界面，提供公开的 landing 页（`HomePage`：安装/连接指引与安全说明）、账号密码登录、设备状态页，以及跟随系统偏好并可手动切换的主题（`theme.tsx` / `ThemeToggle`）。
 
 ## Colors
 
@@ -22,4 +22,4 @@
 
 ## 复用约定
 
-沿用上游布局和主题，页面聚焦登录与设备状态。
+沿用上游布局和主题，页面聚焦 landing、登录与设备状态。

@@ -31,3 +31,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 前拒绝 Session V3 Host。
 
 `0.4.29` 的兼容目标与 0.4.28 相同，新增 Windows 状态文件写入重试，详见 CHANGELOG。
+
+`0.5.0` 的 carrier 代际不变（rc.2 `ApiProxy`；v0.1.2 alpha.1–rc.1、v0.1.5 rc.1、v0.1.6 alpha.1 与 v0.2.0 rc.1 Session V3 Typert Remote），改的是恢复：所有丧失复用同一条阶梯（10 秒快速窗口、强制 relay、保留视图 → 第 10 秒回退本地 → 有界的 5/10/20/30 秒日程，走完彻底放弃），恢复只还原同一个会话（设备 + 工作区种类 + 目录），用户自己的取消或另选工作区优先于之后才落地的恢复，Codex 域改用 `codex.app.capability` 只在真实翻转时声明可用性——因此关闭 Codex 不再干扰同一条链路上的 Harness 会话。设备只有一份身份（`role` 只存在于连接上）。

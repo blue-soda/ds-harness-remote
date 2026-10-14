@@ -1,3 +1,8 @@
+> ⚠️ **历史文档（原始需求背景）**：本文记录的是 2026-09 之前的需求构想，**不再代表当前实现**。
+> 其中配对 / Device Code 流程、`sessions.*` 业务协议、自定义 event 层与事件序列重放（`sync.from` / `FULL_RESYNC`）、
+> 旧的断线回落策略，以及 `apps/web`、`apps/desktop` 目录布局均已被取代甚至删除。
+> 当前实现边界以 `AGENTS.md`、`README.md` 与 `docs/protocol.md` 为准；正文仅作追溯保留。
+
 # DeepSeek Harness Remote — Full Vibecoding Development Prompt
 
 > 仓库范围变更：本文仅保留原始需求背景，权威边界见 `README.md` 和 `docs/README.md`。本仓库提供 Plugin、Client、共享协议和 `apps/server` 最小自部署版本；完整 Server、Remote Web 与 Admin 仍由独立仓库实现。

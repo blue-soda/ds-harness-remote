@@ -12,7 +12,7 @@
 当前仓库负责：
 
 - `packages/protocol` 的类型、schema、编解码和版本校验
-- Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
+- Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
 - Mock Host/Client 与协议 conformance fixtures
 
 `apps/server` 实现本文的多账号注册/刷新、设备发现、Control 与 Relay 子集；范围见 [最小 Server](../apps/server/README.md)。其余多账号、主机匹配码、Browser 授权、WebRTC/TURN 与 Admin 能力仍属于独立 Server，不得把未实现的能力声明为可用。
@@ -32,7 +32,7 @@ DSH Remote Protocol 定义 Host Plugin、DSH Remote Server 和 Remote Client 之
 - WebRTC signaling 与 Relay routing
 - Host/Client 端到端安全通道
 - rc.2 ApiProxy tunnel 的 unary、respond 与 mux/host streaming
-- v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 Typert Remote 的 unary、stream 与 `$events` 双向事件 carrier
+- v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 Typert Remote 的 unary、stream 与 `$events` 双向事件 carrier
 - reconnect 与原生 stream 重建
 - capability 与版本协商
 - 错误码、限制和安全不变量
@@ -193,8 +193,9 @@ REST/Control JSON 中的 key、nonce、handshake 和 ciphertext 使用无 paddin
 
 `POST /api/v1/devices/register`
 
-Host 和 Client 的首次账号归属必须携带由同一 Server 签发的站点账号 Bearer token；
-同一安装的相反角色可按 §8.1.2 从已有 device credential 继承 owner。本 fork 的插件默认连接
+Host 和 Client 的账号归属必须携带由同一 Server 签发的站点账号 Bearer token；**Host 也可改用
+§8.1.1 的一次性主机匹配码**。§8.1.2 那条「用已有 device credential 为本机注册相反角色」的路径
+**已删除（2026-10-05）**：device token 不能用于注册，账号归属只能来自账号会话或主机匹配码。本 fork 的插件默认连接
 `https://sakakibara.ink:8443`（见 `packages/plugin/src/defaults.ts`），也可以由用户配置自定义 Server；登录、注册、refresh、
 WebSocket 不得跨域混用。注册成功后，Server 为同一账号下的 Host 与 Client 自动
 建立或恢复 membership。
@@ -256,25 +257,27 @@ POST /api/v1/devices/register-with-code
 ```
 
 请求包含 `{ "v": 1, "code": "ABCD-EFGH", "device": <Host Device Descriptor> }`，
-成功响应与 §8.1 相同。主机匹配码 10 分钟过期、单次消费、只允许 `role=host`，
-Server 使用独立用途的 keyed hash 落库。
+成功响应与 §8.1 相同。主机匹配码 10 分钟过期、单次消费，仅用于在同一账号下注册一台 **Host 安装**
+（描述符本身**不含 `role`** —— 角色只在连接上声明，见 §8.1.2 的说明），Server 使用独立用途的 keyed hash 落库。
 
 匹配码请求必须使用大写 `XXXX-XXXX` 格式。每个 `X` 只能是 ASCII 字母或数字。
 
-### 8.1.2 自有设备角色切换
+### 8.1.2 自有设备角色切换 —— **已删除（2026-10-05）**
 
-同一 Plugin 安装已持有有效 Host 或 Client device credential 时，可以用该设备 access
-token 为本机注册相反角色，无需再次登录账号或输入主机匹配码：
-
-```http
-POST /api/v1/devices/register-owned-role
-Authorization: Bearer <currentDeviceAccessToken>
-```
-
-请求 body 与 §8.1 相同，但 descriptor 必须使用新的 deviceId、独立 identity key 和与
-当前设备相反的 role。Server 从当前设备继承 `owner_account`，拒绝无 owner、相同
-deviceId 或相同 role，并为新角色签发独立 token pair、同步同账号 membership。
-角色切换只复用账号归属，不得复用 Host/Client 私钥或 device token。
+> 本节描述的 `POST /api/v1/devices/register-owned-role` 与"用一份凭据为本机铸造相反角色"的整条路径
+> **已从本仓库删除**：一台设备**只有一份身份**（`deviceId` 终身不变、登出/登录不轮换），**`role` 只存在于
+> 连接上**（hello 声明；服务端 peer 键为 `account + deviceId + role`），**不再是有效的配置项**（`config.ts`
+> 为升级兼容仍**接受并忽略**它，以免旧 profile 被拒），也**不在描述符与存储里**。`AccountDeviceDescriptor`
+> 合并了原来的 host/client 形状、**没有 role 字段**，其 schema 故意
+> **不严格**，所以旧安装多发的 role 会被**忽略**而不是被拒收。（例外：浏览器授权交换
+> `POST /api/v1/auth/browser-authorizations/exchange` 的 bespoke 请求体仍是严格 schema 且要求
+> `role: "client"`，见 §8.3 —— 那是跨仓库契约，不属于通用描述符。）随之删除的还有插件的
+> `authorizeOwnedRole` / `authorizeHostAsOwned` / `authorizeHostByDefault` 与控制运行时的"对侧角色补授权"。
+> 当前契约见 `docs/config-and-role.md`；独立 Server 仓库若仍保留该端点，本仓库**不再调用**它。
+>
+> 历史正文（仅供追溯，勿据此实现）：同一 Plugin 安装已持有有效 Host 或 Client device credential 时，可以
+> 用该设备 access token 为本机注册相反角色，无需再次登录账号或输入主机匹配码；请求 body 与 §8.1 相同，
+> descriptor 必须使用新的 deviceId、独立 identity key 和相反的 role。
 
 ### 8.2 Refresh
 
@@ -337,12 +340,14 @@ Content-Type: application/json
 
 - Host 与 Client 的 `owner_account` 必须非空且完全一致。
 - 不允许匿名 Client 注册，也没有设备码创建、领取、确认或轮询接口。
-- `GET /api/v1/devices` 只返回当前 Client 通过同账号授权边可访问的 Host。
+- `GET /api/v1/devices` 返回账号内**所有未吊销设备**，**不再按角色过滤**。每项带 `online`（来自实际
+  连接）与 `hostControl`（来自控制开关）；关闭控制的设备**仍然列出**并标注为不可用/离线，而不是消失。
 - 设备详情、presence、TURN 和连接请求继续校验 membership，防止 IDOR。
 - Server 发出 `connect.incoming` 前再次校验双方账号一致，历史跨账号授权边无效。
 - Host 只接受 `authorization: "account"` 的连接事件，并使用自己的 device token
-  调用 `GET /api/v1/devices/{clientDeviceId}`；只有返回的 membership、role 和
+  调用 `GET /api/v1/devices/{clientDeviceId}`；只有返回的 membership、deviceId 和
   `identityKey` 与事件完全一致，且不冲突于本机 pinned key，才把该 key 绑定到连接。
+  设备描述符**已无 `role`**，Host 不再校验它（连接的 `role` 只在 hello 里声明）。
 - 注销账号会清除 Client 设备 token；重新登录同账号可重新注册设备并恢复访问。
 
 ## 10. Control Channel
@@ -416,7 +421,7 @@ ack：
     "protocol": 1,
     "serverVersion": "0.1.0",
     "connectionSessionId": "01KWS...",
-    "heartbeatIntervalMs": 25000,
+    "heartbeatIntervalMs": 20000,
     "maxControlFrameBytes": 65536,
     "maxRelayFrameBytes": 1048576,
     "capabilities": ["transport.relay", "transport.p2p"],
@@ -761,7 +766,7 @@ Host handshake 的 capability 例子：
 空对象，Result 为 `{ "capabilities": string[] }`。当前 Host 按实际注入服务动态返回
 `harness.api.v1`、`harness.remote.v1` 或 `harness.remote.v3`，不得宣告不存在的 carrier。
 Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使用
-`harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
+`harness.remote.v1`，v0.1.5 rc.1 与 v0.1.6 alpha.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
 
 ApiProxy 与 Typert Remote contract 仍随 Desktop Plugin 发布物升级，但新增的可选业务能力
@@ -875,10 +880,10 @@ Open Params：
 
 `stream` 仅允许 `mux | host`，每条 peer connection 最多同时打开三个原生流：常驻的 host/mux 各一条，加一条 mux 切换缓冲。mux 流的 `payload` 可携带可选 `sessionId`（focus）：提供后 Host 只转发该 session 的 mux 帧（`session/event`、approval、question 等），其余 session 的流量不进入 tunnel；省略时转发全部。Remote Web 每次只关注一个 session，用 focus 避免把其他活跃 session 的大事件流（可能达数 MB）推过 WebRTC/relay 数据面。切换 session 时 Client 先打开新 mux，成功后立即关闭旧 mux；新流失败时保留旧流。Close Params：`{ "streamId": "client-stream-id" }`。`streamId` namespace、三条流上限和生命周期都属于发起它的 `connectionId`；不同 Client 可使用相同 `streamId`，不得互相关闭或接收对方的 tunnel event。连接替换、撤销或断开时 Host 只取消该 connection 的全部流。
 
-### Harness v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Typert Remote bridge
+### Harness v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 / v0.1.6 alpha.1 Typert Remote bridge
 
 `harness.remote.v1` 只承载 `dsh-v0.1.2-alpha.1`–`rc.1` 官方 `TypertGateway` 已编码的 carrier
-envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 的相同官方 carrier 与 Session V3
+envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 与 `dsh-v0.1.6-alpha.1` 的相同官方 carrier 与 Session V3
 业务 envelope。Plugin 不解析或重建远端 Harness Session、Workspace、Approval、Question 等业务模型，也不
 注册第二套 Remote namespace。
 
@@ -1236,6 +1241,11 @@ Client 收到后结束对应 iterator；`failed` 必须以 Gateway 归一化 fai
 本节旧 `sync.from` 机制已退出 Plugin。Desktop Client 重连后重新打开官方 mux/host
 stream，并由 Harness UI 重新读取原生 history baseline；Plugin 不维护第二套 replay buffer。
 
+> **以下 `sync.from` / `sessions.get` 内容为历史正文（已退出，保留供追溯，勿据此实现）。**
+> 代码中 `sync.from`、`sessions.get` 与 `connection.ping` 已无任何引用；`lastSeq`、replay buffer、
+> `FULL_RESYNC_REQUIRED` 与事件去重规则只属于该已删除机制。恢复改为重开官方 mux/host stream 后由
+> 原生 history baseline 重新对齐。
+
 Client 为每台 Host 持久化 `lastSeq`，但不必持久化解密后的 conversation。
 
 Secure channel 恢复后调用扩展 RPC：
@@ -1275,9 +1285,13 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 
 ## 22. Ping/Pong
 
-应用层 `connection.ping` 已退出 Plugin；只保留 Control Channel heartbeat。
+应用层 `connection.ping` 已退出 Plugin；只保留 Control Channel heartbeat（传输层 ping/pong）。
 
-Control Channel heartbeat 默认 25 秒，75 秒未收到有效 pong 视为断开。应用层可通过 `connection.ping` 估计 Host RTT。
+Control Channel heartbeat 默认 **20 秒**（`DSH_SERVER_HEARTBEAT_INTERVAL_MS`，默认 20000，也就是
+`hello.ack.heartbeatIntervalMs` 通告的 ping 周期），最后一次被接受的 pong 距今超过 **45 秒**
+（`DSH_SERVER_PEER_TIMEOUT_MS`，默认 45000）即判离线，丢弃窗口为 **40–65 秒**。通告值是 ping 周期，
+不是容忍时间；Server 构造 Gateway 时校验阈值 ≥ 2 × tick，不满足直接启动失败。应用层不再另有
+`connection.ping` 通道去估计 Host RTT。
 
 Control ping：
 
@@ -1370,11 +1384,11 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | 同连接 pending RPC | 128 |
 | 同 session pending permission | 16 |
 | ICE candidates / connection | 256 |
-| Heartbeat interval | 25 s |
-| Heartbeat disconnect | 75 s |
-| Event replay window | 至少 10,000 events 或 15 min，取先达到者 |
+| Heartbeat interval | 20 s（`DSH_SERVER_HEARTBEAT_INTERVAL_MS`，`hello.ack` 通告值） |
+| Heartbeat disconnect | 45 s（`DSH_SERVER_PEER_TIMEOUT_MS`），丢弃窗口 40–65 s |
+| Event replay window | **已退出**：Plugin 不再维护 replay buffer；历史值 10,000 events / 15 min 仅作为 `packages/protocol` 的参考常量保留 |
 
-Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。超限必须返回稳定错误或关闭违规连接，不能无限缓存。
+Server/Host 可协商更小限制，但必须在 hello / hello.ack 中公布（`system.info` 已退出 Plugin）。超限必须返回稳定错误或关闭违规连接，不能无限缓存。
 
 ## 25. 安全不变量
 
@@ -1390,9 +1404,10 @@ Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。�
 8. 当前 Harness v1 只允许 Remote `allow_once`/`deny`，不得伪造 session grant。
 9. Device revoke 使 token、membership 和现有 connection 失效。
 10. 重放/乱序/身份不匹配的 secure frame 必须拒绝。
-11. Host/Client 首次账号归属必须由同一 Server 的账号授权；Host 也可使用该账号生成的
-    一次性主机匹配码。同一安装仅可用 device token 注册独立的相反角色；device token
-    仍不可调用账号接口，切换 Server 不得复用旧 origin 的身份、凭证或授权状态。
+11. Host/Client 账号归属必须由同一 Server 的账号会话授权；Host 也可使用该账号生成的
+    一次性主机匹配码。用 device token 注册相反角色的路径**已删除（2026-10-05）**：
+    device token 不能用于注册，也不可调用账号接口；切换 Server 不得复用旧 origin 的
+    身份、凭证或授权状态。
 12. 日志禁止记录 token、code 明文、key、prompt、source、workspace 和 tool output。
 13. Admin 无法从数据库或 API 获取 E2EE conversation。
 14. 未协商 capability 的功能不得调用或展示为可用。

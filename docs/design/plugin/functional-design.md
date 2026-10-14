@@ -5,7 +5,7 @@
 
 ## 1. 受控业务接入面
 
-Harness rc.2 会话业务只使用官方 `@deepseek-ai/dsh-host-apiproxy/api`；v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 会话业务只
+Harness rc.2 会话业务只使用官方 `@deepseek-ai/dsh-host-apiproxy/api`；v0.1.2 alpha.1–rc.1、v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 会话业务只
 使用官方 `TypertGateway` Remote carrier；可选文件预览只使用
 `dsh-file-viewer` 暴露的 `fileViewerHost` 只读服务。Plugin 不读取或解释
 `SessionStore`、`AgentRegistry`、Workspace 或 Approval 内部对象，也不把 Harness
@@ -37,10 +37,16 @@ packages/plugin/src/
   server-api.ts               Server REST client
   server-connection.ts        Host control/relay/Noise 连接
   connection-controller.ts    单一认证 peer 与业务通道
-  rpc-router.ts               仅接受 capability 对应的 Harness tunnel RPC
+  rpc-router.ts               仅接受 capability 对应的 tunnel RPC（Harness carrier、Codex、ACP、文件预览与 loopback）
   harness-api-bridge.ts       Host ApiProxy allowlist 与原生流
   harness-remote-bridge.ts    Host v0.1.2 Typert Remote allowlist 与 stream
   file-viewer-bridge.ts       File Viewer 只读方法白名单与传输限制
+  codex/                      独立 CodeX 业务领域（App Server、method allowlist、虚拟原生载体）
+  terminal-policy.ts          Host 终端按设备归属与连接输入权（断线不重放输入）
+  loopback-host.ts            Host 侧 loopback 白名单端口出站代理
+  loopback-preview.ts         Client 侧本机预览 origin 与 loopback 转发
+  client-target-store.ts      上次 Remote 目标持久化与启动恢复
+  acp.ts                      ACP 网关与按连接隔离的会话
   remote-file-content-provider.ts Client 侧远端内容 provider
   remote-directory-browser.ts native picker 场景的只读目录元数据兜底
   remote-api-proxy.ts         Client 侧 ApiProxy 实现
@@ -102,6 +108,14 @@ Remote 业务 RPC 只有：
 - `harness.remote.stream.close`
 - `harness.transport.describe`
 - `fileviewer.call`（仅在 `fileviewer.read.v1` capability 下）
+- `loopback.call`（仅 `loopback.ports` 明确授权的本机端口）
+- `codex.app.call`
+- `codex.app.respond`
+- `codex.app.stream.open`
+- `codex.app.stream.close`
+- `codex.app.transfer.open/chunk/commit/read/close`（仅在 `codex.appserver.transfer.v1` capability 下）
+- `acp.initialize` / `acp.session.new` / `acp.session.load` / `acp.session.prompt`
+- `acp.session.respond_permission` / `acp.session.cancel` / `acp.session.set_mode`
 
 `harness.api.call` 的 `method` 必须命中代码内固定 allowlist。当前允许会话、子 Agent、
 Workspace、Skill、Agent Preset、Goal、Host 描述和只读 LLM 目录等原生 UI 所需操作。
@@ -156,7 +170,8 @@ Host 可同时服务来自不同 `clientDeviceId` 的连接；RPC pending、stre
 - 原生 `rpcId` 保持不变，Remote envelope id 只负责隧道层关联。
 
 `ApiProxySwitch` 向官方 Web UI 暴露稳定对象。选择 Remote 后所有新调用解析到远端
-proxy；连接意外关闭时立即回落 Local 并结束旧流。
+proxy；连接意外关闭时先进入 10 秒快速窗口（至多 2 次、强制 relay、不切视图），第 10 秒才回落 Local 并结束旧流；之后由
+5、10、20、30、30、30、30 秒的重试日程接管（7 次后停止并收起「重连中」），用户取消或另选工作区后落地的恢复会被丢弃。
 
 alpha 的 `RemoteTypertGateway` 对等承载 unary、stream 与 `$events/result`；
 `TypertGatewaySwitch` 同时切换 Gateway 的公开 invoke/stream 和 Connection/WebSocket mux
@@ -219,10 +234,10 @@ alpha 的 eventId/clientId 关联由官方 Gateway 验证。状态按 `connectio
 - mux/host 与 alpha stream frame 转发、显式 `undefined` item 和 close reason 正确。
 - 未认证、错误 identity/membership、篡改和重放 fail closed。
 - peer 替换或断开时关闭全部原生流。
-- Local/Remote switch 可逆，远端断开回落 Local。
+- Local/Remote switch 可逆，远端断开先走快速窗口，窗口耗尽才回落 Local。
 - File Viewer 只允许 stat/list/受限 range read，超限和未安装依赖 fail closed。
 - Host/Client account token 与 device token 隔离，主机匹配码单次消费，refresh single-flight。
 - loopback status 事件流首帧即完整 status、仅在变化时推送、空闲保活、客户端断开后停止采样，
   并且事件流不可用时降级到 unary `status`、不会在可用时读取 unary `status`。
 
-Android 和 VS Code Client 使用相同 rc.2 ApiProxy / v0.1.2 Typert Remote capability 探测；其 UI 和生命周期独立，不构成 Desktop Plugin 的组件兼容要求。
+Android 和 VS Code Client 使用相同 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1、v0.1.5 rc.1 与 v0.1.6 alpha.1 Typert Remote capability 探测；其 UI 和生命周期独立，不构成 Desktop Plugin 的组件兼容要求。

@@ -21,7 +21,7 @@
 
 ## 约束
 
-- 本仓库不实现 Server runtime。
+- 本仓库实现最小自部署 Server 子集（`apps/server`）；完整 Server 在独立仓库。
 - 业务消息只进入已认证的加密 channel。
 - 本任务不扩大 ApiProxy 或 Typert Remote allowlist。
 - 本任务不增加新的 Harness 业务协议。

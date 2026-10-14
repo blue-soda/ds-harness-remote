@@ -42,7 +42,7 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.4.29`
+`@blue-soda/dsh-remote@0.5.0`
 
 ## 主要特性
 
@@ -52,7 +52,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 - 支持 DeepSeek Harness 桌面版，并可使用固定版本的 Remote 插件
 - 打开同一账号下另一台已授权电脑上的 Workspace
 - 复用 Harness 原生界面，不另外维护一套桌面会话 UI
-- 可将纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile 作为 Host，并通过 GitHub 或知乎终端二维码授权
+- 可将纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile 作为 Host，并通过 GitHub 二维码授权
 - Harness 主机无需开放公网监听端口。你可以从任意可上网的地方，通过双向端到端加密链路安全连接
 - 通过 Harness 原生侧栏提供工作区文件、只读预览、终端和已授权本机开发服务预览
 
@@ -62,7 +62,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.4.29`
+`@blue-soda/dsh-remote@0.5.0`
 
 ### dsh-TUI Host
 
@@ -74,7 +74,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.29
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.0
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -128,7 +128,7 @@ Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/d
 
 ### 桌面端
 
-Host 启动后默认允许控制当前设备，当前电脑即可作为 Host。远程终端默认开启，也可在详细 Remote 设置中关闭。
+Host 启动后默认允许控制当前设备，当前电脑即可作为 Host。
 
 在另一台电脑上选择在线 Host，然后打开它的 Workspace。
 
@@ -157,6 +157,27 @@ Remote 通过双向端到端加密链路通信。它将客户端切换到所选 
 因此原有 Workspace、工具和权限流程都保留在该电脑上。Host 当前注册的全部设置分区也可以
 通过 Harness 官方设置 API 在远端配置。凭据值仍然只写，Host 本地的文档打开操作不会暴露到远端。
 
+## 断线恢复、开关，以及什么不会被挪动
+
+任何一次会话丧失都走同一条路径：链路断开、Host 关掉**允许控制本设备**、Host 关掉 Codex，或者对端不再应答
+（例如机器被冻结）。恢复固定分三段：
+
+1. **十秒窗口**：至多两次尝试，两次都强制走 Relay；期间**画面保持原样**——不切工作区、不重载。顶部显示
+   「重连中」并写明正在接回哪个会话，可以就地取消。
+2. **第 10 秒**：客户端回退到自己的本地 shell，所以你不会一直对着一个已经卡住的远程画面。
+3. **有界日程**：5、10、20，随后 30 秒，共 **7 次**尝试，接回的是**同一个**会话；用完即**彻底停止**，
+   「重连中」随之收起、你留在本地，之后随时可以手动重连。
+
+恢复以**设备 + 工作区种类 + 目录**标识"你原本所在的会话"：Codex 会话恢复后仍是 Codex 工作区，**不会**变成
+那台 Host 的 Harness 工作区。**你自己的选择说了算**：如果一次恢复在你取消、或另开了别的工作区之后才落地，
+它的结果会被丢弃，你会留在自己选定的地方。
+
+浏览某台 Host 的工作区**不是**会话——它既不占用远程会话，也不武装重连。
+
+**允许控制本设备**只决定这台电脑"能否被控制"：关掉会向 Server 登记标志、**立即断开 Host 链路**，并让 Server
+此后拒绝来自该设备的新 Host 连接。它**不会**注销设备、**不会**轮换身份，也**不影响**你用它去控制别人。
+关闭控制的设备**仍然列出**，只是标注为离线。
+
 ## 实验性 Codex 工作区
 
 Remote 也可以显示已授权 Host 上的 Codex 项目。你从原来的 Workspace 选择器进入，继续在现有
@@ -164,7 +185,8 @@ Harness 或 Android 界面里使用 Codex，不需要学习另一个 Codex 页�
 工作区页面也可以把 Host 上的目录新增到 Codex 项目目录，不会导入 Harness 存储。
 
 Codex Remote 是面向自有设备的便捷入口。它支持文本 Prompt、可用客户端上的图片 Prompt、模型与
-权限控制、停止和审批。它仍以实验功能发布；长期运行恢复和兼容性工作会继续按 TODO 跟进。
+权限控制、停止和审批。它仍以实验功能发布；兼容性工作会继续，而 Codex 会话的丧失恢复与 Harness 会话
+**走完全同一条路径**（见[断线恢复、开关，以及什么不会被挪动](#断线恢复开关以及什么不会被挪动)）。
 
 Web 和 Desktop 的审批控件显示所选 Codex 会话经 Host 确认的模式；尚未获知时标明沿用 Host
 设置。切换须等 Host 确认成功，发送消息沿用会话当前策略。

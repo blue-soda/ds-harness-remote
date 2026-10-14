@@ -18,9 +18,26 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
       **设备 + 工作区种类 + 目录**——Codex 会话重连后仍是 Codex（不再落回对端 DSH 工作区），Codex 关闭
       再打开会由重试日程自动接回同一目录，Codex 单独失效不再白白重建健康的传输；"关闭整体控制 /
       关闭 Codex"两条 host 开关都会立即生效并写下服务端标志，重启/重连不再让它看起来仍然可控；
-      卡片新增能力轮询（数秒自更新）、Refresh 会重读工作区并重新建立当前会话、拒绝原因用本地化真话
+      卡片能力自更新改走 `codex.app.capability` 事件（Host 只在真实翻转时发送、判定权在客户端；旧的
+      "数秒自更新"周期轮询**已删除**，见 2026-10-14 条目）、Refresh 会重读工作区并重新建立当前会话、拒绝原因用本地化真话
       （CODEX_DISABLED / CODEX_NOT_PROVIDED / CONTROL_DISABLED / HOST_OFFLINE）；目标工作区种类与根
       持久化到 `client-target.json`，进程被回收后仍回到原处
+- [x] 恢复阶梯统一（2026-10-14）：快速窗口 10 秒内至多 **2 次**、强制 relay、期间不切视图 / 不刷新工作区 / 不重载；
+      第 10 秒**回退本地**；重试日程 **5、10、20、30、30、30、30 秒（7 次）后停止**，走完即**放弃**（清掉
+      「重连中」、留在本地、**不再自启**，日志 `remote session recovery gave up; staying in the local shell`，
+      `attempts` 约 8）；开机按记录恢复复用同一日程，只是**额外先做一次立即尝试（0 秒）**
+- [x] 用户的选择是权威（2026-10-14）：取消（`mode.set local`）或另选工作区之后才落地的一次恢复会被**丢弃并回到本地**
+      （`recoveryStillWanted` / `abandonRecovery`）；顶部「重连中」可取消；DSH 与 Codex 共用同一条路径
+- [x] Codex 可用性改为 `codex.app.capability {available}`（2026-10-14）：Host **只在真实翻转时发送**（首次观察只记不发，
+      替换式重启不算失去），**判定权在客户端**——`available:false` 且当前看的是该主机的 Codex 会话才走同一条恢复阶梯，
+      `available:true` **永远不是丧失**；旧的每 30 秒 / 4 秒预算能力探测（含卡片数秒自更新轮询）**已删除**
+- [x] Codex 域世代号与启动串行（2026-10-14）：重叠 launch 会互相抢 `this.appServer`，`restart()` 先等飞行中的 launch
+      落定；关闭 Codex **不干扰同链路其它会话**；旧保留 streamId `codex:domain` **已删除**，`Codex workspace` 身份是**目录**
+- [x] 脚本化端到端矩阵 `scripts/remote-e2e.mts`（2026-10-14）：**21 场景 / 138 断言全绿**（2 类会话 × 3 种失去方式 ×
+      3 个阶段 + 浏览、取消、重启恢复、Codex 负例）；新增 `tests/client-recovery.test.ts`、`tests/host-control-switch.test.ts`、
+      `tests/codex-domain-restart.test.ts`、`tests/codex-session-loss.test.ts`；plugin **394 用例 / 46 文件**、
+      protocol **234 / 7**，`pnpm -r test` exit 0
+- [x] 当前版本 **0.5.0**（2026-10-14）
 - [x] Issue #70：Plugin 刷新跨进程互斥、握手恢复单次重试、重复 Host 连接停止抢占及授权恢复提示
 - [ ] Issue #70：Windows 双实例与异常退出遗留锁的实机回归（已有进程级锁与状态机测试）
 
@@ -49,7 +66,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 第三方发行版在 profile patch 里 seed `ds-harness-remote` 条目时的契约与待办；完整证据链见
 `docs/config-and-role.md`。
 
-- [x] 核对"seed 的 `role: both` 在全新 home 下被改写成 `client`"：已确认 **`role` 不是运行时开关**
+- [x] （**历史调查**：当时 `role` 仍是配置项，该前提已随下一条作废；本条目仅作证据保留）核对"seed 的 `role: both` 在全新 home 下被改写成 `client`"：已确认 **`role` 不是运行时开关**
       （两个半边都由 `serverUrl + connection` 决定 ✓）、双角色注册来自 `authorizeHostByDefault()` ✓、
       `both` 为惰性值 ✓、唯一强制写角色的是**远程卡片的 DeepSeek 登录**（`client.ts:2129` 硬编码
       `role: 'client'` ✓）、其余控制写入与 CLI 都保留或不动 `role` ✓
@@ -238,16 +255,18 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
   "对端离线"）。规则：**先比对大小**（`Get-Item packages/plugin/dist/index.js` 应 ≈1MB），再执行
   `pnpm remove @blue-soda/dsh-remote && pnpm add -w file:…`；构建脚本里"emit 覆盖 bundle"的顺序问题应另行修掉。
 
-- [ ] **半开连接（本端收不到 close）目前没有检测手段**：服务端心跳 25s、75s 无 pong 会 drop link 并通知 Host，
-  因此 Relay 链路下通常由服务端先发现；但若本端 socket 静默失效且 close 事件丢失，插件会一直保持"已连接"状态。
-  2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），被判定为**
-
-## 远程连接：断联检测与列表兜底
+- [ ] **半开连接检测现状（本端收不到 close）**：当前只有两类断链信号——Server 通知"链路已丢"（对端离线 /
+  被顶替 / 协议失败），以及我们自己发现连接已死（写入失败，约在 Server 判超时后 1 秒；或传输被关闭）。服务端
+  **20 秒 tick / 45 秒阈值**（丢弃窗口 40–65 秒）的心跳能覆盖 Relay 场景：本端不 pong 时由服务端先发现并通知本端。
+  但**本端 socket 静默失效且 close 事件丢失**时仍**没有检测手段**，插件会一直保持"已连接"状态。
+  历史：2026-10-07 曾加过一套应用层 `ping` 探测（读取状态时触发、连续两次无应答判定断开），该探测**已删除**
+  ——它排在会话自身流量之后，Host 推大历史时会被误判为"没有应答"。
 
 - [x] **进程被杀后重建会自动连回远程**（2026-10-07 实现）：插件把"上次的远程目标"写入
   `<plugin state>/client-target.json`（`mode: local | remote`，remote 时含 Server 与 Host deviceId），
   启动时 `restoreLastTarget()` 读取它；若为 remote 且 Server 与当前配置一致，就走既有的退避重连循环
-  （1s/2s/4s/8s/15s，之后每 30s），并通过 `status.restoringTargetDeviceId` 与侧栏文案显式显示正在重连。
+  （**与恢复日程相同：5、10、20、30、30、30、30 秒（7 次）后停止**，另外**额外先做一次立即尝试（0 秒）**），
+  并通过 `status.restoringTargetDeviceId` 与侧栏文案显式显示正在重连。
   切回本地会写回 `local` 记录并顶掉重试循环；认证类失败（`AUTH_REQUIRED`/`ACCOUNT_AUTH_REQUIRED`/
   `AUTH_INVALID`/`TOKEN_EXPIRED`/`DEVICE_*`/`MEMBERSHIP_REQUIRED`）**立即停止重试**，因为等待无法修复它。
   **Android 真机验收待做**（进程被回收后重开，确认自动连回与侧栏状态）。
@@ -262,8 +281,9 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
     就要 12 秒）；期间**不切视图、不刷新工作区、不重载**，成功后只刷新会话数据，并把工作区选择重新发布一次。
   - **窗口耗尽 → 回退本地**：走 `handleRemoteTransportLost()`（回退本地 + `fellBackToLocal` + 页面重载），
     `phase = 'fallback'`。
-  - **退避日程与上限**：立即、5、5、10、20 秒，其后每 30 秒，**至多 5 次**；走完即停止并**收起「重连中」**
-    （日志 `reconnect gave up; staying in the local shell {"attempts":10}`），此后只接受手动重连。
+  - **退避日程与上限**：**5、10、20、30、30、30、30 秒（共 7 次）后停止**；走完即**放弃**，收起「重连中」、
+    留在本地、**不再自启**（日志 `remote session recovery gave up; staying in the local shell`，`attempts` 约 8），
+    此后只接受手动重连。开机按记录恢复复用同一日程，只是**额外先做一次立即尝试（0 秒）**。
   - **可见与可中断**：只有**顶部会话栏**显示「重连中」并可点击取消（`mode.set local`，会顶掉重连循环）；
     侧栏条目与目标对话框**不再重复**该状态（用户 2026-10-07 要求把语义交给顶部栏）。启动恢复是第三阶段
     `phase = 'restore'`。
@@ -274,7 +294,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
     什么都不发生 ✓（服务端心跳阈值 45 秒未到，链路存活）；冻结 90 秒 → 服务端在 **48 秒**判离线并丢弃链路 ✓，
     客户端恢复瞬间由**快速窗口第一次尝试**（relay-only）重建 ✓（日志 `session kept its view through a quick reconnect`），
     **没有** `transport lost` ✓、界面不刷新 ✓；Host 长时间不可达时窗口两次都失败 → 回退 ✓ → 日程走完并收起
-    「重连中」✓（`attempts:10`）。
+    「重连中」✓（`attempts` 约 8）。
   - **自我替换陷阱（已修）**：快速重连的重建会**新建**控制连接，而 Server 会关闭同一设备的旧连接 —— 旧传输的
     `onClose` 曾被当成灾难回退，于是快速重连**永远把自己升级掉**（表现为"只看到灾难回退"）。现在正在被替换的
     传输的关闭会被忽略；触发只认真正的断链信号，日志带 `reason`（`transport-closed` / `link-dropped`）。

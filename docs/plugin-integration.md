@@ -22,10 +22,10 @@ Host 接入分为两层认证：
 
 ## 2. Server 地址
 
-插件默认 Server：
+插件默认 Server（代码常量 `DEFAULT_REMOTE_SERVER_URL`，以实际配置为准）：
 
 ```text
-https://dsh.r2049.cn
+https://sakakibara.ink:8443
 ```
 
 同时允许用户输入自定义部署地址，例如：
@@ -138,13 +138,15 @@ Content-Type: application/json
   "device": {
     "deviceId": "0198...",
     "name": "My Workstation",
-    "role": "host",
     "platform": "darwin",
     "identityKey": "base64url-x25519-public-key",
     "clientVersion": "0.1.0"
   }
 }
 ```
+
+描述符不含 `role`：`AccountDeviceDescriptor` 没有 role 字段，其 schema 故意不严格，旧安装多发的
+role 被忽略而非拒收。
 
 成功返回设备凭证：
 
@@ -163,7 +165,7 @@ Content-Type: application/json
 - 已有 Host 属于其他账号：`403 DEVICE_OWNERSHIP_REQUIRED`；
 - 已有 deviceId 没有账号 owner：`403 DEVICE_OWNERSHIP_REQUIRED`，不允许继续使用，必须创建新的 device identity；
 - 相同账号、deviceId 和 identityKey 可以重新注册；
-- 相同 deviceId 不允许更换 role 或 identityKey。
+- 相同 deviceId 不允许更换 identityKey。
 
 注册成功后，`accountToken` 不应继续作为后台连接凭证。插件应安全保存设备 token pair。
 
@@ -201,7 +203,6 @@ Content-Type: application/json
   "device": {
     "deviceId": "0198...",
     "name": "My Workstation",
-    "role": "host",
     "platform": "darwin",
     "identityKey": "base64url-x25519-public-key",
     "clientVersion": "0.1.0"
@@ -214,7 +215,7 @@ Content-Type: application/json
 - 8 位、10 分钟有效、只能成功使用一次；
 - 同一账号只保留一个有效匹配码，重新生成会立即作废旧码；
 - Server 只保存独立域的 keyed hash，不保存明文；
-- 只允许注册 `role=host`；
+- 仅用于在同一账号下注册一台 **Host 安装**；描述符**不含 `role`**（角色只在连接上声明）；
 - 按账号限制生成频率，按来源 IP 限制尝试频率；
 - `HOST_REGISTRATION_CODE_NOT_FOUND`：码不存在或格式无效；
 - `HOST_REGISTRATION_CODE_EXPIRED`：码已过期；
@@ -225,33 +226,29 @@ Content-Type: application/json
 ### 5.3 Desktop Client 账号接入
 
 Desktop Client 使用 §3.1 的账号密码取得临时 `accountToken`，再调用
-`POST /api/v1/devices/register`，descriptor 使用 `role=client` 且不携带
-`harnessVersion`。Client 不允许使用主机匹配码，也没有 Host 生成、领取或确认的设备码。
+`POST /api/v1/devices/register`。注册 envelope 与 Host 相同（描述符**不带 `role`**，也不携带
+`harnessVersion`）。Client 不允许使用主机匹配码，也没有 Host 生成、领取或确认的设备码。
 
-注册成功后只保存 Client 自己的 device token。`GET /api/v1/devices` 返回同账号 Host
-及 membership；Client 随后逐个调用 `GET /api/v1/devices/{hostDeviceId}` 获取 identity
-key，并在本机固定该 key。相同 Host deviceId 的 key 发生变化时必须拒绝覆盖和连接。
+注册成功后只保存 Client 自己的 device token。`GET /api/v1/devices` 返回同账号全部未吊销设备
+（不按角色过滤）及 membership；Client 随后逐个调用 `GET /api/v1/devices/{hostDeviceId}` 获取
+identity key，并在本机固定该 key。相同 Host deviceId 的 key 发生变化时必须拒绝覆盖和连接。
 
-### 5.4 同一安装自动持有 Host / Remote 身份
+### 5.4 同一安装自动持有 Host / Remote 身份 —— **契约已变更（2026-10-05）**
 
-Desktop Plugin 没有用户可见的 Client 模式开关。Host runtime 常驻运行；用户首次打开
-Remote 工作区入口时，插件按需准备独立的 Remote（协议角色仍为 `client`）身份。同一安装
-只需首次完成任一角色的账号归属；准备尚未注册的另一角色时，插件使用当前角色的有效
-device access token 调用：
+> 本节此前描述的 `POST /api/v1/devices/register-owned-role`（用一份凭据为本机铸造相反角色、要求 descriptor
+> 携带相反的 `role`）**已从本仓库删除**。当前契约：
+>
+> - **一台设备只有一份身份**：`deviceId` 持久保存、终身不变；登出/登录**不轮换身份**（只清本地凭证）。
+> - **`role` 只存在于连接上**：不是配置项，也不在描述符与存储里；`AccountDeviceDescriptor` 没有 role 字段，
+>   其 schema 故意不严格，旧安装多发的 role 被**忽略**而非拒收。
+> - Desktop Plugin 仍无用户可见的 Client 模式开关：Host runtime 常驻，Remote 入口按需在**同一身份**上准备
+>   连接（协议角色仍是 `client`），不需要第二次注册。
+>
+> 详细契约见 `docs/config-and-role.md`；独立 Server 仓库若仍保留该端点，本仓库**不再调用**。
+>
+> 历史正文（仅供追溯）：Host runtime 常驻运行；用户首次打开 Remote 工作区入口时，插件按需准备独立的 Remote
+> （协议角色仍为 `client`）身份，并用当前角色的 device access token 调用上述端点为新角色取得 token pair。
 
-```http
-POST /api/v1/devices/register-owned-role
-Authorization: Bearer <currentDeviceAccessToken>
-Content-Type: application/json
-```
-
-body 使用 §5.3 相同的注册 envelope，但新角色必须拥有独立 deviceId 和 identity key。
-Server 继承当前设备的 `owner_account` 并返回新角色自己的 token pair。之后 Host/Client
-后续启动分别读取各自保存的凭据，不再注册。该接口不得接受相同 role、相同 deviceId、无账号
-owner 的设备或其他 Server 签发的 token。
-
-Host 与 Remote 必须使用不同 deviceId 和 identity key。Remote 主机列表应排除本机 Host
-deviceId，避免用户把当前 Harness 连接回自身。
 
 ## 6. 凭证保存和刷新
 
@@ -259,7 +256,7 @@ deviceId，避免用户把当前 Harness 连接回自身。
 
 ```json
 {
-  "serverUrl": "https://dsh.r2049.cn",
+  "serverUrl": "https://sakakibara.ink:8443",
   "authorizationMethod": "account",
   "account": "user@example.com",
   "deviceId": "0198...",
@@ -333,7 +330,7 @@ X25519 密钥对保持不变）。下一次登录用**同一个 `deviceId` 与�
 连接：
 
 ```text
-wss://dsh.r2049.cn/ws/v1/connect
+wss://sakakibara.ink:8443/ws/v1/connect
 ```
 
 自定义 Server 则从 HTTPS origin 派生 `wss` URL。access token 必须放在首个 `hello` frame 中，禁止放在 URL query：
@@ -376,7 +373,7 @@ descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。读取都失败
     "protocol": 1,
     "serverVersion": "0.1.0",
     "connectionSessionId": "0198...",
-    "heartbeatIntervalMs": 25000,
+    "heartbeatIntervalMs": 20000,
     "maxControlFrameBytes": 65536,
     "maxRelayFrameBytes": 1048576,
     "capabilities": ["transport.relay"]
@@ -390,7 +387,7 @@ Server 会发送 `ping`，插件必须及时返回相同 nonce 的 `pong`。同�
 
 ## 8. 账号授权与连接事件
 
-Web 或其他客户端使用同一个账号登录并注册 `role=client` 后，Server 会自动为它与该账号下的 Host 建立授权边。没有创建、领取或确认设备码的接口。
+Web 或其他客户端使用同一个账号登录并注册为**同账号设备**后，Server 会自动为它与该账号下的 Host 建立授权边。没有创建、领取或确认设备码的接口。
 
 Client 发起 `connect.request` 且 Host 在线时，Host WebSocket 收到：
 
@@ -410,7 +407,7 @@ Client 发起 `connect.request` 且 Host 在线时，Host WebSocket 收到：
 }
 ```
 
-插件只接受 `authorization: "account"`，并校验 `clientDeviceId`、`clientIdentityKey` 与字段格式。随后使用 Host device token 调用 `GET /api/v1/devices/{clientDeviceId}`，确认返回的 role、membership 和 identity key 与事件完全一致；本机已有相同 deviceId 但 key 不同则 fail closed。验证通过后把 descriptor 写入本机 pinned trust，无需弹出人工确认窗口，即可进入安全握手。
+插件只接受 `authorization: "account"`，并校验 `clientDeviceId`、`clientIdentityKey` 与字段格式。随后使用 Host device token 调用 `GET /api/v1/devices/{clientDeviceId}`，确认返回的 membership 和 identity key 与事件完全一致；本机已有相同 deviceId 但 key 不同则 fail closed。验证通过后把 descriptor 写入本机 pinned trust，无需弹出人工确认窗口，即可进入安全握手。
 
 `clientIdentityKey` 是本次端到端安全握手的远端静态公钥。插件必须把它绑定到该 `connectionId`，握手期间或连接建立后都不得被替换。Client 同样通过 `GET /api/v1/devices/{hostDeviceId}` 获取并固定 Host 的 `identityKey`。Server 只路由密文，不能替代端到端密钥校验。
 
@@ -426,18 +423,19 @@ Server 通过原有 `error` frame 的可选 `payload.connectionId` 关闭单条�
 
 ## 9. 账号设备查询
 
-使用账号 token 查询当前账号拥有的 Host：
+使用账号 token 查询当前账号内的设备：
 
 ```http
 GET /api/v1/account/devices
 Authorization: Bearer <accountToken>
 ```
 
-响应中的每个 Host 都包含 `deviceId`、名称、平台、版本、`lastSeenAt` 与
-`online`。`online` 表示当前是否有该 Host 的 WebSocket 连接，可直接用于网页或
-插件的主机状态展示。
+响应返回**账号内所有未吊销设备**（不按角色过滤），每项包含 `deviceId`、名称、平台、版本、
+`lastSeenAt`，以及 `online`（是否持有实际的 Host 连接）与 `hostControl`（服务端控制开关）。
+`online` 可直接用于网页或插件的主机状态展示；关闭控制的设备**仍然列出**并标注为离线/不可用，
+而不是消失。
 
-该接口用于插件登录后的设备恢复/展示，不替代本机私钥。若 Server 返回某个 Host，
+该接口用于插件登录后的设备恢复/展示，不替代本机私钥。若 Server 返回某个设备，
 但本机没有对应私钥，插件不能冒充或自动认领该设备，应创建新的 device identity。
 
 ## 10. 最小状态机
@@ -472,4 +470,4 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 
 ## 最小自部署 Server
 
-本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集，且**支持多账号**（设备与令牌按账号命名空间隔离，跨账号互不可见）。`DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` 只是**启动种子账号**，其余账号在重启后保留；**建号默认关闭**，需要时用 `DSH_SERVER_REGISTRATION_CODE` 开启注册码注册，也可选用 DeepSeek 平台登录（`DSH_SERVER_DEEPSEEK_LOGIN=on`）或扫码 provider。配置自定义 Server 地址后按对应方式登录。运行方法见 [README](../apps/server/README.zh.md)。
+本仓库 `apps/server` 提供上述账号密码、设备注册/刷新、设备详情和 Control/Relay API 子集（**自有角色注册端点已于 2026-10-05 删除**，见 §5.4），且**支持多账号**（设备与令牌按账号命名空间隔离，跨账号互不可见）。`DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` 只是**启动种子账号**，其余账号在重启后保留；**建号默认关闭**，需要时用 `DSH_SERVER_REGISTRATION_CODE` 开启注册码注册，也可选用 DeepSeek 平台登录（`DSH_SERVER_DEEPSEEK_LOGIN=on`）或扫码 provider。配置自定义 Server 地址后按对应方式登录。运行方法见 [README](../apps/server/README.zh.md)。

@@ -12,7 +12,7 @@
 Composer、Tool、file change 与 approval UI 直接消费 CodeX 数据。
 
 CodeX 必须继续位于同一个 Remote Plugin 中，并作为 `packages/plugin/src/codex/` 下的独立领域。
-不得拆成第二个 Plugin，不修改 DSH 主仓库，也不得在本仓库增加 Remote Web、Server 或 Admin runtime。
+不得拆成第二个 Plugin，不修改 DSH 主仓库，也不得增加 Remote Web、完整 Server 或 Admin runtime（本仓库只保留 `apps/server` 最小自部署子集）。
 Android 可直接消费同一 `codex.app.*`；VS Code 暂不增加本功能。
 
 ## 产品入口
@@ -43,7 +43,7 @@ Project 的目录选择入口。Host 未启用 CodeX、App Server 不可用或 c
   或自建数据库；
 - 用户操作必须路由回 CodeX App Server 的白名单方法；
 - 退出 CodeX 模式、切换 Host 或断开连接时必须销毁虚拟 carrier、订阅和审批状态；
-- 重新进入或重连时重新读取 `thread/list` 与 `thread/read(includeTurns: true)` baseline。
+- 重新进入或重连时重新读取 `thread/list` 与分页 History（`thread/turns/list` + `thread/items/list`）baseline。
 
 ## 架构
 
@@ -88,7 +88,7 @@ authority 根内通过词法路径与 `realpath` 双重校验的真实子目录�
 Host 只通过 stdio 启动 `codex app-server`。实现以当前官方 schema 和运行时生成的 schema 为准，
 不得读取或解析 `~/.codex` 的私有 JSONL、SQLite 或其它内部存储。
 
-允许的方法包括 `account/read`、`model/list`、`project/list`、`project/create`、`thread/list`、`thread/read`、`thread/start`、
+允许的方法包括 `account/read`、`model/list`、`project/list`、`project/create`、`thread/list`、`thread/turns/list`、`thread/items/list`、`thread/read`、`thread/start`、
 `thread/resume`、`thread/fork`、`thread/name/set`、`thread/archive`、`thread/unarchive`、
 `thread/unsubscribe`、`turn/start`、`turn/steer` 与 `turn/interrupt`。
 
@@ -107,7 +107,7 @@ Project 才能扩展 Workspace authority，映射仍只保留在 Client 内存�
 DSH 0.1.x 存在两个兼容面，Plugin 必须复用现有 switch：
 
 1. rc.2：向 `ApiProxySwitch` 提供虚拟 `ApiProxy`；
-2. v0.1.2 alpha.1–rc.1：向 `TypertGatewaySwitch` 提供虚拟 carrier target。
+2. v0.1.2 alpha.1–rc.1、v0.1.5 rc.1 与 v0.1.6 alpha.1：向 `TypertGatewaySwitch` 提供虚拟 carrier target。
 
 禁止修改 DSH 主仓库注册 Session Provider，也不要新增另一套线协议。虚拟 target 只实现原生 UI
 实际需要的白名单 endpoint；未知 endpoint 必须返回稳定的 `method-not-found`，不允许回落到 Host
@@ -120,7 +120,8 @@ alpha 基线至少支持 `workspace/list`、`workspace/follow`、`workspace/crea
 
 ## History 到原生事件的映射
 
-每次打开 Session 时，调用 `thread/read({ threadId, includeTurns: true })`，按 Turn 和 Item 原顺序生成
+每次打开 Session 时，主路径用 `thread/turns/list` 分页读取 Turn，并逐 Turn 用 `thread/items/list` 分页读取 Item
+（`thread/read({ threadId, includeTurns: true })` 仅作回退），按 Turn 和 Item 原顺序生成
 单调递增 `seq` 的 DSH 原生事件：
 
 | CodeX 数据 | DSH 原生事件 |
@@ -156,7 +157,7 @@ delta、command/file/MCP progress、file patch update、`thread/status/changed`�
 | Fork Session | `thread/fork` |
 | Rename Session | `thread/name/set` |
 | Archive Session | `thread/archive` |
-| 打开既有 Session | `thread/read`; 不得自动 resume |
+| 打开既有 Session | `thread/turns/list` + `thread/items/list`（回退 `thread/read`）; 不得自动 resume |
 | Composer 发送 | `thread/resume` 后 `turn/start` |
 | 运行中 steer | `turn/steer` + `expectedTurnId` |
 | Stop | `turn/interrupt` |
@@ -215,6 +216,6 @@ git diff --check
 5. 虚拟记录不进入 DSH SessionStore、Workspace 数据库或 Harness 日志；
 6. Host allowlist、CodeX Workspace authority、membership、identity 固定、Noise 与连接隔离仍然生效；
 7. 退出或断线后无残留虚拟 target、stream 或 approval；
-8. Android 仅直接消费同一 `codex.app.*`；不修改 VS Code、Server runtime 或 DSH 主仓库；
+8. Android 仅直接消费同一 `codex.app.*`；不修改 VS Code、完整 Server runtime 或 DSH 主仓库；
 9. 核心测试、check、bundle 校验、build、test 与 `git diff --check` 通过；
 10. README、中文 README、AGENTS、TODO、协议和本文与真实实现一致。

@@ -1,7 +1,7 @@
 # 发布与发版清单
 
 本仓库以 `@blue-soda/dsh-remote` 发布到 npm（GitHub 仓库同时是 DSH 的 GitHub 安装边界）。
-本文记录发布入口、发版清单与两次发布的实测复盘。**仍会直接导致失败的三条硬规则**摘要见
+本文记录发布入口、发版清单与三次发布的实测复盘。**仍会直接导致失败的三条硬规则**摘要见
 `AGENTS.md` 的 Project Structure 小节。
 
 ## 包名、归属与安装边界
@@ -53,14 +53,22 @@ node scripts/break-hard-links.mjs packages/plugin
 建议再跑一次。另注意 npm **不理解 pnpm workspace**：`npm publish -w packages/plugin` 会报
 `No workspaces found`，必须进入包目录发布。
 
-**发版清单**（`verify-version-sync.mjs` 要求**三处版本号一致**：根 `package.json`、
-`packages/plugin/package.json`、`packages/plugin/src/version.ts`）：
+**发版清单**（**5 处**版本号必须一致，由两个脚本分别校验：`packages/plugin/scripts/verify-version-sync.mjs`
+要求 `packages/plugin/package.json` 与 `packages/plugin/src/version.ts` 的 `PLUGIN_VERSION` 相同，
+它由包的 build/check/test 脚本自动调用；`scripts/verify-dsh-plugin.mjs` 要求两个 `dsh-plugin.json`
+分别与其旁边的 `package.json` 相同）：
+
+- 根 `package.json`
+- 根 `dsh-plugin.json`
+- `packages/plugin/package.json`
+- `packages/plugin/dsh-plugin.json`
+- `packages/plugin/src/version.ts`（`PLUGIN_VERSION`；`dist/index.js` 里的那处由构建生成，不要手改）
 
 ```bash
-# 1) 三处改成同一个新版本号
+# 1) 上面 5 处改成同一个新版本号
 # 2) 构建：会校验版本一致并重新生成两个 client bundle
 pnpm --filter @blue-soda/dsh-remote build
-# 3) 校验 DSH bundle 契约（包名、bin、exports、patch id、客户端 module id）
+# 3) 校验 DSH bundle 契约（包名、bin、exports、patch id、客户端 module id、两个 manifest 的版本）
 node scripts/verify-dsh-plugin.mjs
 # 4) 断开硬链接（否则 registry 以 415 拒收）
 node scripts/break-hard-links.mjs packages/plugin
@@ -90,5 +98,14 @@ E403（账号未开 2FA + `.npmrc` 里残留旧 `_authToken`，用 `npm logout` 
   现已采纳 npm 的写法，`scripts/verify-dsh-plugin.mjs` 对**npm 包**断言归一化路径 ✓
   （根包不发布，保留显式路径 ✓）。
 - **发布前必须先断硬链接** ✓（见上节 ✓），且重新构建/安装 profile 之后要再跑一次 ✓。
+
+第三次发布记录（2026-10-14，`0.5.0`）：
+
+- **包与提交**：`@blue-soda/dsh-remote@0.5.0` ✓；发布提交 `c446487`（release）与 `bb5fb9f`
+  （发布说明链接指向本 fork）✓；标签 `v0.5.0` ✓。
+- **注意同名的上游线** ✗：本仓库同时存在上游那条线的 `v0.5.0`，已改存为 `v0.5.0-acp` ✓；上游以**另一个包名**
+  `ds-harness-remote` 发布 ✓，因此本包的 `0.5.0` 在 npm 上**没有版本冲突** ✓。
+- **待补**：发布需人工执行 `npm publish --access public`（2FA 的 EOTP 仍要人工在浏览器完成或提供 6 位码 ✓），
+  实测输出待补 ✓。
 
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。

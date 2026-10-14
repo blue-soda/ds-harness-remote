@@ -43,7 +43,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`@blue-soda/dsh-remote@0.4.29`
+`@blue-soda/dsh-remote@0.5.0`
 
 ## Features
 
@@ -53,7 +53,7 @@ plugin version through DSH's plugin manager:
 - Support the DeepSeek Harness desktop edition with pinned Remote plugin releases
 - Open workspaces from another authorized computer on the same account
 - Reuse the native Harness interface instead of maintaining a separate desktop conversation UI
-- Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host and authorize it with a GitHub or Zhihu QR code
+- Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host and authorize it with a GitHub QR code
 - The Harness Host does not need a public listening port. Connect securely from anywhere with internet access over a bidirectional end-to-end encrypted channel
 - Native workspace files, read-only previews, terminal access, and authorized local development-service previews are available through the Harness sidebar.
 
@@ -64,7 +64,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`@blue-soda/dsh-remote@0.4.29`
+`@blue-soda/dsh-remote@0.5.0`
 
 ### dsh-TUI Host
 
@@ -76,7 +76,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.4.29
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.0
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -166,6 +166,35 @@ tools, and permission flow remain on that computer. Every settings namespace cur
 registered by the Host can also be configured remotely through the official Harness settings
 API. Credential values remain write-only, and Host-local document/open actions are never exposed.
 
+## Reconnecting, switches, and what stays put
+
+Every way a session can be lost takes the same path: the link is dropped, the Host turns **Allow
+control of this device** off, the Host switches Codex off, or the peer stops answering (a frozen
+machine). Recovery always runs in three stages:
+
+1. **A ten-second window** with at most two attempts, both forced over the Relay path, while the view
+   stays exactly as it is - no workspace switch, no reload. The header shows a **reconnecting**
+   indicator naming the session it is putting back, and you can cancel it there.
+2. **At the ten-second mark** the client falls back to its own local shell, so you are never left
+   staring at a frozen remote view.
+3. **A bounded schedule** - 5, 10, 20, then 30 seconds, seven attempts in total - puts the *same*
+   session back and then stops for good. When it runs out the indicator goes away and you stay local;
+   you can reconnect by hand whenever you like.
+
+Recovery restores the session you were in, identified by device, workspace kind and directory: a
+Codex session comes back as a Codex workspace, never as that Host's Harness workspace. Your own
+choice decides: if a recovery lands after you cancelled it or opened another workspace, its result is
+discarded and you stay where you put yourself.
+
+Browsing a Host's workspaces is not a session - it neither occupies a remote session nor arms a
+reconnect.
+
+**Allow control of this device** only decides whether this computer can be *controlled*: turning it
+off registers that with the Server, drops the Host link immediately, and makes the Server refuse new
+Host connections from this device. It does not sign the device out, does not rotate its identity, and
+does not stop you from controlling other devices from it. A device with control off is still listed,
+marked offline.
+
 ## Experimental Codex workspaces
 
 Remote can also show Codex projects from an authorized Host. Pick one from the normal workspace
@@ -175,7 +204,9 @@ project catalog without importing it into Harness storage.
 
 Codex Remote is meant as a convenience layer for your own devices. It supports text prompts, image
 prompts where available, model and permission controls, interrupt, and approvals. It is still
-published as experimental while long-running recovery and compatibility work continue.
+published as experimental while compatibility work continues; a lost Codex session recovers along
+exactly the same path as a Harness session (see [Reconnecting, switches, and what stays
+put](#reconnecting-switches-and-what-stays-put)).
 
 Web and Desktop approval controls show the Host-confirmed mode for the selected Codex session.
 If it has not been reported, they indicate that Host settings are inherited. Changing the mode
@@ -186,6 +217,18 @@ has the ChatGPT desktop app installed, the Plugin finds the `codex.exe` it bundl
 `codex app-server` directly, so **the desktop app does not need to be running** to browse Codex
 projects, load their history and chat. Advanced configuration and implementation notes live in
 [Codex Remote technical notes](docs/codex-remote.md).
+
+Turning Codex off on the Host is a capability change, not a link drop: it is announced once as
+`codex.app.capability`, and it never disturbs a Harness session, terminal, or preview on the same
+connection. Only an *unavailable* Codex while you are watching one of that Host's Codex sessions
+counts as losing a session; Codex becoming available again never counts as a loss - a session still
+waiting to be restored is put back by the retry schedule.
+
+`account/read` is a gate for the whole domain: if the Host's Codex account cannot be refreshed
+(signed out, region-blocked, or the machine's VPN/proxy is off), Codex disappears from the settings
+card and its workspaces cannot be opened. A blocked network shows up as `CODEX_REQUEST_TIMEOUT` or an
+upstream error code such as `-32603`; the domain retries every 60 seconds and returns to ready on its
+own once the network is back.
 
 ## End-to-end encryption
 

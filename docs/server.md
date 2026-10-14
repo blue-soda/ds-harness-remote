@@ -8,7 +8,7 @@
 
 本文保留完整 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现最小自部署版本，其运行方式与支持的 API 见 [最小 Server 说明](../apps/server/README.zh.md)。
 
-最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量种子账号的多账号模型和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
+最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量种子账号的多账号模型和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供 landing、登录与设备状态页（landing 含安装与连接指引、安全说明；主题跟随系统并支持手动切换）。后文记录独立 Server 项目的完整设计。
 
 ## 1. 定位
 
@@ -129,20 +129,24 @@ device Bearer 与普通 web 账号均不能访问 Admin API。
 
 Host 与 Client 的首次账号归属必须携带站点账号 token 注册随机身份并获取 Server credential。
 Host 还可用账号网页生成的一次性主机匹配码接入。注册行为按 IP/账号限速；重复
-deviceId 不允许覆盖已有 public key、role 或 owner。
+deviceId 不允许覆盖已有 public key、identity key 或 owner。
 
 Server credential 使用短 access token + 可旋转 refresh token。数据库仅保存 refresh token hash；检测旧 token 重用时撤销整个 token family。
 
 Host/Client private key 始终留在设备本地。
 
-同一 Plugin 安装在任一角色已经归属账号后，可用该角色 device credential 注册本机的
-相反角色。Server 只继承 owner，仍要求两个角色使用不同 deviceId、identity key 和
-token pair。
+> **契约变更（2026-10-05）**：**一台设备只有一份身份**，`role` **只存在于连接上**（hello 声明；peer 键为
+> `account + deviceId + role`），既不是配置项，也不在描述符与存储里 —— `AccountDeviceDescriptor` 没有
+> `role` 字段，其 schema 故意不严格，旧安装多发的 role 被**忽略**。此前"用一份凭据为本机注册相反角色"的
+> 路径（`POST /api/v1/devices/register-owned-role` 与配套的 `store.register` 自有角色守卫）**已删除**；
+> 「能否被控制」只看控制开关（关闭 = 登记标志 + 立即断开 host 连接 + 拒绝新的 `role=host` hello，
+> 不清授权、不轮换身份）。设备列表返回账号内**所有未吊销设备**（不按角色过滤），关闭控制的设备仍列出并
+> 标注离线。契约细节见 `docs/config-and-role.md`。
 
 ## 8. 账号授权设计
 
-- Host 和 Client 注册后，Server 查找同账号下所有未撤销的异角色设备并建立
-  `device_memberships` 行。
+- 设备注册后，Server 查找同账号下所有未撤销设备并建立/恢复 `device_memberships` 行
+  （按设备而不是按"相反角色"，见 §7 的契约变更说明）。
 - 无论 Host 先注册还是 Client 先注册，最终授权结果一致。
 - 同账号设备重新注册会恢复被撤销的派生授权边；撤销整个设备仍使其 token 与连接失效。
 - REST 设备详情、presence、TURN 与 WebSocket connect 都继续校验 membership，防止 IDOR。
@@ -160,13 +164,13 @@ token pair。
 
 | Method | Path | Auth | 说明 |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/devices/register` | Account | 注册账号拥有的 Host 或 Client，并同步授权边 |
-| `POST` | `/api/v1/devices/register-owned-role` | Device | 为同一安装注册账号拥有的相反角色 |
+| `POST` | `/api/v1/devices/register` | Account | 注册账号拥有的设备，并同步授权边 |
+| ~~`POST`~~ | ~~`/api/v1/devices/register-owned-role`~~ | — | **已删除（2026-10-05）**：一台设备一份身份，`role` 只在连接上；独立 Server 若仍保留，本仓库不再调用 |
 | `POST` | `/api/v1/account/host-registration-codes` | Account | 生成一次性主机匹配码 |
 | `POST` | `/api/v1/devices/register-with-code` | rate limited | 使用主机匹配码注册 Host |
 | `POST` | `/api/v1/auth/browser-authorizations/exchange` | Account | 用当前 Web 授权注册 Browser Client |
-| `GET` | `/api/v1/account/devices` | Account | 返回账号拥有的 Host 及当前在线状态 |
-| `GET` | `/api/v1/devices` | Client | 返回该 Client 同账号可访问的 Host |
+| `GET` | `/api/v1/account/devices` | Account | 返回账号内**全部未吊销设备**（不按角色过滤）；每项带 `online`（来自实际连接）与 `hostControl`（来自开关），关闭控制的设备仍列出并标注离线 |
+| `GET` | `/api/v1/devices` | Client | 返回账号内**全部未吊销设备**（不按角色过滤）；每项带 `online`（来自实际连接）与 `hostControl`（来自开关），关闭控制的设备仍列出并标注离线 |
 | `GET` | `/api/v1/devices/{id}` | membership | Host 元数据 |
 | `POST` | `/api/v1/auth/refresh` | refresh token | 旋转 token |
 | `GET` | `/api/v1/turn/credentials` | active connection | 短期 TURN credential |
@@ -254,7 +258,10 @@ Server 不向前端返回 `TURN_SECRET`。Admin 只能看到 TURN URL、是否�
 
 ### `devices`
 
-`id`, `name`, `role`, `platform`, `public_key`, `owner_account`, `version`, `created_at`, `last_seen_at`, `revoked_at`
+`id`, `name`, `platform`, `public_key`, `owner_account`, `version`, `host_control`（服务端字段 `hostControl`）, `created_at`, `last_seen_at`, `revoked_at`
+
+> **已变更（2026-10-05）**：`role` 列已删除——`role` 只存在于连接上（hello 声明），不在设备行里。
+> 自部署版本 `apps/server/src/store.ts` 的设备 schema 即 `{ account, descriptor, revoked, hostControl, lastSeenAt }`，无 role。
 
 ### `host_registration_codes`
 
