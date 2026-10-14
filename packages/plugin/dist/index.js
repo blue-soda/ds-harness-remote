@@ -13429,7 +13429,11 @@ function resolveConfig(input2 = {}, env = process.env) {
       jitter: reconnect.jitter ?? 0.2
     },
     codex: {
-      enabled: parsed.codex?.enabled ?? true,
+      // Off by default (2026-10-14). Carrying another agent's workspaces is a capability the user opts into, not
+      // one that quietly starts a second process on their machine: the domain launches `codex app-server`, probes
+      // an account and, while unavailable, retries every minute. The bundled profile patch says the same thing, so
+      // an install that never touches the switch has it off.
+      enabled: parsed.codex?.enabled ?? false,
       binary: parsed.codex?.binary ?? "codex"
     },
     acp: { enabled: parsed.acp?.enabled ?? true, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id4) => {

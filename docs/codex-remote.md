@@ -71,7 +71,7 @@ Harness 日志或第二份 Codex 数据存储。
 
 ## 配置
 
-Codex 默认开启，可在 DeepSeek Remote 设置卡片中关闭，修改后需要重启 DSH。
+Codex 默认关闭，需要在 DeepSeek Remote 设置卡片中手动开启；切换后立即生效（无需重启 DSH）。
 
 ```yaml
 ds-harness-remote:

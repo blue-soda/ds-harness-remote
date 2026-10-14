@@ -886,6 +886,12 @@ async function main(): Promise<void> {
     }
     process.stdout.write(`Driving ${host.deviceId.slice(0, 8)} as the Host\n`)
 
+    // Codex is off by default (2026-10-14), and a switched-off domain answers `settings.get` with `enabled: false`
+    // — which the Codex half of the matrix reads as "this Host cannot offer Codex" and skips. Switch it on once
+    // here, through the same guarded helper each scenario's `finally` uses (it only writes what is actually off, so
+    // it never restarts a domain that is already starting up).
+    await restoreHostSwitches(ctx)
+
     // The Client home remembers the target of the previous run, so it comes up mid-restore (`phase: 'restore'`)
     // and the first scenario would be racing it - which makes results depend on what ran last. Each scenario
     // states its own preconditions, so the run starts from the plain local shell.

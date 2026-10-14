@@ -10,12 +10,15 @@ describe('plugin config', () => {
       terminal: { enabled: true },
       forceRelay: false,
       reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
-      codex: { enabled: true, binary: 'codex' },
+      codex: { enabled: false, binary: 'codex' },
     })
     expect(resolveConfig({}, { DSH_REMOTE_TERMINAL_ENABLED: 'false' }).terminal.enabled).toBe(false)
   })
 
-  it('allows the default-on Codex domain to be disabled and rejects obsolete workspace filters', () => {
+  it('keeps the Codex domain off by default and lets it be switched on, and rejects obsolete workspace filters', () => {
+    // Carrying another agent's workspaces is opt-in (2026-10-14): the domain launches a second process and, while
+    // unavailable, retries every minute, so it must not start on a machine whose user never asked for it.
+    expect(resolveConfig({}, {}).codex.enabled).toBe(false)
     expect(resolveConfig({ codex: { enabled: false } }, {})).toMatchObject({
       codex: { enabled: false, binary: 'codex' },
     })

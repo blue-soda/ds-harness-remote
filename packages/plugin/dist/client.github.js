@@ -945,7 +945,7 @@
       }
       function RemotePluginOptions(props) {
         let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [codexBinary, setCodexBinary] = React.useState("codex"), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? DEFAULT_REMOTE_SERVER_URL, association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-          setSettingsView(view), setServerUrl(view.config.serverUrl ?? DEFAULT_REMOTE_SERVER_URL), setCodexEnabled(view.config.codex?.enabled ?? !0), setCodexBinary(view.config.codex?.binary ?? "codex"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+          setSettingsView(view), setServerUrl(view.config.serverUrl ?? DEFAULT_REMOTE_SERVER_URL), setCodexEnabled(view.config.codex?.enabled ?? !1), setCodexBinary(view.config.codex?.binary ?? "codex"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
             props.control("settings.get"),
@@ -2296,7 +2296,7 @@
             try {
               let loaded = await control("settings.get");
               if (cancelled) return;
-              setView(loaded), setEnabled(loaded.config.codex?.enabled ?? !0), setBinary(loaded.config.codex?.binary ?? "codex");
+              setView(loaded), setEnabled(loaded.config.codex?.enabled ?? !1), setBinary(loaded.config.codex?.binary ?? "codex");
             } catch (cause) {
               cancelled || setError(cause instanceof Error ? cause.message : String(cause));
             }
@@ -2309,7 +2309,7 @@
           if (view === void 0 || busy || settledState === "ready" || settledState === "disabled") return;
           let timer = setInterval(() => {
             control("settings.get").then((next) => {
-              setView(next), setEnabled(next.config.codex?.enabled ?? !0), setBinary(next.config.codex?.binary ?? "codex");
+              setView(next), setEnabled(next.config.codex?.enabled ?? !1), setBinary(next.config.codex?.binary ?? "codex");
             }).catch(() => {
             });
           }, 2e3);

@@ -1323,7 +1323,7 @@ window.__ModuleLoader__.load({
       const applyView = (view: PluginSettingsView): void => {
         setSettingsView(view)
         setServerUrl(view.config.serverUrl ?? DEFAULT_REMOTE_SERVER_URL)
-        setCodexEnabled(view.config.codex?.enabled ?? true)
+        setCodexEnabled(view.config.codex?.enabled ?? false)
         setCodexBinary(view.config.codex?.binary ?? 'codex')
         setTerminalEnabled(view.config.terminal?.enabled ?? true)
         setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
@@ -2976,7 +2976,7 @@ function CodexConnectionDetails(props: {
         const loaded = await control<PluginSettingsView>('settings.get')
         if (cancelled) return
         setView(loaded)
-        setEnabled(loaded.config.codex?.enabled ?? true)
+        setEnabled(loaded.config.codex?.enabled ?? false)
         setBinary(loaded.config.codex?.binary ?? 'codex')
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
@@ -2996,7 +2996,7 @@ function CodexConnectionDetails(props: {
       void control<PluginSettingsView>('settings.get')
         .then((next: PluginSettingsView) => {
           setView(next)
-          setEnabled(next.config.codex?.enabled ?? true)
+          setEnabled(next.config.codex?.enabled ?? false)
           setBinary(next.config.codex?.binary ?? 'codex')
         })
         .catch(() => undefined)

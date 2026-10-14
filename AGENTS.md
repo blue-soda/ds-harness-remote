@@ -76,7 +76,7 @@ Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用构建
 | Relay Transport | Protocol v1 control/relay 已实现 | 心跳、限制协商、断线状态传播 |
 | WebRTC | signaling、ICE、TURN、LAN/P2P/Relay 自适应路径基础已实现，Android 真机与 Host werift 互操作已验证 | 网络切换恢复和长期稳定性 |
 | Client Core | ApiProxy tunnel RPC/Event 关联基础已实现 | reconnect、pending call/stream 恢复 |
-| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证。**Codex 域后台启动且不阻塞 Host 就绪**：它需要外部二进制，失败只写状态。启动预算 **90 秒**（`CODEX_START_BUDGET_MS`）—— 它**必须大于**最慢的单步（现在是首次 `account/read` 探测的 **60 秒** `ACCOUNT_PROBE_TIMEOUT_MS`，与普通请求的 `APP_SERVER_REQUEST_TIMEOUT_MS` 同级），否则预算会在第一个候选还在正常启动时就耗尽、**每台机器都报 `CODEX_START_TIMEOUT`**；实测本机 319 MB 的 `codex.exe` 冷启动+握手约 **5.3 秒**，但**首次账号探测**在 Codex 状态较大时（本机 `thread_history` 库 427 MB）会明显超过旧的 15 秒，而超时会把真实回答（本机实测为 `CODEX_UPSTREAM_ERROR`）**掩盖**成"账号不可达"。缺二进制、账号不可用或上游失败时变为 `unavailable`（`CODEX_START_TIMEOUT` / `CODEX_AUTH_REQUIRED` / `CODEX_ACCOUNT_UNREACHABLE` / `CODEX_UPSTREAM_ERROR`）。域对外的状态码取**第一个（平台推荐）候选**的失败：曾经只抛最后一个候选（Windows 上是 PATH 里那个不存在的 `codex`），于是"二进制不可用"掩盖了"账号不可达"。上游返回错误时**保留其错误码**（`upstreamCode`，只收短标识符、不记文本）：本机实测 `account/read` 的上游是 **`-32603`（JSON-RPC internal error）**，而在此之前所有上游失败都塌缩成同一句通用文案，让限流、令牌过期与区域被拒看起来完全一样。**实测对应关系（2026-10-13）**：**VPN 未开启**时账号后端不可达，冷启动的 app-server 先表现为探测 15 秒超时、放宽到 60 秒后表现为 `-32603`；同一台机器 VPN 开着时域为 `ready`，关掉后重启即长期停在 `Starting`。所以"域不可用 + `CODEX_UPSTREAM_ERROR`/`-32603`"首先应怀疑这台机器的出网（VPN/代理），而不是 Codex 安装或插件——60 秒慢重试会在出网恢复后自行回到 `ready`，无需重写设置。**注意**：`account/read` 是**门禁** —— 若 Codex 账号无法刷新（实测：403 `unsupported_country_region_territory`，或未签入），整个域就不可用，面板上 Codex 设置与工作区入口会**一起消失**，这不是插件故障。**启动必须串行**：两个重叠的 launch 会互相抢 `this.appServer`，先失败的那个会把另一个**正在做账号探测**的 app-server 关掉（`CODEX_CLOSED`），所以 `restart()` 现在会先等飞行中的 launch 落定再释放 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
+| Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、**默认关闭**（2026-10-14 起；载入其它 agent 的工作区是用户主动开启的能力，且域会启动第二个进程并在不可用时每分钟重试）、可在设置中开启、固定 allowlist 与连接隔离已实现；Desktop 以 rc.2 ApiProxy / v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证。**Codex 域后台启动且不阻塞 Host 就绪**：它需要外部二进制，失败只写状态。启动预算 **90 秒**（`CODEX_START_BUDGET_MS`）—— 它**必须大于**最慢的单步（现在是首次 `account/read` 探测的 **60 秒** `ACCOUNT_PROBE_TIMEOUT_MS`，与普通请求的 `APP_SERVER_REQUEST_TIMEOUT_MS` 同级），否则预算会在第一个候选还在正常启动时就耗尽、**每台机器都报 `CODEX_START_TIMEOUT`**；实测本机 319 MB 的 `codex.exe` 冷启动+握手约 **5.3 秒**，但**首次账号探测**在 Codex 状态较大时（本机 `thread_history` 库 427 MB）会明显超过旧的 15 秒，而超时会把真实回答（本机实测为 `CODEX_UPSTREAM_ERROR`）**掩盖**成"账号不可达"。缺二进制、账号不可用或上游失败时变为 `unavailable`（`CODEX_START_TIMEOUT` / `CODEX_AUTH_REQUIRED` / `CODEX_ACCOUNT_UNREACHABLE` / `CODEX_UPSTREAM_ERROR`）。域对外的状态码取**第一个（平台推荐）候选**的失败：曾经只抛最后一个候选（Windows 上是 PATH 里那个不存在的 `codex`），于是"二进制不可用"掩盖了"账号不可达"。上游返回错误时**保留其错误码**（`upstreamCode`，只收短标识符、不记文本）：本机实测 `account/read` 的上游是 **`-32603`（JSON-RPC internal error）**，而在此之前所有上游失败都塌缩成同一句通用文案，让限流、令牌过期与区域被拒看起来完全一样。**实测对应关系（2026-10-13）**：**VPN 未开启**时账号后端不可达，冷启动的 app-server 先表现为探测 15 秒超时、放宽到 60 秒后表现为 `-32603`；同一台机器 VPN 开着时域为 `ready`，关掉后重启即长期停在 `Starting`。所以"域不可用 + `CODEX_UPSTREAM_ERROR`/`-32603`"首先应怀疑这台机器的出网（VPN/代理），而不是 Codex 安装或插件——60 秒慢重试会在出网恢复后自行回到 `ready`，无需重写设置。**注意**：`account/read` 是**门禁** —— 若 Codex 账号无法刷新（实测：403 `unsupported_country_region_territory`，或未签入），整个域就不可用，面板上 Codex 设置与工作区入口会**一起消失**，这不是插件故障。**启动必须串行**：两个重叠的 launch 会互相抢 `this.appServer`，先失败的那个会把另一个**正在做账号探测**的 app-server 关掉（`CODEX_CLOSED`），所以 `restart()` 现在会先等飞行中的 launch 落定再释放 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
 | Mock Host | 旧 Android Remote RPC 联调工具，当前冻结 | 若恢复 Android 再迁移或替换 |
 | Desktop | Host 设置、Remote 工作区模态框、远程 Header、连接链路与加密状态已接入 Harness Web UI，Host status 由 loopback SSE 推送（无固定间隔的 status 轮询），原生窗口跨机 E2E 已验证 | 多窗口、休眠/唤醒和代理网络回归 |
 | 开源自部署 Server | `apps/server` 已实现多账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；账号间设备与令牌完全隔离，注册默认关闭（需显式配置注册码）；QR OAuth 端点已实现（`auto`/`github`/`wechat`/`mock`/`off`，账户密钥只存服务端）；**DeepSeek 账号登录已实现**（`DSH_SERVER_DEEPSEEK_LOGIN=on`，服务端自行向平台核对 grant 后即弃、不落盘，绑定键为平台稳定账号 ID，故同一 DeepSeek 用户必落同一账号；平台 WAF 强制要求浏览器 UA）；`DSH_SERVER_PASSWORD_LOGIN=off` 可关闭密码登录；建号默认关闭；provider 请求带硬超时且失败会将会话标记过期；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN。大陆部署需解决 `github.com` 出网：GeoDNS 给大陆返回的亚洲节点不可达，文档给出的 `/etc/hosts` 钉定实测**间歇可用**（同一 IP 曾 20/20 成功、随后 0/12 全败），可靠方案是境外部署或出站代理 | 出站代理或境外部署下的 GitHub 扫码验收、真实微信凭据与备案域名验收、账号自助注册与扫码登录的 Web 页面、Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
@@ -251,7 +251,7 @@ instead"、"discards a restore that lands after the user answered"，以及端�
 7. Token、私钥、主机匹配码、prompt、源码和工具输出不得写日志。
 8. Harness v0.1.1 rc.2 业务层只使用官方 `ApiProxy`，v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 业务层只使用官方 `TypertGateway` Remote carrier；原生侧栏使用官方 `workspaceFiles` / `officeToPdf` / `terminal` 固定 allowlist；保留 dsh-file-viewer provider 通道。除规则 10 规定的 CodeX 内存展示载体外，禁止增加 session/agent/workspace/permission adapter、另一套 Harness wire format 或通用文件系统协议。
 9. 不修改用户已有变更，不提交 `node_modules`、Expo cache、Android build 产物或个人 Agent 配置；唯一允许提交的 `dist` 是根 DSH GitHub Bundle 所需的 `packages/plugin/dist/index.js` 与 `client.github.js`，另需保留根 Host 入口 `index.js`。
-10. Codex 支持必须保留在现有 Remote Plugin 内，并作为 `packages/plugin/src/codex/` 独立业务领域实现；默认开启且可在设置中关闭，使用独立 capability/RPC/event/state。允许 Client Plugin 以临时 rc.2 ApiProxy / v0.1.2 Typert 载体复用 DSH 原生 UI，也允许 Android 直接消费同一 `codex.app.*` 并只在内存中投影其移动端 Workspace/Session/Chat；两者都禁止写入 DSH SessionStore、Workspace 数据库或 Harness 日志。远端只允许编译期固定 App Server allowlist；Workspace authority 优先来自 CodeX App Server 的 `project/list`，该接口不可用或无可用根目录时才可回退到 App Server 已通过 `thread/list` 返回的绝对 `cwd`。`project/create` 只可注册 Host 上已存在的单个绝对目录，Host 必须执行 `realpath` 并确认目标是目录，且上游返回的新 Project 才能扩展 authority。新 Thread 还可使用这些 authority 根内经过词法路径与 `realpath` 双重校验的真实子目录，禁止推测共同父目录或越界接受 Client 自报路径。
+10. Codex 支持必须保留在现有 Remote Plugin 内，并作为 `packages/plugin/src/codex/` 独立业务领域实现；**默认关闭**（2026-10-14 起；由用户在设置中开启），使用独立 capability/RPC/event/state。允许 Client Plugin 以临时 rc.2 ApiProxy / v0.1.2 Typert 载体复用 DSH 原生 UI，也允许 Android 直接消费同一 `codex.app.*` 并只在内存中投影其移动端 Workspace/Session/Chat；两者都禁止写入 DSH SessionStore、Workspace 数据库或 Harness 日志。远端只允许编译期固定 App Server allowlist；Workspace authority 优先来自 CodeX App Server 的 `project/list`，该接口不可用或无可用根目录时才可回退到 App Server 已通过 `thread/list` 返回的绝对 `cwd`。`project/create` 只可注册 Host 上已存在的单个绝对目录，Host 必须执行 `realpath` 并确认目标是目录，且上游返回的新 Project 才能扩展 authority。新 Thread 还可使用这些 authority 根内经过词法路径与 `realpath` 双重校验的真实子目录，禁止推测共同父目录或越界接受 Client 自报路径。
 
 ## Test Policy
 
@@ -331,13 +331,15 @@ deviceId**（注册需要账号会话或注册码 ✓，从不只凭设备令牌
 ### 登录必须由用户在浏览器中完成；未登录不是错误（2026-10-14 实测）
 
 **不得"借用"DSH 已有的平台会话静默登录**：`settings.configure` 的 DeepSeek 分支要求**登录流程由本次请求
-发起、且授权在流程开始之后才到达**（对比流程开始时 DSH 持有的 grant；`deepSeekSignIn` 记录它），否则一律返回
-`deepseek-sign-in-required` + 浏览器授权地址。实测背景：新设备静默复用 DSH 的平台会话后，Server 端（该部署
-已开启 `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS`）为它没见过的平台身份**新建了一个空账号**并把设备注册进去，
-面板只显示"没有主机"，用户必须**手动退出再登录**（退出会一并释放 DSH 借出的平台会话，于是重登走浏览器授权）
-才能回到自己的账号。当时线上 `state.json` 有 **11 个账号**，其中 **3 个 0 设备**、5 个 1–4 台，只有一个账号
-放着该用户的 6 台机器。Server 侧的绑定逻辑本身正确（`deepseek:<平台 id>` 命中即复用），问题在于"**谁**同意
-了这次登录"。
+发起**（`deepSeekSignIn` 在返回 `deepseek-sign-in-required` 时置位），否则一律返回 `deepseek-sign-in-required`
++ 浏览器授权地址；用户完成浏览器授权后，DSH 当时持有的 grant 即被接受（2026-10-14 按用户要求放宽：若还要求
+"grant 必须与流程开始前不同"，同一账号重复授权、平台回同一 grant 时会把用户反复丢回浏览器；代价是用户打开
+浏览器后放弃也会用 DSH 当时的账号完成授权，属明知故取）。实测背景：新设备静默复用 DSH 的平台会话后，Server
+端（该部署已开启 `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS`）为它没见过的平台身份**新建了一个空账号**并把设备
+注册进去，面板只显示"没有主机"，用户必须**手动退出再登录**（退出会一并释放 DSH 借出的平台会话，于是重登走
+浏览器授权）才能回到自己的账号。当时线上 `state.json` 有 **11 个账号**，其中 **3 个 0 设备**、5 个 1–4 台，
+只有一个账号放着该用户的 6 台机器（那 3 个空账号已于当日清理）。Server 侧的绑定逻辑本身正确
+（`deepseek:<平台 id>` 命中即复用），问题在于"**谁**同意了这次登录"。
 
 **未登录不是错误**：`ClientModeRuntime.devices()` 在本地凭据不可用时**抛授权错误**（`AUTH_REQUIRED`），不再
 返回空数组——空数组会被面板读成"已登录但没有电脑"，于是新设备打开就是一张空主机列表。面板对该失败**静默**
