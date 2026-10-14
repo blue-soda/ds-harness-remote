@@ -26062,13 +26062,19 @@ var PluginControlRuntime = class {
   verifiedDeepSeekToken;
   verifiedDeepSeekAuthorization;
   /**
-   * The sign-in this plugin asked the user for, and the grant DSH held when it asked.
+   * Whether a sign-in the user asked for is in flight.
    *
-   * Only the browser authorization the user just completed may sign this device in. DSH's own platform session is
-   * not consent: reusing it silently signed a new device into whichever DeepSeek account DSH happened to hold, and
-   * with account creation enabled on the Server that produced a brand-new *empty* account - the "new device lands
-   * in an empty account" report. So a grant that was already there when the flow started is not accepted; the flow
-   * has to have been started by this request, and the grant has to have arrived since.
+   * Only a sign-in the user started may register this device. DSH's own platform session is not consent on its
+   * own: accepting it without a click silently signed a new device into whichever DeepSeek account DSH happened
+   * to hold, and with account creation enabled on the Server that produced a brand-new *empty* account - the
+   * "new device lands in an empty account" report.
+   *
+   * The grant itself is deliberately not compared against what DSH held when the flow started. The user asked for
+   * this sign-in and completed it in the browser, so the account DSH holds afterwards is the one they authorized;
+   * when the platform hands back the same grant - re-authorizing as the same account does exactly that - refusing
+   * it would only loop the user through the browser again. The cost is that a browser page the user opens and
+   * then abandons also ends in an authorization, with the account DSH already held; they still asked for it, and
+   * the alternative was the silent-consent bug above.
    *
    * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
    */
@@ -26181,7 +26187,7 @@ var PluginControlRuntime = class {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
       }
       const session = await this.deepseekSession.read();
-      const counted = session !== void 0 && this.deepSeekSignIn !== void 0 && session.token !== this.deepSeekSignIn.grantBefore;
+      const counted = session !== void 0 && this.deepSeekSignIn !== void 0;
       if (!counted) {
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
@@ -26189,7 +26195,7 @@ var PluginControlRuntime = class {
           locale: typeof value.locale === "string" ? value.locale : "en",
           timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === "number" ? value.timezoneOffsetSeconds : 0
         });
-        this.deepSeekSignIn = { grantBefore: session?.token };
+        this.deepSeekSignIn = true;
         return {
           status: "deepseek-sign-in-required",
           ...started.authorizeUrl === void 0 ? {} : { authorizeUrl: started.authorizeUrl }

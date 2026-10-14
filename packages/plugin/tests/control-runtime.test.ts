@@ -436,6 +436,42 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
     expect(calls.filter(url => url.endsWith('/devices/register'))).toEqual([])
   })
 
+  it('accepts the grant DSH already held once the user has asked for a sign-in', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({})
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/v1/auth/deepseek')) {
+        return json({
+          token: 'account-token-value',
+          expiresAt: Date.now() + 600_000,
+          account: 'deepseek@example.com',
+          profile: {},
+          isAdmin: false,
+        })
+      }
+      if (url.endsWith('/devices/register')) return json(tokens())
+      throw new Error(`unexpected request: ${url}`)
+    }))
+    // DSH is signed in and the platform hands the *same* grant back, which is what re-authorizing as the same
+    // account looks like. Refusing it would loop the user through the browser for nothing.
+    const handler = register(new PluginControlRuntime(
+      resolveConfig(settings.get()), directory, settings, undefined, undefined,
+      { read: async () => ({ token: 'same-grant' }), startSignIn: async () => ({ authorizeUrl: 'https://platform.example/authorize' }), signOut: async () => true },
+    ))
+    const payload = { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }
+
+    // The click still asks first: nothing is authorized from a session the user never asked to use.
+    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required' } })
+    expect(calls).toEqual([])
+
+    // Once they have asked, the account DSH holds is the one they authorized.
+    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
+    expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toHaveLength(1)
+  })
+
   /**
    * The client polls `settings.configure` while the browser sign-in page is open.
    * Every call used to re-run the authorization, which re-verifies the grant with

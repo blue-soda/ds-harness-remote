@@ -122,17 +122,23 @@ export class PluginControlRuntime {
   private verifiedDeepSeekAuthorization?: DeviceAuthorization
 
   /**
-   * The sign-in this plugin asked the user for, and the grant DSH held when it asked.
+   * Whether a sign-in the user asked for is in flight.
    *
-   * Only the browser authorization the user just completed may sign this device in. DSH's own platform session is
-   * not consent: reusing it silently signed a new device into whichever DeepSeek account DSH happened to hold, and
-   * with account creation enabled on the Server that produced a brand-new *empty* account - the "new device lands
-   * in an empty account" report. So a grant that was already there when the flow started is not accepted; the flow
-   * has to have been started by this request, and the grant has to have arrived since.
+   * Only a sign-in the user started may register this device. DSH's own platform session is not consent on its
+   * own: accepting it without a click silently signed a new device into whichever DeepSeek account DSH happened
+   * to hold, and with account creation enabled on the Server that produced a brand-new *empty* account - the
+   * "new device lands in an empty account" report.
+   *
+   * The grant itself is deliberately not compared against what DSH held when the flow started. The user asked for
+   * this sign-in and completed it in the browser, so the account DSH holds afterwards is the one they authorized;
+   * when the platform hands back the same grant - re-authorizing as the same account does exactly that - refusing
+   * it would only loop the user through the browser again. The cost is that a browser page the user opens and
+   * then abandons also ends in an authorization, with the account DSH already held; they still asked for it, and
+   * the alternative was the silent-consent bug above.
    *
    * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
    */
-  private deepSeekSignIn?: { grantBefore?: string }
+  private deepSeekSignIn?: boolean
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
     const statusStream = new ControlStatusStream(() => this.streamStatus())
@@ -260,12 +266,10 @@ export class PluginControlRuntime {
         throw new ClientModeError('METHOD_NOT_ALLOWED', 'DeepSeek account sign-in is unavailable in this profile.')
       }
       const session = await this.deepseekSession.read()
-      // A grant counts only when this plugin asked for one and the grant arrived since. What DSH itself holds is
-      // not the user's answer to *this* sign-in, and treating it as one is what silently moved a new device into a
-      // different - and, on a Server that may create accounts, brand-new and empty - account.
-      const counted = session !== undefined
-        && this.deepSeekSignIn !== undefined
-        && session.token !== this.deepSeekSignIn.grantBefore
+      // The grant counts once the user has asked for this sign-in: they completed the browser round trip, so the
+      // account DSH holds now is the one they authorized. What DSH held *before* any click is not an answer to a
+      // question nobody asked, and that is the case this gate exists for.
+      const counted = session !== undefined && this.deepSeekSignIn !== undefined
       if (!counted) {
         // Ask the user, in the browser, for the account they actually want. Nothing is authorized yet, so the
         // settings are left untouched. The panel shows the button again for as long as this keeps being the
@@ -276,9 +280,9 @@ export class PluginControlRuntime {
           locale: typeof value.locale === 'string' ? value.locale : 'en',
           timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === 'number' ? value.timezoneOffsetSeconds : 0,
         })
-        // Remember what DSH held *before* the browser round trip, so a grant that was already there can never be
-        // mistaken for the one the user is about to authorize.
-        this.deepSeekSignIn = { grantBefore: session?.token }
+        // The user asked for this sign-in; the next poll may authorize with whatever grant the browser round trip
+        // left behind.
+        this.deepSeekSignIn = true
         return {
           status: 'deepseek-sign-in-required',
           ...(started.authorizeUrl === undefined ? {} : { authorizeUrl: started.authorizeUrl }),
