@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 - 2026-10-14
+
+- Signs in only through the browser authorization the user just completed. The DeepSeek sign-in used to accept whatever platform session DSH happened to hold and authorize with it silently, so a new device landed in whichever account DSH was signed into - and on a Server that creates an account for an identity it has never seen, that meant a brand-new, *empty* account: the panel showed an empty Host list and the only way back to the user's own account was to sign out and in again. The endpoint now starts the browser flow unless the user asked for this sign-in, and accepts the grant DSH holds once they have (re-authorizing as the same account hands back the same grant, and refusing it would only loop the user through the browser).
+- Treats being signed out as a state rather than an error. Device discovery reports the authorization failure instead of answering with an empty list - that empty answer was what made a fresh device open on an empty Host list instead of its sign-in button - and the panel answers it silently: the button, no error text.
+- Turns Codex off by default. Carrying another agent's workspaces is something the user opts into, not something that quietly starts a second process (`codex app-server`), probes an account against the platform and retries every minute on a machine that never asked for it. An install that switched Codex on keeps it on: the plugin's switch writes the home-level `cordis.patch.yml`, which is applied after the bundle's patch.
+- Documents the behaviour above where an implementer will look for it (recovery stages, the control switch, browse-is-not-a-session, the Codex gate) and brings the design, protocol and release documents back in line with the implementation.
+
 ## 0.5.0 - 2026-10-14
 
 - Rebuilds session recovery around one ladder for every kind of loss, and around the session actually being restored: the target is a device, a workspace kind and a directory, so a Codex session comes back as a Codex workspace instead of that Host's Harness workspace, and a Codex project is matched by its root rather than by an id the peer may rebuild.

@@ -1,21 +1,17 @@
 ## English
 
-- Rebuilds remote session recovery around **one ladder for every kind of loss** and around the session actually being restored (device + workspace kind + directory). A Codex session comes back as a Codex workspace, never as the peer's DSH workspace.
-- Keeps the view untouched through the **quick window** (two relay-only attempts inside ten seconds), falls back to the local shell at the ten-second mark, then hands over to a **bounded schedule** (5/10/20/30s…) that ends for good and closes the "reconnecting" indicator instead of retrying forever.
-- Treats **the user's own choice as authoritative**: a recovery that lands after the user cancelled it or opened another workspace has its result discarded, and the local shell is restored.
-- Adds the `codex.app.capability` event: the Host states Codex availability **only on a real transition**, and the client decides what it means. Switching Codex **on** can therefore never be read as a lost session, and switching it **off** no longer disturbs a DSH session on the same link.
-- Improves Codex diagnostics: a 90s start budget with a 60s account probe, serialized launches, the **first** (platform-preferred) candidate's failure reported, and upstream error codes retained (`upstreamCode`). An unreachable account no longer reads as a missing binary, and a blocked proxy/VPN is now visible in the status code.
-- Keeps **one identity per device**: `role` exists only on a connection, "can be controlled" is the control switch alone, and a Host with control off is still listed (marked offline) instead of hidden.
-- Adds a **scripted end-to-end matrix** (`scripts/remote-e2e.mts`): two session kinds × three ways to lose them (control switch, Codex switch, frozen process) × three stages (quick window, retry schedule, give-up), plus browsing, cancellation, restart-restore and Codex negative cases.
+- **Signing in now only happens through the browser authorization you just completed.** The DeepSeek sign-in used to accept whichever platform session DSH already held and authorize with it silently, so a new device landed in whatever account DSH happened to be signed into. On a Server that creates an account for an identity it has never seen, that meant a brand-new, *empty* account: an empty Host list, and no way back to your own account except signing out and in again. The card now asks for the browser flow unless you started this sign-in, and accepts the grant DSH holds once you have.
+- **Being signed out is no longer reported as an error.** Device discovery used to answer with an empty list while the local credential could not be used — which the panel read as "signed in, just no computers" — so a fresh device opened on an empty Host list instead of offering its sign-in button. It now reports the authorization failure, and the panel answers it with the button and no error text.
+- **Codex is off by default.** Carrying another agent's workspaces is a capability you opt into; it is not something that quietly starts a second process (`codex app-server`), probes an account and retries every minute on a computer that never asked for it. Turn it on in the DeepSeek Remote settings card — the switch applies immediately, without restarting DSH. An install that already had it on stays on.
+- Documents the behaviour users actually meet — the recovery stages, what the control switch does and does not do, browsing versus opening a session, and the Codex account gate — and brings the design, protocol and release documents back in line with the implementation.
+- Fixes a fresh install opening on an empty Host list instead of the sign-in panel, by keeping the local-credential answer and the device-list answer together when the panel decides.
 
 ## 中文
 
-- 重构远程会话恢复：**所有丧失复用同一条阶梯**，并且只还原"同一个会话"（设备 + 工作区种类 + 目录）。Codex 会话恢复后仍是 Codex 工作区，**不会**落回对端的 DSH 工作区。
-- **快速窗口**（10 秒内至多 2 次、强制 relay）期间不切视图，第 10 秒回退本地，随后交给**有界的重试日程**（5/10/20/30 秒…）；日程走完即明确放弃并收起「重连中」，不再无限重试。
-- **用户的选择是权威**：若一次恢复在用户取消或另选工作区之后才落地，其结果会被丢弃并回到本地 shell。
-- 新增 `codex.app.capability` 事件：Host **只在真实翻转时**声明 Codex 可用性，由客户端决定其含义。因此"打开 Codex"**永远不会**被读成会话丧失，而"关闭 Codex"也不再干扰同一条链路上的 DSH 会话。
-- 改进 Codex 诊断：启动预算 90 秒 / 账号探测 60 秒、启动串行、上报**第一个（平台推荐）候选**的失败、保留上游错误码（`upstreamCode`）。账号不可达不再被掩盖成"缺少二进制"，代理/VPN 被拦也能从状态码看出来。
-- 保持**一台设备一份身份**：`role` 只存在于连接上；"能否被控制"只看控制开关；关闭控制的主机仍然列出（标注离线）而不隐藏。
-- 新增**脚本化端到端矩阵**（`scripts/remote-e2e.mts`）：2 类会话 × 3 种失去方式（控制开关 / Codex 开关 / 冻结进程）× 3 个阶段（快速窗口 / 重试日程 / 放弃），外加浏览、取消、重启恢复与 Codex 负例。
+- **登录只通过你刚刚在浏览器中完成的授权进行。** 此前 DeepSeek 登录会接受 DSH 当时持有的平台会话并静默用它完成授权，于是新设备会落进 DSH 当时登录的那个账号。在"首次见到的身份即建号"的 Server 上，这意味着一个**全新的空账号**：主机列表是空的，除了退出再登录没有别的办法回到自己的账号。现在除非本次登录由你发起，卡片会先走浏览器授权；你完成后，DSH 当时持有的 grant 即被接受。
+- **未登录不再被当成错误。** 本地凭据不可用时，设备发现此前返回空列表——面板会读成"已登录，只是没有电脑"——于是新设备打开就是一张空主机列表，而不是显示登录按钮。现在它会报告授权失败，面板则静默地用登录按钮回应：没有错误文案。
+- **Codex 默认关闭。** 载入其它 agent 的工作区应是你主动开启的能力，而不是在一台从未有此需求的机器上悄悄启动第二个进程（`codex app-server`）、探测账号并每分钟重试。请在 DeepSeek Remote 设置卡片中开启——切换立即生效，无需重启 DSH。已经开启过的安装保持开启。
+- 把用户真正会遇到的行为写进文档——恢复的三段、控制开关**做与不做**什么、浏览与打开会话的区别、Codex 的账号门禁——并让设计、协议与发版文档重新与实现对齐。
+- 修复全新安装直接打开空主机列表而不是登录面板的问题：面板判定时把"本地凭据"与"设备列表"两个事实合在一起看。
 
-[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.4.29...v0.5.0) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.0/README.md)
+[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.5.0...v0.5.1) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.1/README.md)

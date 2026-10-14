@@ -887,10 +887,22 @@ async function main(): Promise<void> {
     process.stdout.write(`Driving ${host.deviceId.slice(0, 8)} as the Host\n`)
 
     // Codex is off by default (2026-10-14), and a switched-off domain answers `settings.get` with `enabled: false`
-    // — which the Codex half of the matrix reads as "this Host cannot offer Codex" and skips. Switch it on once
-    // here, through the same guarded helper each scenario's `finally` uses (it only writes what is actually off, so
-    // it never restarts a domain that is already starting up).
+    // — which the Codex half of the matrix reads as "this Host cannot offer Codex" and skips. Switch it on first,
+    // through the same guarded helper each scenario's `finally` uses (it only writes what is actually off, so it
+    // never restarts a domain that is already starting up), and then **wait for the domain**: `settings.codex.set`
+    // launches `codex app-server` in the background, and the first Codex scenario would otherwise race that launch
+    // and skip itself for a reason the harness had just created.
     await restoreHostSwitches(ctx)
+    const codex = await waitFor('the Host to offer Codex after switching it on', async () => {
+      const view = await ctx.host.control<{ codexStatus?: { state?: string } }>('settings.get').catch(() => undefined)
+      const state = view?.codexStatus?.state
+      if (state === 'ready') return true
+      // A domain that cannot run at all - no binary, account refused - is not something to wait for.
+      return state === 'unavailable' || state === 'disabled' ? false : undefined
+    }, 150_000, 2_000).catch(() => undefined)
+    process.stdout.write(codex === true
+      ? 'Codex is available on the Host\n'
+      : 'Codex is not available on the Host; its scenarios will report why\n')
 
     // The Client home remembers the target of the previous run, so it comes up mid-restore (`phase: 'restore'`)
     // and the first scenario would be racing it - which makes results depend on what ran last. Each scenario
