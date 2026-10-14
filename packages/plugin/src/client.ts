@@ -9,6 +9,7 @@ import {
 import { CONTROL_RPC_PREFIX, STATUS_STREAM_PATH } from './control-route.js'
 import { createStatusFeed, type StatusFeed } from './status-stream.js'
 import { DEFAULT_REMOTE_SERVER_URL } from './defaults.js'
+import { authorizationStillNeeded } from './panel-authorization.js'
 
 declare global {
   interface Window {
@@ -2168,9 +2169,11 @@ window.__ModuleLoader__.load({
           // local credentials, so a signed-out install reaches the sign-in panel
           // right away instead of waiting for the Server round trip below to
           // fail — the round trip then only refines the answer.
+          let storedLocally: boolean | undefined
           try {
             const local = await props.control<{ stored?: boolean }>('authorization.local')
-            setNeedsAuthorization(local?.stored !== true)
+            storedLocally = local?.stored === true
+            setNeedsAuthorization(!storedLocally)
           } catch {
             // A Host without this endpoint keeps the old order: the Host list
             // first, corrected by the device query's outcome.
@@ -2181,7 +2184,12 @@ window.__ModuleLoader__.load({
           try {
             const nextDevices = await props.control<RemoteDevice[]>('devices')
             setDevices(nextDevices)
-            setNeedsAuthorization(false)
+            // A successful read is not proof of authorization — `devices` answers
+            // with an empty list while the local credential is unusable, which is
+            // the state a fresh device is in. Only apply that rule when the Host
+            // answered the local-credential question; without it (an older Host)
+            // the device query stays the only signal, as it always was.
+            if (storedLocally !== undefined) setNeedsAuthorization(authorizationStillNeeded(storedLocally, nextDevices.length))
             if (selectedHost !== undefined) {
               const nextSelectedHost = nextDevices.find(device => device.deviceId === selectedHost.deviceId)
               if (nextSelectedHost === undefined) {
