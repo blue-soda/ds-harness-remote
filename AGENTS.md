@@ -328,6 +328,26 @@ deviceId**（注册需要账号会话或注册码 ✓，从不只凭设备令牌
 [`docs/config-and-role.md`](docs/config-and-role.md) ✓；§6.1 的旧登出语义见
 [`docs/plugin-integration.md`](docs/plugin-integration.md) ✓。
 
+### 登录必须由用户在浏览器中完成；未登录不是错误（2026-10-14 实测）
+
+**不得"借用"DSH 已有的平台会话静默登录**：`settings.configure` 的 DeepSeek 分支要求**登录流程由本次请求
+发起、且授权在流程开始之后才到达**（对比流程开始时 DSH 持有的 grant；`deepSeekSignIn` 记录它），否则一律返回
+`deepseek-sign-in-required` + 浏览器授权地址。实测背景：新设备静默复用 DSH 的平台会话后，Server 端（该部署
+已开启 `DSH_SERVER_DEEPSEEK_CREATES_ACCOUNTS`）为它没见过的平台身份**新建了一个空账号**并把设备注册进去，
+面板只显示"没有主机"，用户必须**手动退出再登录**（退出会一并释放 DSH 借出的平台会话，于是重登走浏览器授权）
+才能回到自己的账号。当时线上 `state.json` 有 **11 个账号**，其中 **3 个 0 设备**、5 个 1–4 台，只有一个账号
+放着该用户的 6 台机器。Server 侧的绑定逻辑本身正确（`deepseek:<平台 id>` 命中即复用），问题在于"**谁**同意
+了这次登录"。
+
+**未登录不是错误**：`ClientModeRuntime.devices()` 在本地凭据不可用时**抛授权错误**（`AUTH_REQUIRED`），不再
+返回空数组——空数组会被面板读成"已登录但没有电脑"，于是新设备打开就是一张空主机列表。面板对该失败**静默**
+处理（catch 不设 error），只显示登录按钮。这条取代了旧折中"让发现返回空列表，以免提示登录中的用户去退出"：
+那个折中的动机（用户点登录却被要求登出）现在由"不报错 + 显示登录按钮"直接解决。
+回归用例：`tests/control-runtime.test.ts`（asks for the browser authorization instead of signing in from a
+DSH session nobody authorized / authorizes a completed grant once across repeated polls）、
+`tests/client-runtime.test.ts`（reports an authorization failure when the local Host authorization is …）、
+`tests/panel-authorization.test.ts`。
+
 ### 清理设备行：client 行可能从不刷新 lastSeenAt（2026-10-08 实测）
 
 按 `lastSeenAt` 判定"在线"会**误删正在使用的设备** ✗：Android 的 **host 行会正常刷新** ✓，但同一台手机的

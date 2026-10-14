@@ -397,6 +397,46 @@ function signal(): AbortSignal { return new AbortController().signal }
 
 describe('PluginControlRuntime DeepSeek sign-in', () => {
   /**
+   * The user has to authorize in the browser, and only the grant that arrives *after* that click may sign this
+   * device in. DSH's own platform session is not that answer: accepting it silently signed a new device into
+   * whichever DeepSeek account DSH happened to hold, and with account creation enabled on the Server that
+   * produced a brand-new *empty* account - the "a new device lands in an empty account" report.
+   */
+  it('asks for the browser authorization instead of signing in from a DSH session nobody authorized', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({})
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/v1/auth/deepseek')) {
+        return json({
+          token: 'account-token-value',
+          expiresAt: Date.now() + 600_000,
+          account: 'deepseek@example.com',
+          profile: {},
+          isAdmin: false,
+        })
+      }
+      if (url.endsWith('/devices/register')) return json(tokens())
+      throw new Error(`unexpected request: ${url}`)
+    }))
+    const startSignIn = vi.fn(async () => ({ authorizeUrl: 'https://platform.example/authorize' }))
+    const handler = register(new PluginControlRuntime(
+      resolveConfig(settings.get()), directory, settings, undefined, undefined,
+      { read: async () => ({ token: 'platform-grant-value' }), startSignIn, signOut: async () => true },
+    ))
+
+    const answer = await handler('settings.configure', { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }, signal())
+
+    expect(answer).toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required', authorizeUrl: 'https://platform.example/authorize' } })
+    expect(startSignIn).toHaveBeenCalledOnce()
+    // Nothing was registered or verified: that grant belongs to DSH, not to a sign-in the user just performed.
+    expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toEqual([])
+    expect(calls.filter(url => url.endsWith('/devices/register'))).toEqual([])
+  })
+
+  /**
    * The client polls `settings.configure` while the browser sign-in page is open.
    * Every call used to re-run the authorization, which re-verifies the grant with
    * the platform and re-registers the device — rotating the tokens the Host
@@ -422,11 +462,24 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
       if (url.endsWith('/devices/register')) return json(tokens())
       throw new Error(`unexpected request: ${url}`)
     }))
+    // DSH is signed out when the user clicks, so the grant that arrives afterwards is the one they authorized.
+    let grant: string | undefined
     const handler = register(new PluginControlRuntime(
       resolveConfig(settings.get()), directory, settings, undefined, undefined,
-      { read: async () => ({ token: 'platform-grant-value' }), startSignIn: async () => ({}), signOut: async () => true },
+      {
+        read: async () => (grant === undefined ? undefined : { token: grant }),
+        startSignIn: async () => {
+          grant = 'platform-grant-value'
+          return {}
+        },
+        signOut: async () => { grant = undefined; return true },
+      },
     ))
     const payload = { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }
+
+    // The click asks for the browser authorization, and does not authorize anything yet.
+    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required' } })
+    expect(calls).toHaveLength(0)
 
     await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
     const afterFirst = calls.length
@@ -439,6 +492,7 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
 
     // Signing out discards it, so the next sign-in verifies anew.
     await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({ ok: true })
+    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required' } })
     await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
     expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toHaveLength(2)
   })

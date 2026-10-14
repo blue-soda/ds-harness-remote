@@ -8,14 +8,14 @@
 /**
  * Whether the panel must keep asking for authorization after a device read that **succeeded**.
  *
- * A successful read is not proof that this installation is authorized. Discovery answers with an empty list
- * while the local credential cannot be used — deliberately, because telling a user who is in the middle of
- * signing in to sign out is a circle they cannot act on. The panel used to read that empty answer as
- * "authorized, just no Hosts" and cleared its sign-in state, so a *fresh* device (nothing stored at all)
- * opened on an empty Host list and only reached the sign-in panel after a manual sign-out and sign-in.
+ * Discovery reports an authorization failure when the local credential cannot be used — see
+ * `RemoteClientRuntime.devices`, which used to answer with an empty list instead and thereby told the panel
+ * "authorized, just no Hosts". That empty answer is what opened a fresh device on an empty Host list and only
+ * reached the sign-in panel after a manual sign-out.
  *
- * Both facts are needed, and only the panel has both: what this installation stores (`authorization.local`,
- * answered from local credentials without touching the Server) and what the read returned.
+ * Both facts still matter, and only the panel has both: what this installation stores (`authorization.local`,
+ * answered from local credentials without touching the Server) and what the read returned. A successful read
+ * plus "nothing stored" must not be read as "signed in to an account with no computers", whatever produced it.
  * @param storedLocally - whether a credential is on disk.
  * @param deviceCount - how many Hosts the read returned.
  * @returns true when the panel should keep asking the user to authorize.

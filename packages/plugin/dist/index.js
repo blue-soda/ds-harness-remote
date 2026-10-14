@@ -21879,7 +21879,9 @@ var ClientModeRuntime = class {
     };
   }
   async devices() {
-    if (!await this.recoverHostAuthorization()) return [];
+    if (!await this.recoverHostAuthorization()) {
+      throw new ClientModeError("AUTH_REQUIRED", "This device is not authorized on the Server yet.");
+    }
     this.requireIdentity();
     const serverDevices = await this.server.listDevices();
     const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
@@ -26059,6 +26061,18 @@ var PluginControlRuntime = class {
    */
   verifiedDeepSeekToken;
   verifiedDeepSeekAuthorization;
+  /**
+   * The sign-in this plugin asked the user for, and the grant DSH held when it asked.
+   *
+   * Only the browser authorization the user just completed may sign this device in. DSH's own platform session is
+   * not consent: reusing it silently signed a new device into whichever DeepSeek account DSH happened to hold, and
+   * with account creation enabled on the Server that produced a brand-new *empty* account - the "new device lands
+   * in an empty account" report. So a grant that was already there when the flow started is not accepted; the flow
+   * has to have been started by this request, and the grant has to have arrived since.
+   *
+   * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
+   */
+  deepSeekSignIn;
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -26167,13 +26181,15 @@ var PluginControlRuntime = class {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
       }
       const session = await this.deepseekSession.read();
-      if (session === void 0) {
+      const counted = session !== void 0 && this.deepSeekSignIn !== void 0 && session.token !== this.deepSeekSignIn.grantBefore;
+      if (!counted) {
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
           loginSource: value.loginSource === "desktop" ? "desktop" : "web",
           locale: typeof value.locale === "string" ? value.locale : "en",
           timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === "number" ? value.timezoneOffsetSeconds : 0
         });
+        this.deepSeekSignIn = { grantBefore: session?.token };
         return {
           status: "deepseek-sign-in-required",
           ...started.authorizeUrl === void 0 ? {} : { authorizeUrl: started.authorizeUrl }
@@ -26186,6 +26202,7 @@ var PluginControlRuntime = class {
         this.verifiedDeepSeekToken = session.token;
         this.verifiedDeepSeekAuthorization = authorization;
       }
+      this.deepSeekSignIn = void 0;
     } else {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
@@ -26305,6 +26322,7 @@ var PluginControlRuntime = class {
     const config = resolveConfig(this.settings.get());
     this.verifiedDeepSeekToken = void 0;
     this.verifiedDeepSeekAuthorization = void 0;
+    this.deepSeekSignIn = void 0;
     if (config.serverUrl !== void 0) {
       await Promise.all([
         this.client?.clearClientAuthorization(),

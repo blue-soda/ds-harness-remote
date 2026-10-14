@@ -121,6 +121,19 @@ export class PluginControlRuntime {
   private verifiedDeepSeekToken?: string
   private verifiedDeepSeekAuthorization?: DeviceAuthorization
 
+  /**
+   * The sign-in this plugin asked the user for, and the grant DSH held when it asked.
+   *
+   * Only the browser authorization the user just completed may sign this device in. DSH's own platform session is
+   * not consent: reusing it silently signed a new device into whichever DeepSeek account DSH happened to hold, and
+   * with account creation enabled on the Server that produced a brand-new *empty* account - the "new device lands
+   * in an empty account" report. So a grant that was already there when the flow started is not accepted; the flow
+   * has to have been started by this request, and the grant has to have arrived since.
+   *
+   * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
+   */
+  private deepSeekSignIn?: { grantBefore?: string }
+
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
     const statusStream = new ControlStatusStream(() => this.streamStatus())
     return registerControlRoute(
@@ -247,16 +260,25 @@ export class PluginControlRuntime {
         throw new ClientModeError('METHOD_NOT_ALLOWED', 'DeepSeek account sign-in is unavailable in this profile.')
       }
       const session = await this.deepseekSession.read()
-      if (session === undefined) {
-        // Signed out: start the official browser authorization rather than
-        // telling the user to go find DSH's own account settings. Nothing is
-        // authorized yet, so the settings are left untouched.
+      // A grant counts only when this plugin asked for one and the grant arrived since. What DSH itself holds is
+      // not the user's answer to *this* sign-in, and treating it as one is what silently moved a new device into a
+      // different - and, on a Server that may create accounts, brand-new and empty - account.
+      const counted = session !== undefined
+        && this.deepSeekSignIn !== undefined
+        && session.token !== this.deepSeekSignIn.grantBefore
+      if (!counted) {
+        // Ask the user, in the browser, for the account they actually want. Nothing is authorized yet, so the
+        // settings are left untouched. The panel shows the button again for as long as this keeps being the
+        // answer; being signed out is not an error, so no error is raised.
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === 'string' ? value.callbackOrigin : '',
           loginSource: value.loginSource === 'desktop' ? 'desktop' : 'web',
           locale: typeof value.locale === 'string' ? value.locale : 'en',
           timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === 'number' ? value.timezoneOffsetSeconds : 0,
         })
+        // Remember what DSH held *before* the browser round trip, so a grant that was already there can never be
+        // mistaken for the one the user is about to authorize.
+        this.deepSeekSignIn = { grantBefore: session?.token }
         return {
           status: 'deepseek-sign-in-required',
           ...(started.authorizeUrl === undefined ? {} : { authorizeUrl: started.authorizeUrl }),
@@ -272,6 +294,7 @@ export class PluginControlRuntime {
         this.verifiedDeepSeekToken = session.token
         this.verifiedDeepSeekAuthorization = authorization
       }
+      this.deepSeekSignIn = undefined
     } else {
       if (typeof value.email !== 'string' || typeof value.password !== 'string') {
         throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required for account authorization.')
@@ -408,6 +431,8 @@ export class PluginControlRuntime {
     // grant with the Server again rather than reuse a cached authorization.
     this.verifiedDeepSeekToken = undefined
     this.verifiedDeepSeekAuthorization = undefined
+    // A sign-in that was in flight belongs to the session being released; the next click starts a new one.
+    this.deepSeekSignIn = undefined
     if (config.serverUrl !== undefined) {
       await Promise.all([
         this.client?.clearClientAuthorization(),

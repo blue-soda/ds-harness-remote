@@ -510,11 +510,13 @@ export class ClientModeRuntime {
   }
 
   async devices(): Promise<RemoteDeviceView[]> {
-    // A stale Host credential must not become a dead end: the user is usually *in the middle* of signing in,
-    // and "sign out and authorize again" is a circle they cannot act on. Try to re-authorize from the stored
-    // Client credential, and when that cannot work either, report no devices - the panel already renders the
-    // authorization state from the host status, and nothing is leaked.
-    if (!await this.recoverHostAuthorization()) return []
+    // An unusable local credential is an authorization failure, not an empty account. Answering `[]` here read as
+    // "signed in, just no computers", so the panel skipped its sign-in button and a fresh device opened on an empty
+    // Host list. The panel catches this silently and offers the button — being signed out is not an error, which is
+    // what the old shortcut tried to achieve by lying about the result.
+    if (!await this.recoverHostAuthorization()) {
+      throw new ClientModeError('AUTH_REQUIRED', 'This device is not authorized on the Server yet.')
+    }
     this.requireIdentity()
     const serverDevices = await this.server.listDevices()
     const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)

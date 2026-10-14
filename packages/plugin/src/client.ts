@@ -2208,6 +2208,9 @@ window.__ModuleLoader__.load({
               }
             }
           } catch {
+            // Deliberately silent: an unreadable Host list means this installation has to be authorized (or its
+            // stored credential has gone stale), and being signed out is not an error to report. The panel asks
+            // for the sign-in the user can act on instead of describing what failed.
             setDevices([])
             setNeedsAuthorization(true)
             setSelectedHost(undefined)

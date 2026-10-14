@@ -859,7 +859,7 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
-  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('reports no devices when the local Host authorization is %s, instead of telling the user to sign out', async error => {
+  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('reports an authorization failure when the local Host authorization is %s', async error => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-auth-'))
     directories.push(directory)
     const listDevices = vi.fn(async () => [])
@@ -884,9 +884,10 @@ describe('ClientModeRuntime Host account control', () => {
     )
     await runtime.start()
 
-    // The old behaviour refused with "sign out and authorize again", which a user who is currently signing in
-    // cannot act on. Discovery now reports nothing and leaves the state to the panel.
-    await expect(runtime.devices()).resolves.toEqual([])
+    // This used to resolve with `[]`, which the panel read as "authorized, just no Hosts" and answered with an
+    // empty list instead of its sign-in button. An unusable credential is an authorization failure; the panel
+    // catches it silently, so the user sees the button and no error.
+    await expect(runtime.devices()).rejects.toMatchObject({ code: 'AUTH_REQUIRED' })
     expect(listDevices).not.toHaveBeenCalled()
     await runtime.close()
   })
