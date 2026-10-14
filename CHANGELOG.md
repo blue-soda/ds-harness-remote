@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 - 2026-10-14
+
+- Centres the Remote status pill on narrow screens and lines it up with the header. Below 760px the pill was anchored 88px from the right - where the harness has already collapsed its own row - so it sat visibly off-centre, and that branch's border and padding grew a rule declared as `height:28px` to 36px while `top:12px` stayed put, which dropped the text's centre line 4px below the "open sidebar" button. The pill is centred on the viewport now, and both branches keep the same 28px outer height so the text rides the header's own centre line. Wide screens are unchanged.
+
 ## 0.5.1 - 2026-10-14
 
 - Signs in only through the browser authorization the user just completed. The DeepSeek sign-in used to accept whatever platform session DSH happened to hold and authorize with it silently, so a new device landed in whichever account DSH was signed into - and on a Server that creates an account for an identity it has never seen, that meant a brand-new, *empty* account: the panel showed an empty Host list and the only way back to the user's own account was to sign out and in again. The endpoint now starts the browser flow unless the user asked for this sign-in, and accepts the grant DSH holds once they have (re-authorizing as the same account hands back the same grant, and refusing it would only loop the user through the browser).
