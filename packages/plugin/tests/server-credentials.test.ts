@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -69,5 +69,46 @@ describe('credential refresh process lock', () => {
     const store = new ServerCredentialStore(path)
     await expect(store.withRefreshLock(async () => { throw new Error('failed') })).rejects.toThrow('failed')
     await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
+  })
+
+  /**
+   * A phone kills the app mid-refresh routinely, which left the lock behind forever: every later sign-in then
+   * answered `SERVER_CREDENTIALS_BUSY` and told the user to delete a file they cannot reach. The owner now
+   * decides - a lock whose process is gone is taken over, a live one (even suspended) is still respected.
+   */
+  it('reclaims a lock left by a process that no longer exists', async () => {
+    const path = await directory()
+    const lock = join(path, 'server-credentials.json.refresh-lock')
+    await mkdir(lock)
+    // A pid that cannot be running: even if it were, it is not ours to signal and would count as alive.
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: 2_147_483_646, at: Date.now() }))
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'reclaimed')).resolves.toBe('reclaimed')
+    await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    // The reclaimed lock is gone, so the next transaction simply takes a fresh one.
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'again')).resolves.toBe('again')
+  })
+
+  it('keeps waiting for a lock a live process holds', async () => {
+    const path = await directory()
+    const store = new ServerCredentialStore(path)
+    let release = (): void => {}
+    const held = store.withRefreshLock(() => new Promise<string>(resolve => { release = (): void => { resolve('first') } }))
+    await vi.waitFor(async () => { await stat(join(path, 'server-credentials.json.refresh-lock', 'owner.json')) })
+    const waiting = new ServerCredentialStore(path).withRefreshLock(async () => 'second')
+    // Give the second contender time to hit the lock at least once before the first one lets go.
+    await new Promise(resolve => setTimeout(resolve, 200))
+    release()
+    await expect(waiting).resolves.toBe('second')
+    await expect(held).resolves.toBe('first')
+  })
+
+  it('treats an owner-less lock older than the abandoned window as stale', async () => {
+    const path = await directory()
+    const lock = join(path, 'server-credentials.json.refresh-lock')
+    await mkdir(lock)
+    const stale = new Date(Date.now() - 11 * 60_000)
+    await utimes(lock, stale, stale)
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'reclaimed')).resolves.toBe('reclaimed')
+    await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

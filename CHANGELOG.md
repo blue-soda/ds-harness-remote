@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3 - 2026-10-18
+
+- Reclaims a credential-refresh lock whose owner is gone, instead of leaving it behind forever. The lock is a directory that no longer recorded who held it and was never taken over, so a process killed mid-refresh - routine on a phone, where the app is backgrounded or swept away - left the plugin answering `SERVER_CREDENTIALS_BUSY` on every later sign-in and telling the user to delete a file they could not reach. The lock now writes `owner.json` (`pid`, `at`), and a contender reclaims it when that pid no longer exists (one atomic `rename`, so only one contender wins); a lock with no owner is reclaimed after ten minutes. A **live** owner is still never preempted, including one that is merely suspended - liveness is what is checked now, which is exactly what the old unconditional rule was protecting.
+
 ## 0.5.2 - 2026-10-14
 
 - Centres the Remote status pill on narrow screens and lines it up with the header. Below 760px the pill was anchored 88px from the right - where the harness has already collapsed its own row - so it sat visibly off-centre, and that branch's border and padding grew a rule declared as `height:28px` to 36px while `top:12px` stayed put, which dropped the text's centre line 4px below the "open sidebar" button. The pill is centred on the viewport now, and both branches keep the same 28px outer height so the text rides the header's own centre line. Wide screens are unchanged.

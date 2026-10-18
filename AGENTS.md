@@ -298,7 +298,16 @@ Windows 上是 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` ✓，当**目标文件**
 
 Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；握手被拒绝后最多刷新恢复一次。
 `4003` 映射为 `CONNECTION_REPLACED` 并停止自动抢占，同机并行 Host 应分别设置 `DSH_HOME`。
-锁不按时间强行抢占；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。
+**刷新锁只回收"已死持有者"，不抢占活着的实例**（2026-10-18 修正）：锁是一个目录，里面现在写 `owner.json`
+（`{pid, at}`）。遇到 `EEXIST` 时先读持有者：**PID 已不存在**（`process.kill(pid, 0)` 抛 `ESRCH`；`EPERM`
+按"活着"处理 ✓）就用一次 `rename` 抢走并删除 ✓ —— rename 原子，所以只有一个竞争者能成功 ✓；没有 `owner.json`
+的旧锁按 **mtime 超过 10 分钟** 判为遗弃 ✓。**活着的持有者（包括被挂起/冻结的）永不抢占** ✓ —— 这正是原来那条
+"永不抢占"规则要保护的东西（挂起的进程仍可能消费一次性 refresh token ✓），差别只在于"死"与"挂起"改用**存活性**
+区分，而不是用时间 ✗。触发场景：手机上 App 在刷新期间被系统杀掉 ✓ → 旧实现留下永久锁 ✗ → 之后每次登录都
+`SERVER_CREDENTIALS_BUSY` ✓ 并要求用户删除一个够不到的文件 ✗✗。回归用例：`tests/server-credentials.test.ts`
+的 reclaims a lock left by a process that no longer exists / keeps waiting for a lock a live process holds /
+treats an owner-less lock older than the abandoned window as stale。手工兜底仍有效：停掉所有实例后删除
+`server-credentials.json.refresh-lock` 并重新授权；`SERVER_CREDENTIALS_BUSY` 的异常退出恢复步骤见 README。
 核心测试覆盖多进程刷新互斥与鉴权恢复状态机，Windows 双实例实机验证仍待完成。
 
 **一台设备一份身份；吊销即删行**：设备身份只有一份（`ensureDeviceDirectory()` 把旧的角色目录

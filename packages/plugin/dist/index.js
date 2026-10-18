@@ -13162,7 +13162,7 @@ function fromBase64Url2(value) {
 import { platform } from "node:os";
 
 // src/server-credentials.ts
-import { chmod, mkdir, readFile, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename as rename2, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
 import { dirname, join as join2 } from "node:path";
 
 // src/atomic-file.ts
@@ -13237,6 +13237,11 @@ function uuidV7(now = Date.now()) {
 }
 
 // src/server-credentials.ts
+var LOCK_ABANDONED_MS = 10 * 6e4;
+var lockOwnerSchema = external_exports.object({
+  pid: external_exports.number().int().positive(),
+  at: external_exports.number().int().nonnegative()
+});
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -13254,8 +13259,13 @@ var ServerCredentialStore = class {
     this.path = join2(directory, "server-credentials.json");
   }
   /** Serialize the complete read/refresh/write transaction across processes.
-   * Never steal an old lock: a suspended owner may still consume a one-use token.
-   * After a crash, stop all instances before removing the orphaned lock.
+   *
+   * A lock left by a process that no longer exists can never be released by that process, and being killed
+   * mid-refresh is routine on a phone (the app is backgrounded or swept away) - the old rule then left the user
+   * with `SERVER_CREDENTIALS_BUSY` forever and told them to delete a file they cannot reach. So the lock now
+   * records its owner and a contender reclaims it when that owner is **gone**. Liveness is what is checked, not
+   * age: an owner that is merely suspended still protects its one-use refresh token, which is exactly what the
+   * old unconditional rule was guarding against.
    */
   async withRefreshLock(operation) {
     const lock = `${this.path}.refresh-lock`;
@@ -13263,10 +13273,11 @@ var ServerCredentialStore = class {
     const deadline = Date.now() + 15e3;
     for (; ; ) {
       try {
-        await mkdir(lock, { mode: 448 });
+        await claimRefreshLock(lock);
         break;
       } catch (error) {
         if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+        if (await reclaimAbandonedRefreshLock(lock)) continue;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
         await new Promise((resolve4) => setTimeout(resolve4, 50));
       }
@@ -13274,7 +13285,7 @@ var ServerCredentialStore = class {
     try {
       return await operation();
     } finally {
-      await rm2(lock, { recursive: true });
+      await rm2(lock, { recursive: true, force: true });
     }
   }
   async load(serverUrl, deviceId) {
@@ -13307,6 +13318,49 @@ var ServerCredentialsBusyError = class extends Error {
     super("Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.");
   }
 };
+async function claimRefreshLock(lock) {
+  await mkdir(lock, { mode: 448 });
+  await writeFile(join2(lock, "owner.json"), `${JSON.stringify({ pid: process.pid, at: Date.now() })}
+`, {
+    encoding: "utf8",
+    mode: 384
+  });
+}
+async function reclaimAbandonedRefreshLock(lock) {
+  const owner = await readRefreshLockOwner(lock);
+  const abandoned = owner === void 0 ? await olderThan(lock, LOCK_ABANDONED_MS) : !processAlive(owner.pid);
+  if (!abandoned) return false;
+  const tomb = `${lock}.${process.pid}.${uuidV7()}.abandoned`;
+  try {
+    await rename2(lock, tomb);
+  } catch {
+    return false;
+  }
+  await rm2(tomb, { recursive: true, force: true });
+  return true;
+}
+async function readRefreshLockOwner(lock) {
+  try {
+    return lockOwnerSchema.parse(JSON.parse(await readFile(join2(lock, "owner.json"), "utf8")));
+  } catch {
+    return void 0;
+  }
+}
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+  }
+}
+async function olderThan(path, ageMs) {
+  try {
+    return Date.now() - (await stat2(path)).mtimeMs > ageMs;
+  } catch {
+    return false;
+  }
+}
 async function atomicWrite(path, contents) {
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 448 });
@@ -13462,7 +13516,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.2";
+var PLUGIN_VERSION = "0.5.3";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
