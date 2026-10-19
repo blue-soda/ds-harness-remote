@@ -481,3 +481,29 @@ else { peer.nonce = randomUUID(); send(ping) }
 完整排查记录（含被证伪的假设、复现探针与修复细节）见
 [`docs/incidents/dsh-0.2.1-desktop-remote-boot.md`](docs/incidents/dsh-0.2.1-desktop-remote-boot.md)；
 真实协议自检用 `scripts/codex-app-server-smoke.mts`。
+
+## DSH 升级兼容：网关转发必须原样透传参数（2026-10-19 实测）
+
+**症状**（用户报告"升级到最新版 DSH 后 remote 插件崩了"）：DSH `0.2.1-rc.2` + 插件 `0.5.2` 时页面只剩骨架
+（`选择工作区`），控制台两条红色报错 `[ui-cordis] reading the Cordis inventory failed: gateway/internal:
+Cannot read properties of undefined (reading 'signal')` 与 `[cordis-client-runner] syncing inspect providers failed`
+—— 工作区列表、插件清单、会话全部不出现。
+
+**复现**（忠实还原用户环境，不改我们的工作 checkout）：隔离目录 `npm i @deepseek-ai/dsh@0.2.1-rc.2` →
+用它的 CLI 在全新 `DSH_HOME` 里 `plugin --profile web add @blue-soda/dsh-remote@0.5.2` → 起 `dsh web` →
+用无头 Edge（`puppeteer-core` + 本机 Edge，不下载浏览器）抓 `console`/`pageerror`。**A/B 对照**：同样 rc.2 但
+**不装插件**时页面完整渲染（323 字符）、控制台 0 错误 ✓ —— 差异因此确定来自插件 ✓。
+
+**根因**：rc.2 给网关内部 dispatcher 增加了第 4 个参数（`remoteRequest(endpoint, payload, signal, peer)`），
+且 `assertPeerLive(peer)` 直接读 `peer.signal` ✓；我们的 `TypertGatewaySwitch` 包装 `runtime.dispatchRpc` 时
+只转发 `(endpoint, payload, signal)` ✗ → `peer` 变 `undefined` ✗ → 每个经过载体的调用都抛 TypeError ✗ →
+网关包成 `gateway/internal` ✗ → 依赖它的 cordis 清单与工作区加载全挂 ✗。堆栈可直接定位到
+`dist/index.js` 的 `runtime.dispatchRpc` ✓（在 rc.2 的 `assertPeerLive` 之前 ✓）。
+
+**修法**：`CarrierDispatch` 改为可变参数并**原样透传** `...rest` ✓（转发分支与本地分支都传 ✓）。旧版 gateway
+忽略多余参数 ✓，因此对 0.1.x/0.2.0 仍兼容 ✓。回归用例：`tests/typert-gateway-switch.test.ts` 的
+`passes the caller arguments through untouched, including the rc.2 peer`（断言转发与本地两条路径都收到
+`(endpoint, payload, signal, peer)` ✓）。
+
+**规则**：包装/转发 DSH 网关方法时**不得按其已知签名重建参数** ✗ —— 一律 `...rest` 透传 ✓；升级 DSH 时至少
+用**发布版 rc** 跑一次"装插件 / 不装插件"的 A/B 渲染对照 ✓（本次就是靠它一眼定位 ✓）。

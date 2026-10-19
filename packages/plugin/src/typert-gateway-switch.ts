@@ -10,7 +10,21 @@ import type {
 import { decodeByteValue } from './rpc-binary-attachments.js'
 
 type RemoteInvoke = (request: TypertGatewayRequest) => Promise<unknown>
-type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TypertRpcResult>
+/**
+ * Carrier dispatcher of the local gateway.
+ *
+ * The trailing arguments are passed through untouched. dsh 0.2.1-rc.2 appended the calling **peer** as the
+ * fourth parameter (`remoteRequest(endpoint, payload, signal, peer)`), and its `assertPeerLive` reads
+ * `peer.signal` - so a wrapper that forwarded only the first three crashed every call that came through it
+ * with `Cannot read properties of undefined (reading 'signal')`, which took the whole Cordis inventory down
+ * with it. Passing whatever the caller supplied keeps both shapes working: older gateways ignore the extras.
+ */
+type CarrierDispatch = (
+  endpoint: string,
+  payload: unknown,
+  signal: AbortSignal,
+  ...rest: unknown[]
+) => Promise<TypertRpcResult>
 type CarrierOpen = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<AsyncIterable<unknown>>
 
 /**
@@ -162,8 +176,8 @@ export class TypertGatewaySwitch {
           )
     }
     if (previousDispatch !== undefined) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => forwards(endpoint)
-        ? Promise.resolve(previousDispatch(endpoint, payload, signal)).catch(error => {
+      this.runtime.dispatchRpc = (endpoint, payload, signal, ...rest) => forwards(endpoint)
+        ? Promise.resolve(previousDispatch(endpoint, payload, signal, ...rest)).catch(error => {
           // Without a remote target the shell has to work locally, and a failing local call is otherwise
           // invisible: the fallback exists precisely so the user can keep working.
           console.warn('[dsh-remote] local call failed with no remote target selected', {
@@ -174,11 +188,11 @@ export class TypertGatewaySwitch {
           throw error
         })
         : !this.routesToRemote(endpoint)
-          ? this.localDispatch!(endpoint, payload, signal)
+          ? this.localDispatch!(endpoint, payload, signal, ...rest)
           : this.withLocalFallback(
             endpoint,
             () => Promise.resolve(this.remoteTarget!.dispatch(endpoint, payload, signal)),
-            () => this.localDispatch!(endpoint, payload, signal),
+            () => this.localDispatch!(endpoint, payload, signal, ...rest),
           ).then(result => normalizeByteResult(endpoint, result) as typeof result)
     }
     if (previousOpen !== undefined) {

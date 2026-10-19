@@ -2,6 +2,7 @@
 
 ## 0.5.3 - 2026-10-18
 
+- Works on dsh 0.2.1-rc.2 again. That release appended the calling peer to the gateway carrier dispatcher (`remoteRequest(endpoint, payload, signal, peer)`) and `assertPeerLive` reads `peer.signal`, while the switch forwarded only the first three arguments - so every call through it threw `Cannot read properties of undefined (reading 'signal')`. That took the Cordis inventory and the workspace list down with it and left the page as a bare shell (`reading the Cordis inventory failed`). Arguments are passed through untouched now, which keeps older gateways working too.
 - Reclaims a credential-refresh lock whose owner is gone, instead of leaving it behind forever. The lock is a directory that no longer recorded who held it and was never taken over, so a process killed mid-refresh - routine on a phone, where the app is backgrounded or swept away - left the plugin answering `SERVER_CREDENTIALS_BUSY` on every later sign-in and telling the user to delete a file they could not reach. The lock now writes `owner.json` (`pid`, `at`), and a contender reclaims it when that pid no longer exists (one atomic `rename`, so only one contender wins); a lock with no owner is reclaimed after ten minutes. A **live** owner is still never preempted, including one that is merely suspended - liveness is what is checked now, which is exactly what the old unconditional rule was protecting.
 
 ## 0.5.2 - 2026-10-14

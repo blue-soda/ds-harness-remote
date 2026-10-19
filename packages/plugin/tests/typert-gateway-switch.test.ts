@@ -285,6 +285,38 @@ describe('TypertGatewaySwitch carrier chain', () => {
     await expect(dispatch('session/list')).resolves.toMatchObject({ value: 'local-shell' })
     expect(previousCarrier).toHaveBeenCalledOnce()
   })
+
+  /**
+   * dsh 0.2.1-rc.2 appended the calling peer to the dispatcher (`remoteRequest(endpoint, payload, signal,
+   * peer)`) and its `assertPeerLive` reads `peer.signal`. A wrapper that forwarded only the first three
+   * arguments therefore crashed every call with `Cannot read properties of undefined (reading 'signal')`,
+   * which took the Cordis inventory down and left the shipped 0.5.2 rendering a bare shell on the newest DSH.
+   */
+  it('passes the caller arguments through untouched, including the rc.2 peer', async () => {
+    const localShell = vi.fn(async () => ({ ok: true as const, value: 'local-shell' }))
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localShell } as unknown as TypertGatewayLike
+    const target = new TypertGatewaySwitch(gateway)
+    const previousCarrier = vi.fn(async () => ({ ok: true as const, value: 'api-proxy' }))
+    ;(gateway as unknown as { dispatchRpc: unknown }).dispatchRpc = previousCarrier
+    target.install()
+    target.selectRemote(async () => 'command', { execute: true, list: true })
+
+    const peer = { signal: new AbortController().signal }
+    const signal = new AbortController().signal
+    const dispatch = (endpoint: string): Promise<unknown> => (
+      gateway as unknown as {
+        dispatchRpc(endpoint: string, payload: unknown, signal: AbortSignal, peer: unknown): Promise<unknown>
+      }
+    ).dispatchRpc(endpoint, { args: {} }, signal, peer)
+
+    // Forwarded: the carrier behind sees the peer it needs to authorise the call.
+    await expect(dispatch('workspaceFiles/readBytes')).resolves.toMatchObject({ value: 'api-proxy' })
+    expect(previousCarrier).toHaveBeenCalledWith('workspaceFiles/readBytes', { args: {} }, signal, peer)
+    // Local: the local dispatcher sees it too, so a gateway that requires it does not crash.
+    target.setRemoteAvailability(() => false)
+    await expect(dispatch('session/list')).resolves.toMatchObject({ value: 'local-shell' })
+    expect(localShell).toHaveBeenCalledWith('session/list', { args: {} }, signal, peer)
+  })
 })
 
 describe('TypertGatewaySwitch forwarded receiver', () => {
