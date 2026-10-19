@@ -386,3 +386,28 @@ describe('TypertGatewaySwitch byte results', () => {
     expect(other.value.data).toBe('AAEC')
   })
 })
+
+describe('TypertGatewaySwitch owner peer', () => {
+  /**
+   * dsh 0.2.1-rc.2 refuses a carrier call that arrives without a peer (`assertPeerLive` reads `peer.signal`), and the
+   * Host bridge serves remote calls through `local()`. A remote client acts with the Host owner's authority, so the
+   * switch appends the peer it was given when a caller passes only the old three arguments.
+   */
+  it('appends the peer to the local dispatcher and the local stream opener', async () => {
+    const peer = { signal: new AbortController().signal }
+    const dispatchRpc = vi.fn(async () => ({ ok: true as const, value: 'local' }))
+    // Six parameters is the rc.1/rc.2 arity, so the opener expects the peer in the fourth slot.
+    const openWireStream = vi.fn(async function (
+      _endpoint: string, _payload: unknown, _uplink: unknown, _peer: unknown, _signal: AbortSignal, _control: unknown,
+    ) { return (async function* () { /* empty */ })() })
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc, openWireStream } as unknown as TypertGatewayLike
+    const local = new TypertGatewaySwitch(gateway, { peer: () => peer }).local()
+    const signal = new AbortController().signal
+
+    await expect(local.dispatch('session/list', { args: {} }, signal)).resolves.toMatchObject({ value: 'local' })
+    expect(dispatchRpc).toHaveBeenCalledWith('session/list', { args: {} }, signal, peer)
+
+    await local.open('workspaceFiles/read', { args: {} }, signal)
+    expect(openWireStream.mock.calls[0]?.[3]).toBe(peer)
+  })
+})

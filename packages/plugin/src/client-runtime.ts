@@ -389,9 +389,10 @@ export class ClientModeRuntime {
     private readonly host?: HostAuthorizationControl,
     private readonly rtcFactoryProvider: (options?: WeriftFactoryOptions) => Promise<RtcPeerConnectionFactory | undefined> = loadNodeRtcFactory,
     private readonly targetStore?: ClientTargetStore,
+    private readonly peer?: () => unknown,
   ) {
     this.proxySwitch = apiProxy === undefined ? undefined : new ApiProxySwitch(apiProxy)
-    this.gatewaySwitch = new TypertGatewaySwitch(typertGateway)
+    this.gatewaySwitch = new TypertGatewaySwitch(typertGateway, { peer: this.peer })
     // Serve the local shell while no peer session is live. Otherwise a remote-mode
     // boot routes its own local services at a peer that may not be there, and the
     // shell never finishes activating.

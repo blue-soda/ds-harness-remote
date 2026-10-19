@@ -237,8 +237,23 @@ async function activate(
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
+  // dsh 0.2.1-rc.2 hands every carrier call a `peer` and reads `peer.signal`, so a call that arrives without one is
+  // refused. A remote client runs with the Host owner's authority (decided 2026-10-19) - the same principal dsh gives
+  // its own browser peer - so the plugin serves remote calls as the owner. Older releases ignore the argument.
+  const connectionService = ctx.get('connection', false) as {
+    createPeer?: (options: { principal: { kind: 'owner' } }) => unknown
+  } | undefined
+  let ownerPeerResolved = false
+  let ownerPeer: unknown
+  const peerFor = (): unknown => {
+    if (!ownerPeerResolved) {
+      ownerPeerResolved = true
+      ownerPeer = connectionService?.createPeer?.({ principal: { kind: 'owner' } })
+    }
+    return ownerPeer
+  }
   const nativeTypertGateway = ctx.get('typertGateway') as TypertGatewayLike
-  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local()
+  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway, { peer: peerFor }).local()
   // The Host `subprocess` service owns PTY allocation, containment, and process
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
@@ -306,6 +321,7 @@ async function activate(
       // The RTC factory keeps its default; the target store lives beside the plugin state.
       undefined,
       new ClientTargetStore(defaultIdentityDirectory),
+      peerFor,
     )
   }
 

@@ -98,9 +98,13 @@ export class TypertGatewaySwitch {
   private installed = false
   /** Defaults to reachable so a caller that never wires this keeps the old behaviour. */
   private remoteAvailability: () => boolean = () => true
+  /** Supplies the peer carrier calls speak for; see {@link ownerPeer}. */
+  private readonly peerFor?: () => unknown
+  private peer?: unknown
 
-  constructor(gateway: TypertGatewayLike) {
+  constructor(gateway: TypertGatewayLike, options: { peer?: () => unknown } = {}) {
     this.runtime = gateway as RuntimeGateway
+    this.peerFor = options.peer
     this.originalInvoke = gateway.invoke
     this.localInvoke = this.originalInvoke.bind(gateway)
     this.originalStream = gateway.stream
@@ -108,19 +112,49 @@ export class TypertGatewaySwitch {
     this.originalDispatch = this.runtime.dispatchRpc
     this.localDispatch = this.runtime.dispatchRpc?.bind(gateway)
     this.originalOpen = this.runtime.openWireStream
-    this.localOpen = createLocalOpen(gateway, this.runtime)
+    this.localOpen = createLocalOpen(gateway, this.runtime, () => this.ownerPeer())
+  }
+
+  /**
+   * The peer a carrier call speaks for, created once and reused.
+   *
+   * dsh 0.2.1-rc.2 reads `peer.signal` on every carrier call and rejects one that arrives without a peer; a remote
+   * client runs with the Host owner's authority (decided 2026-10-19), which is the same principal dsh gives its own
+   * browser peer, so the plugin serves remote calls as the owner. Releases before rc.2 ignore the argument, and a
+   * profile without a `connection` service simply has no peer to offer.
+   */
+  private ownerPeer(): unknown {
+    if (this.peer !== undefined) return this.peer
+    this.peer = this.peerFor?.()
+    return this.peer
+  }
+
+  /** Trailing argument the carrier wants when the caller did not supply one. */
+  private peerArguments(): unknown[] {
+    const peer = this.ownerPeer()
+    return peer === undefined ? [] : [peer]
   }
 
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
   local(): LocalTypertGateway {
-    const dispatch: CarrierDispatch = this.localDispatch ?? (async (endpoint, payload, signal) => {
-      try {
-        const request = requestFromCarrier(endpoint, payload, signal)
-        return { ok: true, value: await this.localInvoke(request) }
-      } catch (error) {
-        return { ok: false, error: this.failure(error) }
-      }
-    })
+    const bare: CarrierDispatch | undefined = this.localDispatch
+    const dispatch: CarrierDispatch = bare === undefined
+      ? (async (endpoint, payload, signal) => {
+        try {
+          const request = requestFromCarrier(endpoint, payload, signal)
+          return { ok: true, value: await this.localInvoke(request) }
+        } catch (error) {
+          return { ok: false, error: this.failure(error) }
+        }
+      })
+      // The bridges call this with the three arguments the old carrier took. A release that also wants the
+      // calling peer (rc.2) gets it appended, and a caller that already supplied one is left alone.
+      : (endpoint, payload, signal, ...rest) => Promise.resolve(bare(
+        endpoint,
+        payload,
+        signal,
+        ...(rest.length === 0 ? this.peerArguments() : rest),
+      ))
     const open: CarrierOpen = this.localOpen ?? (async (endpoint, payload, signal) => {
       if (this.localStream === undefined) throw new Error('The local Harness Gateway does not support Remote streams.')
       return this.localStream(requestFromCarrier(endpoint, payload, signal))
@@ -375,12 +409,16 @@ function linkControl(signal: AbortSignal): AbortController {
  * @param runtime - Gateway object owning the private `openWireStream` dispatcher.
  * @returns a local opener that carries the signal to the release's signal slot.
  */
-function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): CarrierOpen | undefined {
+function createLocalOpen(
+  gateway: TypertGatewayLike,
+  runtime: RuntimeGateway,
+  peer: () => unknown = () => undefined,
+): CarrierOpen | undefined {
   const open = runtime.openWireStream
   if (open !== undefined) {
     return usesRc1Arity(open)
       ? (endpoint, payload, signal) => (open as Rc1OpenWireStream)
-        .call(runtime, endpoint, payload, endedUplink(), undefined, signal, linkControl(signal))
+        .call(runtime, endpoint, payload, endedUplink(), peer(), signal, linkControl(signal))
       : (endpoint, payload, signal) => (open as CarrierOpen).call(runtime, endpoint, payload, signal)
   }
   const wire = gateway.wireStream
@@ -388,7 +426,7 @@ function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): C
   const wireOpen = wire.open
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen as Rc1WireStreamOpen
-    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), undefined, signal)
+    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), peer(), signal)
   }
   const legacy = wireOpen as LegacyWireStreamOpen
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal)

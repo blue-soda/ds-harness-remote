@@ -35,6 +35,10 @@ const CLIENT_HOME = process.env.DSH_REMOTE_E2E_CLIENT ?? 'C:\\Workspace\\.dsh-re
 const HOST_PORT = Number(process.env.DSH_REMOTE_E2E_HOST_PORT ?? 63731)
 const CLIENT_PORT = Number(process.env.DSH_REMOTE_E2E_CLIENT_PORT ?? 63721)
 const NODE = process.env.DSH_NODE ?? 'C:\\Program Files\\nodejs\\node.exe'
+/** Run one side on a different dsh build: a published 
+ode_modules/@deepseek-ai/dsh/lib/bin.js, or another checkout. */
+const HOST_ENTRY = process.env.DSH_REMOTE_E2E_HOST_ENTRY
+const CLIENT_ENTRY = process.env.DSH_REMOTE_E2E_CLIENT_ENTRY
 /** The window the plugin promises in `client-runtime.ts`; the timing assertions are built on it. */
 const WINDOW_MS = 10_000
 /** The ladder the plugin promises after the window. */
@@ -169,7 +173,7 @@ function post(port: number, endpoint: string, payload: unknown, cookie: string):
 }
 
 /** Start one instance, exchange its launch token for the signed cookie, and read its identity. */
-async function startInstance(label: string, home: string, port: number): Promise<Instance> {
+async function startInstance(label: string, home: string, port: number, entry?: string): Promise<Instance> {
   if (!existsSync(home)) mkdirSync(home, { recursive: true })
   const logPath = join(home, 'instance.out.log')
   const errPath = join(home, 'instance.err.log')
@@ -180,13 +184,14 @@ async function startInstance(label: string, home: string, port: number): Promise
   const env = { ...process.env }
   // The profile comes from argv alone; a stray DSH_PROFILE would decide it instead.
   for (const name of ['DSH_PROFILE', 'DSH_PROFILE_DIR', 'DSH_SESSION_ID', 'DSH_SHELL', 'DSH_WEB_URL']) delete env[name]
-  const child = spawn(NODE, [
-    '--import', 'tsx/esm',
-    'apps/cli/src/bin.ts', 'web',
-    '--port', String(port),
-    '--host', '127.0.0.1',
-    '--no-open',
-  ], { cwd: DSH_CHECKOUT, env: { ...env, DSH_HOME: home }, stdio: ['ignore', out, err], windowsHide: true })
+  // `entry` lets one side of the harness run a *different* dsh build than the other - a published release
+  // (`node_modules/@deepseek-ai/dsh/lib/bin.js`) or another checkout - which is how the cross-version link
+  // matrix asks "does a client on one dsh talk to a host on another". Tsx is only needed for a TypeScript
+  // checkout; a published build is plain JavaScript.
+  const args = entry === undefined
+    ? ['--import', 'tsx/esm', 'apps/cli/src/bin.ts', 'web', '--port', String(port), '--host', '127.0.0.1', '--no-open']
+    : [entry, 'web', '--port', String(port), '--host', '127.0.0.1', '--no-open']
+  const child = spawn(NODE, args, { cwd: DSH_CHECKOUT, env: { ...env, DSH_HOME: home }, stdio: ['ignore', out, err], windowsHide: true })
 
   const readLog = (): string => {
     // Both streams: the plugin writes its `info` lines to stdout and its `warn`/`error` ones to stderr, and
@@ -818,8 +823,8 @@ async function main(): Promise<void> {
     return
   }
 
-  let host = await startInstance('host', HOST_HOME, HOST_PORT)
-  let client = await startInstance('client', CLIENT_HOME, CLIENT_PORT)
+  let host = await startInstance('host', HOST_HOME, HOST_PORT, HOST_ENTRY)
+  let client = await startInstance('client', CLIENT_HOME, CLIENT_PORT, CLIENT_ENTRY)
   const ctx: Ctx = {
     client,
     host,
@@ -827,13 +832,13 @@ async function main(): Promise<void> {
     async restartClient() {
       client.stop()
       await sleep(2_000)
-      client = await startInstance('client', CLIENT_HOME, CLIENT_PORT)
+      client = await startInstance('client', CLIENT_HOME, CLIENT_PORT, CLIENT_ENTRY)
       ctx.client = client
     },
     async restartHost() {
       host.stop()
       await sleep(2_000)
-      host = await startInstance('host', HOST_HOME, HOST_PORT)
+      host = await startInstance('host', HOST_HOME, HOST_PORT, HOST_ENTRY)
       ctx.host = host
     },
   }

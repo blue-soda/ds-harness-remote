@@ -20345,8 +20345,12 @@ var TypertGatewaySwitch = class {
   installed = false;
   /** Defaults to reachable so a caller that never wires this keeps the old behaviour. */
   remoteAvailability = () => true;
-  constructor(gateway) {
+  /** Supplies the peer carrier calls speak for; see {@link ownerPeer}. */
+  peerFor;
+  peer;
+  constructor(gateway, options = {}) {
     this.runtime = gateway;
+    this.peerFor = options.peer;
     this.originalInvoke = gateway.invoke;
     this.localInvoke = this.originalInvoke.bind(gateway);
     this.originalStream = gateway.stream;
@@ -20354,18 +20358,42 @@ var TypertGatewaySwitch = class {
     this.originalDispatch = this.runtime.dispatchRpc;
     this.localDispatch = this.runtime.dispatchRpc?.bind(gateway);
     this.originalOpen = this.runtime.openWireStream;
-    this.localOpen = createLocalOpen(gateway, this.runtime);
+    this.localOpen = createLocalOpen(gateway, this.runtime, () => this.ownerPeer());
+  }
+  /**
+   * The peer a carrier call speaks for, created once and reused.
+   *
+   * dsh 0.2.1-rc.2 reads `peer.signal` on every carrier call and rejects one that arrives without a peer; a remote
+   * client runs with the Host owner's authority (decided 2026-10-19), which is the same principal dsh gives its own
+   * browser peer, so the plugin serves remote calls as the owner. Releases before rc.2 ignore the argument, and a
+   * profile without a `connection` service simply has no peer to offer.
+   */
+  ownerPeer() {
+    if (this.peer !== void 0) return this.peer;
+    this.peer = this.peerFor?.();
+    return this.peer;
+  }
+  /** Trailing argument the carrier wants when the caller did not supply one. */
+  peerArguments() {
+    const peer = this.ownerPeer();
+    return peer === void 0 ? [] : [peer];
   }
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
   local() {
-    const dispatch = this.localDispatch ?? (async (endpoint, payload, signal) => {
+    const bare = this.localDispatch;
+    const dispatch = bare === void 0 ? (async (endpoint, payload, signal) => {
       try {
         const request = requestFromCarrier(endpoint, payload, signal);
         return { ok: true, value: await this.localInvoke(request) };
       } catch (error) {
         return { ok: false, error: this.failure(error) };
       }
-    });
+    }) : (endpoint, payload, signal, ...rest) => Promise.resolve(bare(
+      endpoint,
+      payload,
+      signal,
+      ...rest.length === 0 ? this.peerArguments() : rest
+    ));
     const open = this.localOpen ?? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream(requestFromCarrier(endpoint, payload, signal));
@@ -20549,17 +20577,17 @@ function linkControl(signal) {
   else signal.addEventListener("abort", () => control.abort(signal.reason), { once: true });
   return control;
 }
-function createLocalOpen(gateway, runtime) {
+function createLocalOpen(gateway, runtime, peer = () => void 0) {
   const open = runtime.openWireStream;
   if (open !== void 0) {
-    return usesRc1Arity(open) ? (endpoint, payload, signal) => open.call(runtime, endpoint, payload, endedUplink(), void 0, signal, linkControl(signal)) : (endpoint, payload, signal) => open.call(runtime, endpoint, payload, signal);
+    return usesRc1Arity(open) ? (endpoint, payload, signal) => open.call(runtime, endpoint, payload, endedUplink(), peer(), signal, linkControl(signal)) : (endpoint, payload, signal) => open.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
   const wireOpen = wire.open;
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen;
-    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), void 0, signal);
+    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), peer(), signal);
   }
   const legacy = wireOpen;
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal);
@@ -21727,7 +21755,7 @@ var QUICK_RECONNECT_RETRY_DELAY_MS = 5e3;
 var QUICK_RECONNECT_FORCE_RELAY = true;
 var BACKGROUND_RETRY_DELAYS_MS = [5e3, 1e4, 2e4, 3e4, 3e4, 3e4, 3e4];
 var ClientModeRuntime = class {
-  constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore) {
+  constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory, targetStore, peer) {
     this.config = config;
     this.identities = identities;
     this.server = server;
@@ -21735,8 +21763,9 @@ var ClientModeRuntime = class {
     this.host = host;
     this.rtcFactoryProvider = rtcFactoryProvider;
     this.targetStore = targetStore;
+    this.peer = peer;
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
-    this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
+    this.gatewaySwitch = new TypertGatewaySwitch(typertGateway, { peer: this.peer });
     this.gatewaySwitch.setRemoteAvailability(() => this.connected !== void 0);
   }
   preview;
@@ -30323,8 +30352,18 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   const deviceDirectory = config.serverUrl === void 0 ? defaultIdentityDirectory : await ensureDeviceDirectory(defaultIdentityDirectory, config.serverUrl);
   const hostIdentities = new IdentityStore({ directory: deviceDirectory });
   const apiProxy = ctx.get("apiProxy");
+  const connectionService = ctx.get("connection", false);
+  let ownerPeerResolved = false;
+  let ownerPeer;
+  const peerFor = () => {
+    if (!ownerPeerResolved) {
+      ownerPeerResolved = true;
+      ownerPeer = connectionService?.createPeer?.({ principal: { kind: "owner" } });
+    }
+    return ownerPeer;
+  };
   const nativeTypertGateway = ctx.get("typertGateway");
-  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local();
+  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway, { peer: peerFor }).local();
   const subprocess = ctx.get("subprocess", false);
   const deepseekAccount = ctx.get("deepseekAccount", false);
   const deepseekSession = deepseekAccount === void 0 ? void 0 : {
@@ -30373,7 +30412,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       hostControl,
       // The RTC factory keeps its default; the target store lives beside the plugin state.
       void 0,
-      new ClientTargetStore(defaultIdentityDirectory)
+      new ClientTargetStore(defaultIdentityDirectory),
+      peerFor
     );
   }
   const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl, deepseekSession);
