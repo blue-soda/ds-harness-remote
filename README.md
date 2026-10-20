@@ -43,7 +43,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`@blue-soda/dsh-remote@0.5.3`
+`@blue-soda/dsh-remote@0.5.4`
 
 ## Features
 
@@ -64,7 +64,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`@blue-soda/dsh-remote@0.5.3`
+`@blue-soda/dsh-remote@0.5.4`
 
 ### dsh-TUI Host
 
@@ -76,7 +76,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.3
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.4
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which

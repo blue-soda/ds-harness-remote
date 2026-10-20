@@ -297,7 +297,11 @@ Windows 上是 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` ✓，当**目标文件**
 回归测试见 `tests/atomic-file.test.ts` ✓。
 
 Plugin 凭据刷新使用跨进程目录锁，获得锁后重新读取凭据；握手被拒绝后最多刷新恢复一次。
-`4003` 映射为 `CONNECTION_REPLACED` 并停止自动抢占，同机并行 Host 应分别设置 `DSH_HOME`。
+`4003` 映射为 `CONNECTION_REPLACED`，同机并行 Host 应分别设置 `DSH_HOME`。**2026-10-20 修正**：被顶替的一方
+**不再永久停止重连** ✗ —— 它记录「待命」并**每 5 分钟**重试一次（`reconnect.replacedRetryMs`，默认 `300000` ✓），
+对方退出即自动接管 ✓。原因：永久停止会让“赢家后来退出”变成**永久离线** ✗（实测两个安卓端因此看到 Desktop 离线
+一整天 ✓）；5 分钟 > 服务端心跳判定窗口（45 s 阈值 + 20 s tick ✓）→ 两个活实例不会互顶 ✓。鉴定类错误仍终止 ✓，
+自我替换仍被忽略 ✓。回归用例：`tests/server-connection.test.ts` 的 `replaced` / `replaced-before-ack` ✓。
 **刷新锁只回收"已死持有者"，不抢占活着的实例**（2026-10-18 修正）：锁是一个目录，里面现在写 `owner.json`
 （`{pid, at}`）。遇到 `EEXIST` 时先读持有者：**PID 已不存在**（`process.kill(pid, 0)` 抛 `ESRCH`；`EPERM`
 按"活着"处理 ✓）就用一次 `rename` 抢走并删除 ✓ —— rename 原子，所以只有一个竞争者能成功 ✓；没有 `owner.json`

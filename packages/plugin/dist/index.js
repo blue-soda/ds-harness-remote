@@ -13480,7 +13480,11 @@ function resolveConfig(input2 = {}, env = process.env) {
       enabled: parsed.reconnect !== false,
       initialDelayMs,
       maxDelayMs,
-      jitter: reconnect.jitter ?? 0.2
+      jitter: reconnect.jitter ?? 0.2,
+      // A displaced connection is a standby: another instance holds this device identity, so it waits five
+      // minutes - well outside the Server's 40-65 s reap window - and then tries again, taking over as soon
+      // as that instance leaves. Giving up for good is how the device stayed offline after the winner left.
+      replacedRetryMs: reconnect.replacedRetryMs ?? 3e5
     },
     codex: {
       // Off by default (2026-10-14). Carrying another agent's workspaces is a capability the user opts into, not
@@ -13516,7 +13520,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.3";
+var PLUGIN_VERSION = "0.5.4";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -14080,15 +14084,18 @@ var HostServerConnection = class {
   }
   async run() {
     let delayMs = this.config.reconnect.initialDelayMs;
+    let replacedRetryMs;
     this.authRecoveryAttempted = false;
     while (!this.stopped) {
       try {
         await this.connectOnce();
         delayMs = this.config.reconnect.initialDelayMs;
+        replacedRetryMs = void 0;
       } catch (error) {
         const code = errorCode2(error);
         if (code === "CREDENTIALS_REFRESHED") continue;
         this.terminalError = code;
+        replacedRetryMs = code === "CONNECTION_REPLACED" ? this.config.reconnect.replacedRetryMs : void 0;
         this.logger.warn("server control connection failed", {
           code,
           retryable: isRetryable(error),
@@ -14096,7 +14103,7 @@ var HostServerConnection = class {
           ...connectionFailureDetail(error)
         });
         if (TERMINAL_AUTH_ERRORS.has(code)) {
-          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
+          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
         }
         if (code === "DEVICE_REVOKED") {
           try {
@@ -14114,7 +14121,7 @@ var HostServerConnection = class {
         continue;
       }
       if (!this.config.reconnect.enabled) return;
-      await this.waitBeforeRetry(delayMs);
+      await (replacedRetryMs === void 0 ? this.waitBeforeRetry(delayMs) : this.waitBeforeRetry(replacedRetryMs, true));
       if (this.reconnectRequested) {
         this.reconnectRequested = false;
         delayMs = this.config.reconnect.initialDelayMs;
@@ -14678,8 +14685,8 @@ var HostServerConnection = class {
       tunnel.noise.destroy();
     }
   }
-  waitBeforeRetry(baseDelay) {
-    const spread = baseDelay * this.config.reconnect.jitter;
+  waitBeforeRetry(baseDelay, exact = false) {
+    const spread = exact ? 0 : baseDelay * this.config.reconnect.jitter;
     const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2));
     return new Promise((resolve4) => {
       const timer = setTimeout(() => {
@@ -14694,7 +14701,6 @@ var HostServerConnection = class {
   }
 };
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
-  "CONNECTION_REPLACED",
   "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
   "AUTH_INVALID",
@@ -29994,7 +30000,7 @@ function remoteStatusLines(target2) {
     `Authorization: ${status2.authorized ? status2.account === void 0 ? "logged in" : `logged in (${status2.account})` : "logged out"}`,
     `Server connection: ${connection}`,
     ...status2.error === void 0 ? [] : [`Connection error: ${status2.error}`],
-    ...status2.error === "CONNECTION_REPLACED" ? ["Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting."] : status2.error === "SERVER_CREDENTIALS_BUSY" ? ["Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again."] : status2.accountRequired ? ["Authorize again with /remote login [github|zhihu]."] : [],
+    ...status2.error === "CONNECTION_REPLACED" ? ["Another instance is using this Host identity. Standing by: retrying every five minutes, and taking over as soon as it leaves."] : status2.error === "SERVER_CREDENTIALS_BUSY" ? ["Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again."] : status2.accountRequired ? ["Authorize again with /remote login [github|zhihu]."] : [],
     `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : "disabled"}`,

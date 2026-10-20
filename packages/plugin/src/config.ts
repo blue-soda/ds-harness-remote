@@ -22,6 +22,8 @@ export interface Config {
   reconnect?: boolean | {
     initialDelayMs?: number
     maxDelayMs?: number
+    /** How long a connection displaced by another instance waits before retrying. */
+    replacedRetryMs?: number
     jitter?: number
   }
   /** Optional Codex domain carried by the existing authenticated Remote Plugin. */
@@ -48,6 +50,8 @@ export interface ResolvedConfig {
     initialDelayMs: number
     maxDelayMs: number
     jitter: number
+    /** Fixed wait before a displaced connection retries; five minutes by default, never jittered. */
+    replacedRetryMs: number
   }
   terminal: { enabled: boolean }
   hostControl?: { enabled: boolean; paused: boolean }
@@ -167,6 +171,10 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       initialDelayMs,
       maxDelayMs,
       jitter: reconnect.jitter ?? 0.2,
+      // A displaced connection is a standby: another instance holds this device identity, so it waits five
+      // minutes - well outside the Server's 40-65 s reap window - and then tries again, taking over as soon
+      // as that instance leaves. Giving up for good is how the device stayed offline after the winner left.
+      replacedRetryMs: (reconnect as { replacedRetryMs?: number }).replacedRetryMs ?? 300_000,
     },
     codex: {
       // Off by default (2026-10-14). Carrying another agent's workspaces is a capability the user opts into, not

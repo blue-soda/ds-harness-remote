@@ -158,15 +158,22 @@ export class HostServerConnection {
 
   private async run(): Promise<void> {
     let delayMs = this.config.reconnect.initialDelayMs
+    // A displaced connection is a standby, not a failure: the Server closes the older socket of a device with
+    // 4003 whenever another instance takes its identity over. Retrying inside the Server's 40-65 s reap window
+    // would only displace each other in a loop, and giving up for good left the device offline after the winning
+    // instance went away. So it waits a fixed, configured interval (five minutes) and tries again.
+    let replacedRetryMs: number | undefined
     this.authRecoveryAttempted = false
     while (!this.stopped) {
       try {
         await this.connectOnce()
         delayMs = this.config.reconnect.initialDelayMs
+        replacedRetryMs = undefined
       } catch (error) {
         const code = errorCode(error)
         if (code === 'CREDENTIALS_REFRESHED') continue
         this.terminalError = code
+        replacedRetryMs = code === 'CONNECTION_REPLACED' ? this.config.reconnect.replacedRetryMs : undefined
         // A bare code cannot separate a DNS failure, a refused upgrade, a socket the Server closed and a
         // stale credential lock - which is exactly what made a stuck reconnect loop undiagnosable. The
         // detail below is the message and the underlying system code; no token, payload or header is logged.
@@ -177,7 +184,7 @@ export class HostServerConnection {
         })
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === 'CONNECTION_REPLACED'
-            ? 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused.'
+            ? 'Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves.'
             : code === 'SERVER_CREDENTIALS_BUSY'
               ? 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.'
               : 'Host authorization failed. Run /remote login or authorize this Host again in Remote settings.')
@@ -198,7 +205,9 @@ export class HostServerConnection {
         continue
       }
       if (!this.config.reconnect.enabled) return
-      await this.waitBeforeRetry(delayMs)
+      await (replacedRetryMs === undefined
+        ? this.waitBeforeRetry(delayMs)
+        : this.waitBeforeRetry(replacedRetryMs, true))
       if (this.reconnectRequested) {
         this.reconnectRequested = false
         delayMs = this.config.reconnect.initialDelayMs
@@ -833,8 +842,9 @@ export class HostServerConnection {
     }
   }
 
-  private waitBeforeRetry(baseDelay: number): Promise<void> {
-    const spread = baseDelay * this.config.reconnect.jitter
+  private waitBeforeRetry(baseDelay: number, exact = false): Promise<void> {
+    // The standby interval is a promise to the user ("every five minutes"), so it is not jittered.
+    const spread = exact ? 0 : baseDelay * this.config.reconnect.jitter
     const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2))
     return new Promise(resolve => {
       const timer = setTimeout(() => { this.retryWake = undefined; resolve() }, delay)
@@ -844,7 +854,6 @@ export class HostServerConnection {
 }
 
 const TERMINAL_AUTH_ERRORS = new Set([
-  'CONNECTION_REPLACED',
   'SERVER_CREDENTIALS_BUSY',
   'ACCOUNT_AUTH_REQUIRED',
   'AUTH_INVALID',

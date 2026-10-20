@@ -42,7 +42,7 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.5.3`
+`@blue-soda/dsh-remote@0.5.4`
 
 ## 主要特性
 
@@ -62,7 +62,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.5.3`
+`@blue-soda/dsh-remote@0.5.4`
 
 ### dsh-TUI Host
 
@@ -74,7 +74,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.3
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.4
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报

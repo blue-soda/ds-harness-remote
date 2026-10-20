@@ -43,3 +43,6 @@ after either upstream is upgraded are recorded in
 `0.5.2` changes nothing outside the Remote status pill's CSS: on narrow screens it is centred on the viewport and shares the header's centre line instead of sitting lower and further right. Install pins move to `0.5.2`; everything in `0.5.1` above still applies.
 
 `0.5.3` changes no wire format either: the credential-refresh lock now records its owner and is reclaimed when that process is gone (a lock with no owner is reclaimed after ten minutes), where it used to sit forever and block every later sign-in with `SERVER_CREDENTIALS_BUSY`. A live instance - including a suspended one - is still never preempted, so the one-use refresh token stays protected. Everything above still applies.
+
+`0.5.4` changes no wire format: a connection displaced by another instance (`CONNECTION_REPLACED`, Server code `4003`) is no longer terminal. It logs that it is standing by and retries every five minutes (`reconnect.replacedRetryMs`, default `300000`) instead of stopping forever, so the device comes back once the other instance leaves. Everything above still applies.
+

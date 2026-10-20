@@ -362,7 +362,7 @@ function config(): ResolvedConfig {
     deviceName: 'Host',
     forceRelay: true,
     logLevel: 'error',
-    reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
+    reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 , replacedRetryMs: 1 },
     codex: { enabled: false, binary: 'codex' },
   }
 }

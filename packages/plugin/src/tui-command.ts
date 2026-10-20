@@ -285,7 +285,7 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
     `Server connection: ${connection}`,
     ...(status.error === undefined ? [] : [`Connection error: ${status.error}`]),
     ...(status.error === 'CONNECTION_REPLACED'
-      ? ['Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting.']
+      ? ['Another instance is using this Host identity. Standing by: retrying every five minutes, and taking over as soon as it leaves.']
       : status.error === 'SERVER_CREDENTIALS_BUSY'
         ? ['Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again.']
         : status.accountRequired ? ['Authorize again with /remote login [github|zhihu].'] : []),

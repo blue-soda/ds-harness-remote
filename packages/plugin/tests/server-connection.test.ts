@@ -212,7 +212,7 @@ describe('HostServerConnection', () => {
       }),
     } as unknown as HostServerApi
     const server = new HostServerConnection(
-      { ...config(), reconnect: { ...config().reconnect, enabled: true } },
+      { ...config(), reconnect: { ...config().reconnect, enabled: true , replacedRetryMs: 1 } },
       { schemaVersion: 1, deviceId: 'host-2', name: 'Host', fingerprint: 'HOST', ...keys },
       { trustedPeer: vi.fn() } as unknown as IdentityStore,
       api,
@@ -283,7 +283,7 @@ describe('HostServerConnection', () => {
       } as unknown as HostServerApi
       const logs = logger()
       const server = new HostServerConnection(
-        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
+        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 , replacedRetryMs: 1 } },
         { schemaVersion: 1, deviceId: 'host-recovery', name: 'Host', fingerprint: 'HOST', ...keys },
         { trustedPeer: vi.fn() } as unknown as IdentityStore, api,
         { close: vi.fn(async () => undefined) } as unknown as ConnectionController, logs,
@@ -330,8 +330,16 @@ describe('HostServerConnection', () => {
           expect(api.refreshCredentials).toHaveBeenCalledTimes(1)
         } else {
           await new Promise(resolve => setTimeout(resolve, 20))
-          expect(sockets).toHaveLength(1)
-          expect(server.isReconnecting()).toBe(false)
+          if (scenario.startsWith('replaced')) {
+            // A displaced connection is a standby: it keeps retrying after `replacedRetryMs` (one millisecond
+            // here) instead of stopping for good, so it takes over once the other instance leaves.
+            expect(server.isReconnecting()).toBe(true)
+            expect(server.lastError()).toBe('CONNECTION_REPLACED')
+            expect(sockets.length).toBeGreaterThanOrEqual(1)
+          } else {
+            expect(sockets).toHaveLength(1)
+            expect(server.isReconnecting()).toBe(false)
+          }
           expect(api.refreshCredentials).toHaveBeenCalledTimes(scenario === 'refresh-rejected' ? 1 : 0)
           expect(api.clearAuthorization).toHaveBeenCalledTimes(scenario.startsWith('revoked') ? 1 : 0)
           if (scenario !== 'stopped') expect(server.lastError()).toBe(
@@ -358,7 +366,7 @@ describe('HostServerConnection', () => {
         refreshCredentials,
       } as unknown as HostServerApi
       const server = new HostServerConnection(
-        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
+        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 , replacedRetryMs: 1 } },
         { schemaVersion: 1, deviceId: 'host-retry-refresh', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
         { trustedPeer: vi.fn() } as unknown as IdentityStore, api,
         { close: vi.fn(async () => undefined) } as unknown as ConnectionController, logger(),
@@ -659,7 +667,7 @@ function config(): ResolvedConfig {
     deviceName: 'Host',
     forceRelay: true,
     logLevel: 'error',
-    reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
+    reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 , replacedRetryMs: 1 },
     codex: { enabled: false, binary: 'codex' },
   }
 }

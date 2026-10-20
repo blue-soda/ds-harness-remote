@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4 - 2026-10-20
+
+- A displaced connection is a standby instead of a dead end. When another instance takes this device identity over, the Server closes the older socket with `4003` and the plugin used to log "another instance is using this Host identity" and stop reconnecting for good - so after the winning instance went away the device stayed offline, with no indication why (two Android clients saw a Desktop offline for a day that way). The displaced side now logs that it is standing by and retries every five minutes (`reconnect.replacedRetryMs`, default `300000`), taking over as soon as the other instance leaves. The interval is deliberately longer than the Server heartbeat's 40-65 s reap window, so two live instances cannot displace each other in a loop. Authentication failures still stop retries, and replacing this peer's own transport is still ignored.
+
 ## 0.5.3 - 2026-10-18
 
 - Works on dsh 0.2.1-rc.2 again. That release appended the calling peer to the gateway carrier dispatcher (`remoteRequest(endpoint, payload, signal, peer)`) and `assertPeerLive` reads `peer.signal`, while the switch forwarded only the first three arguments - so every call through it threw `Cannot read properties of undefined (reading 'signal')`. That took the Cordis inventory and the workspace list down with it and left the page as a bare shell (`reading the Cordis inventory failed`). Arguments are passed through untouched now, which keeps older gateways working too.
