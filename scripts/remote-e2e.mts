@@ -769,7 +769,43 @@ interface Scenario {
 }
 
 const KINDS: SessionKind[] = ['harness', 'codex']
+
+/**
+ * Two instances of the same device identity, which is what a second Desktop on one DSH_HOME looks like.
+ *
+ * Before 0.5.4 the displaced instance treated `CONNECTION_REPLACED` as terminal and stopped reconnecting, so once the
+ * winning instance went away the device stayed offline - a Desktop stayed offline for a day that way. The displaced
+ * side now stands by and retries on a fixed interval, so it must take over here as soon as the winner stops.
+ */
+async function standbyTakeover(ctx: Ctx): Promise<void> {
+  check('the original Host is online before the second instance starts', await waitForHostOnline(ctx, 90_000))
+  // Same home, same device identity, different port: the Server keeps one host connection per identity, so this
+  // instance displaces the original - exactly the collision that has no other way to be produced from a script.
+  const second = await startInstance('standby host', HOST_HOME, HOST_PORT + 2, HOST_ENTRY)
+  const stopSecond = async (): Promise<void> => {
+    for (const pid of treePids(second.process.pid as number)) {
+      try { process.kill(pid) } catch { /* already gone */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1_000))
+  }
+  try {
+    const displaced = await waitFor('the original Host to be displaced', async () => {
+      const status = await ctx.host.control<{ host?: { error?: string } }>('status')
+      return status?.host?.error === 'CONNECTION_REPLACED' ? true : undefined
+    }, 90_000, 1_000).catch(() => undefined)
+    check('the displaced instance reports CONNECTION_REPLACED', displaced === true)
+
+    // The displaced side must still be trying. This is the regression: it used to log the collision and stop for good,
+    // leaving nothing to take over once the winner was gone.
+    await stopSecond()
+    const backOnline = await waitForHostOnline(ctx, 90_000)
+    check('the standby takes over once the other instance leaves', backOnline === true)
+  } finally {
+    await stopSecond()
+  }
+}
 const scenarios: Scenario[] = [
+  { name: 'standby-takeover', toggles: true, needsCodex: false, speed: 'slow', run: standbyTakeover },
   { name: 'browse-harness', toggles: false, needsCodex: false, speed: 'fast', run: ctx => browse(ctx, 'harness') },
   { name: 'browse-codex', toggles: false, needsCodex: true, speed: 'fast', run: ctx => browse(ctx, 'codex') },
   { name: 'open-harness', toggles: false, needsCodex: false, speed: 'fast', run: ctx => open(ctx, 'harness') },

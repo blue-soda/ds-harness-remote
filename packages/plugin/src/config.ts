@@ -174,7 +174,11 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       // A displaced connection is a standby: another instance holds this device identity, so it waits five
       // minutes - well outside the Server's 40-65 s reap window - and then tries again, taking over as soon
       // as that instance leaves. Giving up for good is how the device stayed offline after the winner left.
-      replacedRetryMs: (reconnect as { replacedRetryMs?: number }).replacedRetryMs ?? 300_000,
+      // The fixture matrix needs a short interval to watch a standby take over, so an operator can override it.
+      replacedRetryMs: (reconnect as { replacedRetryMs?: number }).replacedRetryMs
+        ?? (Number.isFinite(Number(env.DSH_REMOTE_RECONNECT_REPLACED_RETRY_MS))
+          ? Number(env.DSH_REMOTE_RECONNECT_REPLACED_RETRY_MS)
+          : 300_000),
     },
     codex: {
       // Off by default (2026-10-14). Carrying another agent's workspaces is a capability the user opts into, not
