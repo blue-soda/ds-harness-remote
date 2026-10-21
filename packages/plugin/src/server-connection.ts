@@ -163,17 +163,28 @@ export class HostServerConnection {
     // would only displace each other in a loop, and giving up for good left the device offline after the winning
     // instance went away. So it waits a fixed, configured interval (five minutes) and tries again.
     let replacedRetryMs: number | undefined
+      let replacedAttempts = 0
     this.authRecoveryAttempted = false
     while (!this.stopped) {
       try {
         await this.connectOnce()
         delayMs = this.config.reconnect.initialDelayMs
         replacedRetryMs = undefined
+        replacedAttempts = 0
       } catch (error) {
         const code = errorCode(error)
         if (code === 'CREDENTIALS_REFRESHED') continue
         this.terminalError = code
-        replacedRetryMs = code === 'CONNECTION_REPLACED' ? this.config.reconnect.replacedRetryMs : undefined
+      // The first retry after a displacement waits one Server heartbeat window (45 s peer timeout plus one 20 s
+      // tick), long enough for a stale socket - a restart's dying process, a half-closed link - to be reaped. Only a
+      // peer still there after that earns the full five minutes; waiting five minutes up front is what turned a
+      // normal restart into five minutes of "offline".
+      replacedRetryMs = code === 'CONNECTION_REPLACED'
+        ? (replacedAttempts === 0
+          ? Math.min(this.config.reconnect.replacedRetryMs, REPLACED_FIRST_RETRY_MS)
+          : this.config.reconnect.replacedRetryMs)
+        : undefined
+      replacedAttempts = code === 'CONNECTION_REPLACED' ? replacedAttempts + 1 : 0
         // A bare code cannot separate a DNS failure, a refused upgrade, a socket the Server closed and a
         // stale credential lock - which is exactly what made a stuck reconnect loop undiagnosable. The
         // detail below is the message and the underlying system code; no token, payload or header is logged.
@@ -852,6 +863,9 @@ export class HostServerConnection {
     })
   }
 }
+
+/** One Server heartbeat window: the 45 s peer timeout plus the 20 s tick that decides it. */
+const REPLACED_FIRST_RETRY_MS = 65_000
 
 const TERMINAL_AUTH_ERRORS = new Set([
   'SERVER_CREDENTIALS_BUSY',

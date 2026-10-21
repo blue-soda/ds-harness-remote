@@ -14086,17 +14086,20 @@ var HostServerConnection = class {
   async run() {
     let delayMs = this.config.reconnect.initialDelayMs;
     let replacedRetryMs;
+    let replacedAttempts = 0;
     this.authRecoveryAttempted = false;
     while (!this.stopped) {
       try {
         await this.connectOnce();
         delayMs = this.config.reconnect.initialDelayMs;
         replacedRetryMs = void 0;
+        replacedAttempts = 0;
       } catch (error) {
         const code = errorCode2(error);
         if (code === "CREDENTIALS_REFRESHED") continue;
         this.terminalError = code;
-        replacedRetryMs = code === "CONNECTION_REPLACED" ? this.config.reconnect.replacedRetryMs : void 0;
+        replacedRetryMs = code === "CONNECTION_REPLACED" ? replacedAttempts === 0 ? Math.min(this.config.reconnect.replacedRetryMs, REPLACED_FIRST_RETRY_MS) : this.config.reconnect.replacedRetryMs : void 0;
+        replacedAttempts = code === "CONNECTION_REPLACED" ? replacedAttempts + 1 : 0;
         this.logger.warn("server control connection failed", {
           code,
           retryable: isRetryable(error),
@@ -14701,6 +14704,7 @@ var HostServerConnection = class {
     });
   }
 };
+var REPLACED_FIRST_RETRY_MS = 65e3;
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
@@ -22084,9 +22088,26 @@ var ClientModeRuntime = class {
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-    await this.host.setHostControl?.(enabled);
-    if (enabled) await this.host.resumeHostConnection?.();
-    else await this.host.pauseHostConnection?.();
+    if (!enabled) {
+      await this.host.setHostControl?.(false);
+      await this.host.pauseHostConnection?.();
+      return this.status();
+    }
+    let flagError;
+    try {
+      await this.host.setHostControl?.(true);
+    } catch (error) {
+      flagError = error;
+    }
+    await this.host.resumeHostConnection?.();
+    try {
+      await this.host.setHostControl?.(true);
+    } catch (error) {
+      this.logger.warn("could not tell the Server that this Host accepts control; retrying when it reconnects", {
+        code: safeErrorCode(error),
+        ...flagError === void 0 ? {} : { firstCode: safeErrorCode(flagError) }
+      });
+    }
     return this.status();
   }
   async setMode(mode, targetDeviceId, signal) {

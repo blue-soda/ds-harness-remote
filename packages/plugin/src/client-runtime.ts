@@ -644,10 +644,27 @@ export class ClientModeRuntime {
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
     if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
-    // The flag first: resuming before the Server knows would only get the hello refused.
-    await this.host.setHostControl?.(enabled)
-    if (enabled) await this.host.resumeHostConnection?.()
-    else await this.host.pauseHostConnection?.()
+    if (!enabled) {
+      // Turning control off: the flag first, so the Server refuses a new hello immediately.
+      await this.host.setHostControl?.(false)
+      await this.host.pauseHostConnection?.()
+      return this.status()
+    }
+    // Turning control on: the flag first, because the Server refuses a host hello while it says control is off -
+    // but that upload runs over the paused connection, and a failed one must not keep the device offline. That is
+    // how "allow control" stayed dead (offline + refuses control) until the next sign-in. Resume regardless, then
+    // send the flag again once the connection is up; both calls are idempotent.
+    let flagError: unknown
+    try { await this.host.setHostControl?.(true) } catch (error) { flagError = error }
+    await this.host.resumeHostConnection?.()
+    try {
+      await this.host.setHostControl?.(true)
+    } catch (error) {
+      this.logger.warn('could not tell the Server that this Host accepts control; retrying when it reconnects', {
+        code: safeErrorCode(error),
+        ...(flagError === undefined ? {} : { firstCode: safeErrorCode(flagError) }),
+      })
+    }
     return this.status()
   }
 
