@@ -1514,7 +1514,12 @@
                   targetDeviceId: host.deviceId
                 }), codexReason, nextCodexWorkspaces = await props.control("codex.workspaces.list", {
                   targetDeviceId: host.deviceId
-                }).catch((reason) => (codexReason = remoteErrorMessage(reason, t), [])), nextStatus = await props.control("status").catch(() => {
+                }).catch(async (reason) => {
+                  let code = typeof reason?.code == "string" ? String(reason.code) : "";
+                  return ["TRANSPORT_CLOSED", "NOT_CONNECTED", "CONNECTION_FAILED", "RPC_TIMEOUT"].includes(code) ? await props.control("codex.workspaces.list", {
+                    targetDeviceId: host.deviceId
+                  }).catch((again) => (codexReason = remoteErrorMessage(again, t), [])) : (codexReason = remoteErrorMessage(reason, t), []);
+                }), nextStatus = await props.control("status").catch(() => {
                 });
                 return nextStatus !== void 0 && setStatus(nextStatus), setCodexNotice(codexReason), { workspaces: nextWorkspaces, codexWorkspaces: nextCodexWorkspaces, status: nextStatus };
               },

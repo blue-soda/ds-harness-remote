@@ -2033,9 +2033,21 @@ window.__ModuleLoader__.load({
               let codexReason: string | undefined
               const nextCodexWorkspaces = await props.control<CodexWorkspaceView[]>('codex.workspaces.list', {
                 targetDeviceId: host.deviceId,
-              }).catch((reason: unknown) => {
-                codexReason = remoteErrorMessage(reason, t)
-                return []
+              }).catch(async (reason: unknown) => {
+                // The first request establishes the connection, but the link can still be settling when the Codex probe
+                // goes out - which is how a card opened right after connecting showed "not connected" for good. One
+                // retry, and the notice is only kept when even that fails.
+                const code = typeof (reason as { code?: unknown })?.code === 'string' ? String((reason as { code: string }).code) : ''
+                if (!['TRANSPORT_CLOSED', 'NOT_CONNECTED', 'CONNECTION_FAILED', 'RPC_TIMEOUT'].includes(code)) {
+                  codexReason = remoteErrorMessage(reason, t)
+                  return []
+                }
+                return await props.control<CodexWorkspaceView[]>('codex.workspaces.list', {
+                  targetDeviceId: host.deviceId,
+                }).catch((again: unknown) => {
+                  codexReason = remoteErrorMessage(again, t)
+                  return []
+                })
               })
               const nextStatus = await props.control<RemoteStatus>('status').catch(() => undefined)
               if (nextStatus !== undefined) setStatus(nextStatus)
