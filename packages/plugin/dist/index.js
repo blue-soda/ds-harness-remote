@@ -22522,6 +22522,22 @@ var ClientModeRuntime = class {
       return;
     }
     const transportLost = reason !== "codex-closed";
+    if (String(reason) === "CONNECTION_REPLACED" && this.reconnecting === void 0) {
+      const run = this.remoteReconnectRun;
+      this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fast" };
+      this.logger.info("the link was closed by this client's own connection replacement; retrying in place", {
+        targetDeviceId: shortId2(targetDeviceId),
+        kind
+      });
+      const rescued = await this.quickReconnectSession(targetDeviceId, target2, transportLost, run);
+      if (run !== this.remoteReconnectRun) return;
+      if (rescued) {
+        this.finishRecovery(targetDeviceId, "replacement", kind);
+        return;
+      }
+      void this.reconnectRemoteSession(targetDeviceId, target2);
+      return;
+    }
     if (this.reconnecting === void 0) {
       const run = this.remoteReconnectRun;
       this.reconnecting = { targetDeviceId, ...targetName === void 0 ? {} : { targetName }, phase: "fast" };

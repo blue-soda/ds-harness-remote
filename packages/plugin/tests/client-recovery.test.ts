@@ -452,6 +452,43 @@ describe('remote session recovery targets the same session', () => {
     await runtime.setMode('local')
     await runtime.close()
   })
+  it('retries in place when this client\'s own connection replacement closed the link', async () => {
+    // The reported case: the panel refresh and the automatic reconnect both open a control connection, the Server
+    // closes the older one with 4003, and the link built on it dies with CONNECTION_REPLACED. That must read as a
+    // retry, not as the peer going away - falling back here is what looked like a dropped sign-in.
+    const runtime = await makeRuntime()
+    const client = { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    connect(runtime, client)
+    seams(runtime).lastWorkspaceSelection = { targetDeviceId: 'host-1', workspaceId: 'workspace-1' }
+    const quick = vi.fn(async () => true)
+    seams(runtime).quickReconnectSession = quick
+
+    await seams(runtime).handleRemoteTransportLost(client, 'host-1', 'CONNECTION_REPLACED')
+
+    expect(quick).toHaveBeenCalledTimes(1)
+    expect(seams(runtime).fellBackToLocal).toBeFalsy()
+    await runtime.close()
+  })
+
+  it('keeps the target and the ladder when that replacement retry does not land', async () => {
+    const runtime = await makeRuntime()
+    const client = { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay' }) }
+    connect(runtime, client)
+    const selection = { targetDeviceId: 'host-1', workspaceId: 'workspace-1' }
+    seams(runtime).lastWorkspaceSelection = selection
+    seams(runtime).quickReconnectSession = vi.fn(async () => false)
+    const ladder = vi.fn(async () => undefined)
+    seams(runtime).reconnectRemoteSession = ladder
+
+    await seams(runtime).handleRemoteTransportLost(client, 'host-1', 'CONNECTION_REPLACED')
+
+    expect(ladder).toHaveBeenCalledTimes(1)
+    expect(seams(runtime).fellBackToLocal).toBeFalsy()
+    expect(seams(runtime).lastWorkspaceSelection).toEqual(selection)
+    expect(seams(runtime).reconnecting?.phase).toBe('fast')
+    await runtime.close()
+  })
+
 })
 
 function config(): ResolvedConfig {

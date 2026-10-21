@@ -1156,6 +1156,27 @@ export class ClientModeRuntime {
     // A Caller that already probed the link reports 'manual'; the close notice and the Server's link-dropped
     // notice are the transport-level signals. Only a Codex-only loss arrives with a link that is known to be up.
     const transportLost = reason !== 'codex-closed'
+    // A `CONNECTION_REPLACED` here is this client's own doing: the panel's refresh and the automatic reconnect can
+    // both open a control connection, and the Server closes the older socket of a device with 4003 - the link that was
+    // still being built on it then dies with the same code. That is not the peer going away, so it must not hand the
+    // view to the local shell, forget the target, or look like a lost session: just try again, and keep the ladder
+    // running silently if the retry does not land inside the window.
+    if (String(reason) === 'CONNECTION_REPLACED' && this.reconnecting === undefined) {
+      const run = this.remoteReconnectRun
+      this.reconnecting = { targetDeviceId, ...(targetName === undefined ? {} : { targetName }), phase: 'fast' }
+      this.logger.info('the link was closed by this client\'s own connection replacement; retrying in place', {
+        targetDeviceId: shortId(targetDeviceId),
+        kind,
+      })
+      const rescued = await this.quickReconnectSession(targetDeviceId, target, transportLost, run)
+      if (run !== this.remoteReconnectRun) return
+      if (rescued) {
+        this.finishRecovery(targetDeviceId, 'replacement', kind)
+        return
+      }
+      void this.reconnectRemoteSession(targetDeviceId, target)
+      return
+    }
     if (this.reconnecting === undefined) {
       // Phase 1 - the quick window. Two attempts inside ten seconds, and the view is deliberately NOT touched:
       // the same Workspace and Session list stay on screen while the session is rescued. A Codex-only loss needs
