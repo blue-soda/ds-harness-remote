@@ -1017,3 +1017,77 @@ describe('device revocation from the panel', () => {
     await runtime.close()
   }, 20_000)
 })
+describe('ClientModeRuntime control resume and single-flight connect', () => {
+  it('resumes the Host even when the control flag cannot be uploaded', async () => {
+    // Reported: switching "allow control" back on left the Desktop offline and refusing control until the next
+    // sign-in. The flag upload runs over the paused connection, so failing it must not skip the resume.
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-control-'))
+    directories.push(directory)
+    const host = {
+      hostStatus: vi.fn(() => ({
+        configured: true,
+        online: false,
+        reconnecting: false,
+        error: 'CONNECTION_FAILED',
+        authorized: true,
+        accountRequired: false,
+      })),
+      reconnectHost: vi.fn(),
+      setHostControl: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined),
+      pauseHostConnection: vi.fn(),
+      resumeHostConnection: vi.fn(),
+      clearHostAuthorization: vi.fn(),
+      authorizeHostWithAccount: vi.fn(async (email: string) => ({ account: email, expiresAt: Date.now() + 60_000, isAdmin: false })),
+      authorizeHostWithCode: vi.fn(async () => ({ method: 'host_registration_code' })),
+    } satisfies HostAuthorizationControl
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+      host,
+    )
+    await runtime.start()
+
+    await expect(runtime.setHostAuthorization(true)).resolves.toBeDefined()
+    expect(host.resumeHostConnection).toHaveBeenCalledOnce()
+    expect(host.setHostControl).toHaveBeenCalledTimes(2)
+
+    await runtime.close()
+  })
+
+  it('opens one connection for a second caller that arrives while an attempt is in flight', async () => {
+    // The panel refresh and the automatic reconnect can ask at the same moment; two control connections make the
+    // Server close the older one with 4003 and kill the link being built on it.
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-singleflight-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+    const seam = runtime as unknown as {
+      connectNow: (deviceId: string, signal?: AbortSignal, relay?: boolean) => Promise<unknown>
+      connect: (deviceId: string, signal?: AbortSignal, relay?: boolean) => Promise<unknown>
+    }
+    let release: (() => void) | undefined
+    const connectNow = vi.fn(() => new Promise<void>(resolve => { release = () => { resolve() } }))
+    seam.connectNow = connectNow
+
+    const first = seam.connect('host-1')
+    const second = seam.connect('host-1')
+    expect(connectNow).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(connectNow).toHaveBeenCalledTimes(1))
+    release?.()
+    await Promise.all([first, second])
+    expect(connectNow).toHaveBeenCalledTimes(1)
+
+    await runtime.close()
+  })
+})
