@@ -23271,7 +23271,26 @@ var ClientModeRuntime = class {
       throw error;
     }
   }
+  /**
+   * One attempt at a time per target: the panel's refresh and the automatic reconnect can ask at the same moment, and
+   * two control connections in flight make the Server close the older one with 4003 (`CONNECTION_REPLACED`), which
+   * also kills the link that was being built on it - what the user saw as being kicked out of the card.
+   */
+  inFlightConnect;
   async connect(targetDeviceId, signal, forceRelay = false) {
+    const key = `${targetDeviceId}|${forceRelay ? "relay" : "auto"}`;
+    const inFlight = this.inFlightConnect;
+    if (inFlight?.key === key) {
+      signal?.throwIfAborted();
+      return await inFlight.promise;
+    }
+    const promise = this.connectNow(targetDeviceId, signal, forceRelay).finally(() => {
+      if (this.inFlightConnect?.promise === promise) this.inFlightConnect = void 0;
+    });
+    this.inFlightConnect = { key, promise };
+    return await promise;
+  }
+  async connectNow(targetDeviceId, signal, forceRelay = false) {
     signal?.throwIfAborted();
     const progressRunId = this.connectionProgressRun + 1;
     this.connectionProgressRun = progressRunId;
