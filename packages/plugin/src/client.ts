@@ -486,12 +486,12 @@ const en = {
   exitRemote: 'Exit',
   stopReconnecting: 'Stop reconnecting',
   addRemoteWorkspace: 'Add remote workspace',
-  addCodexWorkspace: 'Add CodeX workspace',
-  noCodexWorkspaces: 'No CodeX workspaces yet.',
+  addCodexWorkspace: 'Add Codex workspace',
+  noCodexWorkspaces: 'No Codex workspaces yet.',
   cancelAddWorkspace: 'Cancel',
   confirmAddWorkspace: 'Add and open',
   showAllWorkspaces: 'Show all DSH workspaces',
-  showAllCodexWorkspaces: 'Show all CodeX workspaces',
+  showAllCodexWorkspaces: 'Show all Codex workspaces',
   remoteModeDsh: 'Remote DSH · ',
   remoteModeCodex: 'Remote Codex · ',
   remoteNetworkP2p: 'P2P',
@@ -588,7 +588,7 @@ const en = {
   accountPasswordLogin: 'Password',
   qrLoginExpired: 'This QR code expired. Refresh it to continue.',
   refreshQrCode: 'Refresh QR code',
-  codexVirtualWorkspace: 'CodeX virtual workspace',
+  codexVirtualWorkspace: 'Codex virtual workspace',
   codexVirtualSessions: 'Sessions',
 } as const
 
@@ -763,12 +763,12 @@ const zh: Record<keyof typeof en, string> = {
   exitRemote: '退出',
   stopReconnecting: '停止重连',
   addRemoteWorkspace: '添加远程工作区',
-  addCodexWorkspace: '添加 CodeX 工作区',
-  noCodexWorkspaces: '还没有 CodeX 工作区。',
+  addCodexWorkspace: '添加 Codex 工作区',
+  noCodexWorkspaces: '还没有 Codex 工作区。',
   cancelAddWorkspace: '取消',
   confirmAddWorkspace: '确认并打开',
   showAllWorkspaces: '显示全部 DSH 工作区',
-  showAllCodexWorkspaces: '显示全部 CodeX 工作区',
+  showAllCodexWorkspaces: '显示全部 Codex 工作区',
   remoteModeDsh: '远程DSH · ',
   remoteModeCodex: '远程Codex · ',
   remoteNetworkP2p: 'P2P',
@@ -865,7 +865,7 @@ const zh: Record<keyof typeof en, string> = {
   accountPasswordLogin: '账号密码',
   qrLoginExpired: '二维码已过期，请刷新后重试。',
   refreshQrCode: '刷新二维码',
-  codexVirtualWorkspace: 'CodeX 工作区',
+  codexVirtualWorkspace: 'Codex 工作区',
   codexVirtualSessions: 'Sessions',
 }
 
@@ -2025,7 +2025,7 @@ window.__ModuleLoader__.load({
             progressRun,
             async () => {
               // The first request establishes the selected Host connection.
-              // Keep the optional CodeX probe on that same connection instead
+              // Keep the optional Codex probe on that same connection instead
               // of racing two initial handshakes for one target.
               const nextWorkspaces = await props.control<RemoteWorkspaceView[]>('workspaces.list', {
                 targetDeviceId: host.deviceId,
@@ -2858,7 +2858,7 @@ window.__ModuleLoader__.load({
                         onClick: () => void openWorkspace(),
                       }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
             notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),
-            error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))))
+            error === undefined || error === codexNotice ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))))
     }
 
 

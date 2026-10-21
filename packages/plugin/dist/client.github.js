@@ -328,12 +328,12 @@
     exitRemote: "Exit",
     stopReconnecting: "Stop reconnecting",
     addRemoteWorkspace: "Add remote workspace",
-    addCodexWorkspace: "Add CodeX workspace",
-    noCodexWorkspaces: "No CodeX workspaces yet.",
+    addCodexWorkspace: "Add Codex workspace",
+    noCodexWorkspaces: "No Codex workspaces yet.",
     cancelAddWorkspace: "Cancel",
     confirmAddWorkspace: "Add and open",
     showAllWorkspaces: "Show all DSH workspaces",
-    showAllCodexWorkspaces: "Show all CodeX workspaces",
+    showAllCodexWorkspaces: "Show all Codex workspaces",
     remoteModeDsh: "Remote DSH \xB7 ",
     remoteModeCodex: "Remote Codex \xB7 ",
     remoteNetworkP2p: "P2P",
@@ -430,7 +430,7 @@
     accountPasswordLogin: "Password",
     qrLoginExpired: "This QR code expired. Refresh it to continue.",
     refreshQrCode: "Refresh QR code",
-    codexVirtualWorkspace: "CodeX virtual workspace",
+    codexVirtualWorkspace: "Codex virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
     terminalRemote: "\u8FDC\u7A0B\u7EC8\u7AEF",
@@ -602,12 +602,12 @@
     exitRemote: "\u9000\u51FA",
     stopReconnecting: "\u505C\u6B62\u91CD\u8FDE",
     addRemoteWorkspace: "\u6DFB\u52A0\u8FDC\u7A0B\u5DE5\u4F5C\u533A",
-    addCodexWorkspace: "\u6DFB\u52A0 CodeX \u5DE5\u4F5C\u533A",
-    noCodexWorkspaces: "\u8FD8\u6CA1\u6709 CodeX \u5DE5\u4F5C\u533A\u3002",
+    addCodexWorkspace: "\u6DFB\u52A0 Codex \u5DE5\u4F5C\u533A",
+    noCodexWorkspaces: "\u8FD8\u6CA1\u6709 Codex \u5DE5\u4F5C\u533A\u3002",
     cancelAddWorkspace: "\u53D6\u6D88",
     confirmAddWorkspace: "\u786E\u8BA4\u5E76\u6253\u5F00",
     showAllWorkspaces: "\u663E\u793A\u5168\u90E8 DSH \u5DE5\u4F5C\u533A",
-    showAllCodexWorkspaces: "\u663E\u793A\u5168\u90E8 CodeX \u5DE5\u4F5C\u533A",
+    showAllCodexWorkspaces: "\u663E\u793A\u5168\u90E8 Codex \u5DE5\u4F5C\u533A",
     remoteModeDsh: "\u8FDC\u7A0BDSH \xB7 ",
     remoteModeCodex: "\u8FDC\u7A0BCodex \xB7 ",
     remoteNetworkP2p: "P2P",
@@ -704,7 +704,7 @@
     accountPasswordLogin: "\u8D26\u53F7\u5BC6\u7801",
     qrLoginExpired: "\u4E8C\u7EF4\u7801\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002",
     refreshQrCode: "\u5237\u65B0\u4E8C\u7EF4\u7801",
-    codexVirtualWorkspace: "CodeX \u5DE5\u4F5C\u533A",
+    codexVirtualWorkspace: "Codex \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
   };
   function codexUnavailableKey(code) {
@@ -2219,7 +2219,7 @@
                 )
               ),
               notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, notice),
-              error === void 0 ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
+              error === void 0 || error === codexNotice ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
             )
           )) : null
         );
