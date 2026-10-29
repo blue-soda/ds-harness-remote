@@ -2278,6 +2278,20 @@ window.__ModuleLoader__.load({
         setShowAllCodexWorkspaces(false)
         setOpen(true)
         await refreshRemote()
+          // Opening waits for the automatic authorization the way a clicked sign-in does: the settings read only starts it,
+          // so read the device back for up to ten seconds - bounded, inside this action, not a standing poll.
+for (let attempt = 0; attempt < 10; attempt++) {
+            const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
+            if (list !== undefined) {
+              setDevices(list)
+              authorizedOnce.current = true
+              setNeedsAuthorization(false)
+              setAuthorizationResolved(true)
+              await refreshRemote()
+              return
+            }
+            await new Promise(resolve => { setTimeout(resolve, 1_000) })
+           }
       }
 
       React.useEffect(() => {

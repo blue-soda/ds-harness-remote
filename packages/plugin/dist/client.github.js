@@ -1609,6 +1609,17 @@
           }
         }, show = async () => {
           setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setOpen(!0), await refreshRemote();
+          for (let attempt = 0; attempt < 10; attempt++) {
+            let list = await props.control("devices").catch(() => {
+            });
+            if (list !== void 0) {
+              setDevices(list), authorizedOnce.current = !0, setNeedsAuthorization(!1), setAuthorizationResolved(!0), await refreshRemote();
+              return;
+            }
+            await new Promise((resolve) => {
+              setTimeout(resolve, 1e3);
+            });
+          }
         };
         React.useEffect(() => {
           if (!(!open || selectedHost !== void 0))
