@@ -1783,6 +1783,12 @@ window.__ModuleLoader__.load({
     }): unknown {
       const { t } = props
       const [open, setOpen] = React.useState(false)
+  // Opening the card re-reads the settings: that read is what reconciles with DSH's session, and the card stays mounted
+  // between openings, so a mount-only read would miss a DSH sign-in or sign-out that happened meanwhile.
+  React.useEffect(() => {
+    if (!open) return
+    void props.control('settings.get').catch(() => undefined)
+  }, [open])
       const [status, setStatus] = React.useState<RemoteStatus | undefined>(undefined)
       const [devices, setDevices] = React.useState<RemoteDevice[]>([])
       const [selectedHost, setSelectedHost] = React.useState<RemoteDevice | undefined>(undefined)
@@ -2344,7 +2350,14 @@ window.__ModuleLoader__.load({
           void (async () => {
             const next = await props.control<RemoteStatus>('status').catch(() => undefined)
             if (next !== undefined) setStatus(next)
-            const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
+            const authorization = await props.control<{ stored?: boolean }>('authorization.local').catch(() => undefined)
+      if (authorization?.stored === false) {
+        // The reconciliation just cleared this device (DSH signed out): the card must not keep showing a session.
+        setDevices([])
+        setNeedsAuthorization(true)
+        return
+      }
+      const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
             if (list === undefined) return
             setDevices(list)
             authorizedOnce.current = true
