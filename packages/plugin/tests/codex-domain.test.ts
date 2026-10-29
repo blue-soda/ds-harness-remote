@@ -84,7 +84,12 @@ describe('CodexRemoteDomain', () => {
     await domain.start()
 
     const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-    expect(result).toMatchObject({ data: [
+    // Row keys keep forked rows apart; the real id is the part before the first separator.
+    const rows = {
+      ...(result as Record<string, unknown>),
+      data: (result as { data: Array<Record<string, unknown>> }).data.map(row => ({ ...row, id: String(row.id).split('~')[0] })),
+    }
+    expect(rows).toMatchObject({ data: [
       { id: 'allowed-thread', cwd: root, projectId: 'allowed-project' },
       { id: 'outside-thread', cwd: outside, projectId: 'outside-project' },
       { id: 'project-only-thread', projectId: 'allowed-project' },
@@ -131,7 +136,12 @@ describe('CodexRemoteDomain', () => {
       await domain.start()
 
       const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-      expect(result).toMatchObject({ data: [
+      // Row keys keep forked rows apart; the real id is the part before the first separator.
+      const rows = {
+        ...(result as Record<string, unknown>),
+        data: (result as { data: Array<Record<string, unknown>> }).data.map(row => ({ ...row, id: String(row.id).split('~')[0] })),
+      }
+      expect(rows).toMatchObject({ data: [
         { id: 'allowed-thread', cwd: root },
         { id: 'outside-thread', cwd: outside },
         { id: 'unprojected-thread', cwd: `${root}-unprojected` },
@@ -139,6 +149,15 @@ describe('CodexRemoteDomain', () => {
       expect(JSON.stringify(result)).not.toContain('project-only-thread')
       expect(JSON.stringify(result)).not.toContain('missing-cwd')
       expect(app.calls.filter(call => call.method === 'thread/list')).toHaveLength(1)
+      // A Codex fork keeps the thread id, so the rows have to come back under unique keys - and whatever the
+      // client sends back from a row key must reach the App Server as the real thread id.
+      const rowKeys = (result as { data: Array<{ id: string }> }).data.map(row => row.id)
+      expect(new Set(rowKeys).size).toBe(rowKeys.length)
+      expect(rowKeys.every(key => key.includes('~'))).toBe(true)
+      await domain.call('connection-1', { method: 'thread/resume', params: { threadId: rowKeys[0] } })
+      expect(app.calls.find(call => call.method === 'thread/resume')?.params).toMatchObject({
+        threadId: rowKeys[0]?.split('~')[0],
+      })
       await expect(domain.call('connection-1', {
         method: 'thread/read', params: { threadId: 'unprojected-thread' },
       })).resolves.toMatchObject({ thread: { id: 'unprojected-thread', cwd: `${root}-unprojected` } })

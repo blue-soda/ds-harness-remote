@@ -25014,12 +25014,24 @@ var CodexRemoteDomain = class {
         idempotencyKey: call.params.idempotencyKey
       }));
     }
+    if (isRecord12(call.params) && typeof call.params.threadId === "string") {
+      const rowKey = call.params.threadId;
+      const separator = rowKey.indexOf("~");
+      if (separator > 0) call.params.threadId = rowKey.slice(0, separator);
+    }
     if (call.method === "thread/list") {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
-      return filterThreadListByWorkspaceAuthority(
+      const authorized = filterThreadListByWorkspaceAuthority(
         result,
         await this.readWorkspaceAuthority(result.data)
       );
+      return {
+        ...authorized,
+        data: authorized.data.map((row, index) => ({
+          ...row,
+          id: `${String(row.id)}~${String(row.createdAt ?? "")}~${index}`
+        }))
+      };
     }
     if (call.method === "thread/start") {
       const cwd = await this.requireCodexWorkspacePath(call.params.cwd);
