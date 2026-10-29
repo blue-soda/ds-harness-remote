@@ -90,6 +90,8 @@ interface RemoteStatus {
   }
   remoteFeatures?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean }
   network?: RemoteNetworkDetails
+  /** This device, so the panel can tell when its own host connection shows up online. */
+  deviceId?: string
   hostAuthorizationAvailable: boolean
   /** True while the plugin is exchanging DSH's credential for this device's Server credentials. */
   authorizing?: boolean
@@ -2323,20 +2325,26 @@ window.__ModuleLoader__.load({
        * A signed-out DSH has no grant to lend, so the Host starts the official
        * browser authorization instead and hands back the page to open.
        */
-      // The plugin authorizes itself from DSH's credential. While that is in flight the card says so, and once it
-      // succeeds the card fills itself in instead of waiting to be reopened.
+      // Two waits live here. While the plugin authorizes itself from DSH's credential (or a clicked sign-in runs), the
+      // device list is unreadable; once it is readable this device may still be offline until its host connection
+      // lands. Both are polled, so the card ends on "connected" without the user reopening it.
       React.useEffect(() => {
-        if (!needsAuthorization) return
+        const self = status?.deviceId
+        const online = self !== undefined && devices.some(device => device.deviceId === self && device.online === true)
+        if (online) return
         const timer = window.setInterval(() => {
-          void props.control<RemoteDevice[]>('devices').then(async list => {
+          void (async () => {
+            const next = await props.control<RemoteStatus>('status').catch(() => undefined)
+            if (next !== undefined) setStatus(next)
+            const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
+            if (list === undefined) return
             setDevices(list)
             setNeedsAuthorization(false)
             setAuthorizationResolved(true)
-            setStatus(await props.control<RemoteStatus>('status').catch(() => undefined))
-          }).catch(() => undefined)
+          })()
         }, 1_500)
         return () => window.clearInterval(timer)
-      }, [needsAuthorization])
+      }, [devices, status?.deviceId])
 
       const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
         const transport = (globalThis as typeof globalThis & {

@@ -1631,16 +1631,20 @@
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCodexNotice(void 0), setCodexAvailable(!1), codexProbeAvailable.current = !1, setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
         };
         React.useEffect(() => {
-          if (!needsAuthorization) return;
+          let self = status?.deviceId;
+          if (self !== void 0 && devices.some((device) => device.deviceId === self && device.online === !0)) return;
           let timer = window.setInterval(() => {
-            props.control("devices").then(async (list) => {
-              setDevices(list), setNeedsAuthorization(!1), setAuthorizationResolved(!0), setStatus(await props.control("status").catch(() => {
-              }));
-            }).catch(() => {
-            });
+            (async () => {
+              let next = await props.control("status").catch(() => {
+              });
+              next !== void 0 && setStatus(next);
+              let list = await props.control("devices").catch(() => {
+              });
+              list !== void 0 && (setDevices(list), setNeedsAuthorization(!1), setAuthorizationResolved(!0));
+            })();
           }, 1500);
           return () => window.clearInterval(timer);
-        }, [needsAuthorization]);
+        }, [devices, status?.deviceId]);
         let requestDeepSeekSignIn = async () => {
           let transport = globalThis.__DSH_TRANSPORT__, callbackOrigin = transport?.streamBaseUrl !== void 0 ? new URL(transport.streamBaseUrl).origin : window.location.origin, result = await props.control("settings.configure", {
             // No `role`: a device has one identity, and the control writes only the Server address plus this
