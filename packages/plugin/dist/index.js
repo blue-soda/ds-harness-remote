@@ -26246,7 +26246,6 @@ var PluginControlRuntime = class {
    *
    * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
    */
-  deepSeekSignIn;
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -26355,6 +26354,12 @@ var PluginControlRuntime = class {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
       }
       const session = await this.deepseekSession.read();
+      const present = session !== void 0;
+      if (present !== this.deepSeekSessionPresent) {
+        this.deepSeekSessionPresent = present;
+        this.deepSeekReconcileFailures = 0;
+        this.deepSeekReconciledAt = 0;
+      }
       if (session === void 0) {
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
@@ -26362,7 +26367,6 @@ var PluginControlRuntime = class {
           locale: typeof value.locale === "string" ? value.locale : "en",
           timezoneOffsetSeconds: typeof value.timezoneOffsetSeconds === "number" ? value.timezoneOffsetSeconds : 0
         });
-        this.deepSeekSignIn = true;
         return {
           status: "deepseek-sign-in-required",
           ...started.authorizeUrl === void 0 ? {} : { authorizeUrl: started.authorizeUrl }
@@ -26375,7 +26379,6 @@ var PluginControlRuntime = class {
         this.verifiedDeepSeekToken = session.token;
         this.verifiedDeepSeekAuthorization = authorization;
       }
-      this.deepSeekSignIn = void 0;
     } else {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
@@ -26495,7 +26498,6 @@ var PluginControlRuntime = class {
     const config = resolveConfig(this.settings.get());
     this.verifiedDeepSeekToken = void 0;
     this.verifiedDeepSeekAuthorization = void 0;
-    this.deepSeekSignIn = void 0;
     if (config.serverUrl !== void 0) {
       await Promise.all([
         this.client?.clearClientAuthorization(),
@@ -26543,6 +26545,8 @@ var PluginControlRuntime = class {
   deepSeekReconciledAt = 0;
   /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
   deepSeekReconcileFailures = 0;
+  /** Whether DSH held a DeepSeek session on the previous reconciliation. */
+  deepSeekSessionPresent = false;
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
   /**
@@ -26565,7 +26569,7 @@ var PluginControlRuntime = class {
     try {
       const session = await this.deepseekSession.read();
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
-      if (session !== void 0 && !authorized && this.deepSeekSignIn !== true) {
+      if (session !== void 0 && !authorized) {
         await this.configure({ provider: "deepseek" });
       } else if (session === void 0 && authorized) {
         await this.logout();

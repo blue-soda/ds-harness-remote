@@ -141,7 +141,6 @@ export class PluginControlRuntime {
    *
    * `undefined` means no sign-in is in flight, which is also the state after a completed authorization.
    */
-  private deepSeekSignIn?: boolean
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
     const statusStream = new ControlStatusStream(() => this.streamStatus())
@@ -269,6 +268,13 @@ export class PluginControlRuntime {
         throw new ClientModeError('METHOD_NOT_ALLOWED', 'DeepSeek account sign-in is unavailable in this profile.')
       }
       const session = await this.deepseekSession.read()
+      const present = session !== undefined
+      if (present !== this.deepSeekSessionPresent) {
+        // DSH just signed in (or out): answer on the next poll, not after a backoff that belonged to the old state.
+        this.deepSeekSessionPresent = present
+        this.deepSeekReconcileFailures = 0
+        this.deepSeekReconciledAt = 0
+      }
       // The grant counts once the user has asked for this sign-in: they completed the browser round trip, so the
       // account DSH holds now is the one they authorized. What DSH held *before* any click is not an answer to a
       // question nobody asked, and that is the case this gate exists for.
@@ -286,7 +292,6 @@ export class PluginControlRuntime {
         })
         // The user asked for this sign-in; the next poll may authorize with whatever grant the browser round trip
         // left behind.
-        this.deepSeekSignIn = true
         return {
           status: 'deepseek-sign-in-required',
           ...(started.authorizeUrl === undefined ? {} : { authorizeUrl: started.authorizeUrl }),
@@ -302,7 +307,6 @@ export class PluginControlRuntime {
         this.verifiedDeepSeekToken = session.token
         this.verifiedDeepSeekAuthorization = authorization
       }
-      this.deepSeekSignIn = undefined
     } else {
       if (typeof value.email !== 'string' || typeof value.password !== 'string') {
         throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required for account authorization.')
@@ -440,7 +444,6 @@ export class PluginControlRuntime {
     this.verifiedDeepSeekToken = undefined
     this.verifiedDeepSeekAuthorization = undefined
     // A sign-in that was in flight belongs to the session being released; the next click starts a new one.
-    this.deepSeekSignIn = undefined
     if (config.serverUrl !== undefined) {
       await Promise.all([
         this.client?.clearClientAuthorization(),
@@ -495,6 +498,8 @@ export class PluginControlRuntime {
   private deepSeekReconciledAt = 0
   /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
   private deepSeekReconcileFailures = 0
+  /** Whether DSH held a DeepSeek session on the previous reconciliation. */
+  private deepSeekSessionPresent = false
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
 
@@ -519,7 +524,7 @@ export class PluginControlRuntime {
     try {
       const session = await this.deepseekSession.read()
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
-      if (session !== undefined && !authorized && this.deepSeekSignIn !== true) {
+      if (session !== undefined && !authorized) {
         await this.configure({ provider: 'deepseek' })
       } else if (session === undefined && authorized) {
         await this.logout()
