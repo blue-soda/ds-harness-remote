@@ -26578,7 +26578,7 @@ var PluginControlRuntime = class {
     }
   }
   async settingsView() {
-    await this.reconcileWithDeepSeek();
+    void this.reconcileWithDeepSeek();
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
     const associations = await this.associations(config);
     const association = associations.host;

@@ -535,7 +535,10 @@ export class PluginControlRuntime {
   }
 
   private async settingsView(): Promise<PluginSettingsView> {
-    await this.reconcileWithDeepSeek()
+    // Not awaited: the reconciliation reaches the Server, and this view answers the control route that the
+    // reconciliation itself may call - awaiting it deadlocked that call instead of showing the previous state for
+    // one more poll.
+    void this.reconcileWithDeepSeek()
     const config = this.settings === undefined ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()))
     const associations = await this.associations(config)
     // One identity means one association: the panel no longer has a role to pick.
