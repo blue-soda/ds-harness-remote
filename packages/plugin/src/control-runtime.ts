@@ -427,7 +427,7 @@ export class PluginControlRuntime {
   }
 
 
-  private async logout(): Promise<PluginSettingsView & { deepseekSignedOut: boolean }> {
+  private async logout(options: { releaseDeepSeek?: boolean } = {}): Promise<PluginSettingsView & { deepseekSignedOut: boolean }> {
     if (this.settings === undefined) {
       throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     }
@@ -454,7 +454,8 @@ export class PluginControlRuntime {
     let deepseekSignedOut = false
     if (this.deepseekSession !== undefined) {
       try {
-        deepseekSignedOut = await this.deepseekSession.signOut()
+        // Only an explicit sign-out releases DSH; the automatic path must never sign DSH out on its own.
+        deepseekSignedOut = options.releaseDeepSeek === false ? false : await this.deepseekSession.signOut()
       } catch (error) {
       // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is
       // invisible to the user, who only sees the sign-in button.
@@ -491,6 +492,8 @@ export class PluginControlRuntime {
     return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
   }
   private deepSeekReconciledAt = 0
+  /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
+  private absentDeepSeekSessions = 0
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
 
@@ -509,6 +512,7 @@ export class PluginControlRuntime {
     this.reconcilingWithDeepSeek = true
     try {
       const session = await this.deepseekSession.read()
+      this.absentDeepSeekSessions = session === undefined ? this.absentDeepSeekSessions + 1 : 0
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
       if (session !== undefined && !authorized) {
@@ -519,8 +523,9 @@ export class PluginControlRuntime {
         } finally {
           if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
         }
-      } else if (session === undefined && authorized) {
-        await this.logout()
+      } else if (this.absentDeepSeekSessions >= 2 && authorized) {
+        // DSH is already signed out, so nothing is released: clear this device only.
+        await this.logout({ releaseDeepSeek: false })
       }
     } catch (error) {
       // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is

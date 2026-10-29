@@ -26489,7 +26489,7 @@ var PluginControlRuntime = class {
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));
     return this.settingsView();
   }
-  async logout() {
+  async logout(options = {}) {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
@@ -26507,7 +26507,7 @@ var PluginControlRuntime = class {
     let deepseekSignedOut = false;
     if (this.deepseekSession !== void 0) {
       try {
-        deepseekSignedOut = await this.deepseekSession.signOut();
+        deepseekSignedOut = options.releaseDeepSeek === false ? false : await this.deepseekSession.signOut();
       } catch (error) {
         console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
         deepseekSignedOut = false;
@@ -26541,6 +26541,8 @@ var PluginControlRuntime = class {
     return this.client === void 0 ? this.hostOnlyStatus() : await this.client.status();
   }
   deepSeekReconciledAt = 0;
+  /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
+  absentDeepSeekSessions = 0;
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
   /**
@@ -26557,6 +26559,7 @@ var PluginControlRuntime = class {
     this.reconcilingWithDeepSeek = true;
     try {
       const session = await this.deepseekSession.read();
+      this.absentDeepSeekSessions = session === void 0 ? this.absentDeepSeekSessions + 1 : 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
       if (session !== void 0 && !authorized) {
@@ -26566,8 +26569,8 @@ var PluginControlRuntime = class {
         } finally {
           if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
         }
-      } else if (session === void 0 && authorized) {
-        await this.logout();
+      } else if (this.absentDeepSeekSessions >= 2 && authorized) {
+        await this.logout({ releaseDeepSeek: false });
       }
     } catch (error) {
       console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
