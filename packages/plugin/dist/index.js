@@ -26557,29 +26557,29 @@ var PluginControlRuntime = class {
    */
   async reconcileWithDeepSeek() {
     if (this.deepseekSession === void 0 || this.reconcilingWithDeepSeek) return;
-    if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
-    this.deepSeekReconciledAt = Date.now();
     this.reconcilingWithDeepSeek = true;
     try {
       const session = await this.deepseekSession.read();
       if (this.client !== void 0) this.client.hasDeepSeekSession = session !== void 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
-      if (session !== void 0 && !authorized) {
-        if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
-        void (async () => {
-          try {
-            await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
-          } catch {
-          } finally {
-            if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
-          }
-        })();
-      } else if (session === void 0 && authorized) {
+      if (session === void 0 && authorized) {
         await this.logout({ releaseDeepSeek: false });
+        return;
       }
-    } catch (error) {
-      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
+      if (session === void 0 || authorized) return;
+      if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
+      this.deepSeekReconciledAt = Date.now();
+      if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
+      void (async () => {
+        try {
+          await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
+        } catch (error) {
+          console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
+        } finally {
+          if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
+        }
+      })();
     } finally {
       this.reconcilingWithDeepSeek = false;
     }

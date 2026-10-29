@@ -509,37 +509,33 @@ export class PluginControlRuntime {
    */
   private async reconcileWithDeepSeek(): Promise<void> {
     if (this.deepseekSession === undefined || this.reconcilingWithDeepSeek) return
-    if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
-    this.deepSeekReconciledAt = Date.now()
     this.reconcilingWithDeepSeek = true
     try {
       const session = await this.deepseekSession.read()
       if (this.client !== undefined) this.client.hasDeepSeekSession = session !== undefined
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
-      if (session !== undefined && !authorized) {
-        // The panel polls this flag: an automatic authorization in flight must not look like "never signed in".
-        if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
-        // Not awaited: opening the card waits on the local half only (the sign-out below must be visible at once),
-        // while the exchange takes as long as the platform check.
-        void (async () => {
-          try {
-            await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
-          } catch {
-            // Left as it was; the next settings read tries again.
-          } finally {
-            if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
-          }
-        })()
-      } else if (session === undefined && authorized) {
-        // DSH is already signed out, so nothing is released: clear this device only.
+      if (session === undefined && authorized) {
+        // Never throttled: this is the local half, and opening the card must already reflect a DSH sign-out.
         await this.logout({ releaseDeepSeek: false })
+        return
       }
-    } catch (error) {
-      // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is
-      // invisible to the user, who only sees the sign-in button.
-      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
-      // Leave the state as it is: the next poll tries again.
+      if (session === undefined || authorized) return
+      // The exchange is the expensive half (a platform round trip), so it keeps the ten-second throttle.
+      if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
+      this.deepSeekReconciledAt = Date.now()
+      if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
+      // Not awaited: opening the card waits on the local half only, while the exchange takes as long as the platform
+      // check.
+      void (async () => {
+        try {
+          await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
+        } catch (error) {
+          console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
+        } finally {
+          if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
+        }
+      })()
     } finally {
       this.reconcilingWithDeepSeek = false
     }
