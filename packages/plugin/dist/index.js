@@ -26567,11 +26567,14 @@ var PluginControlRuntime = class {
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
       if (session !== void 0 && !authorized) {
         if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
-        try {
-          await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
-        } finally {
-          if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
-        }
+        void (async () => {
+          try {
+            await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
+          } catch {
+          } finally {
+            if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
+          }
+        })();
       } else if (session === void 0 && authorized) {
         await this.logout({ releaseDeepSeek: false });
       }
@@ -26586,7 +26589,7 @@ var PluginControlRuntime = class {
    * plugin has to follow. Only local reads - the exchange itself is throttled to one per ten seconds.
    */
   async settingsView() {
-    void this.reconcileWithDeepSeek();
+    await this.reconcileWithDeepSeek();
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
     const associations = await this.associations(config);
     const association = associations.host;
