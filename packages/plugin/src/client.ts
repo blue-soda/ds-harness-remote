@@ -91,6 +91,8 @@ interface RemoteStatus {
   remoteFeatures?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean }
   network?: RemoteNetworkDetails
   hostAuthorizationAvailable: boolean
+  /** True while the plugin is exchanging DSH's credential for this device's Server credentials. */
+  authorizing?: boolean
   host?: {
     deviceId?: string
     configured: boolean
@@ -2321,6 +2323,21 @@ window.__ModuleLoader__.load({
        * A signed-out DSH has no grant to lend, so the Host starts the official
        * browser authorization instead and hands back the page to open.
        */
+      // The plugin authorizes itself from DSH's credential. While that is in flight the card says so, and once it
+      // succeeds the card fills itself in instead of waiting to be reopened.
+      React.useEffect(() => {
+        if (!needsAuthorization) return
+        const timer = window.setInterval(() => {
+          void props.control<RemoteDevice[]>('devices').then(async list => {
+            setDevices(list)
+            setNeedsAuthorization(false)
+            setAuthorizationResolved(true)
+            setStatus(await props.control<RemoteStatus>('status').catch(() => undefined))
+          }).catch(() => undefined)
+        }, 1_500)
+        return () => window.clearInterval(timer)
+      }, [needsAuthorization])
+
       const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
         const transport = (globalThis as typeof globalThis & {
           __DSH_TRANSPORT__?: { streamBaseUrl?: string }
@@ -2658,8 +2675,11 @@ window.__ModuleLoader__.load({
                           title: t('changeServerUrl'), 'aria-label': t('changeServerUrl'),
                           onClick: () => setEditingServerUrl(true),
                         }, loginServerUrl)),
-                    React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '', onClick: () => void signInClient() },
-                      t(busy ? 'signingIn' : 'deepseekSignIn')),
+                    React.createElement('button', {
+                      type: 'button',
+                      disabled: busy || status?.authorizing === true || loginServerUrl.trim() === '',
+                      onClick: () => void signInClient(),
+                    }, t(busy || status?.authorizing === true ? 'signingIn' : 'deepseekSignIn')),
                     awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' },
                       t(pendingAuthorizeUrl === undefined ? 'deepseekSignInRequesting' : 'deepseekSignInWaiting'),
                       pendingAuthorizeUrl === undefined ? null : React.createElement('a', {

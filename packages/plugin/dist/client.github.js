@@ -1629,7 +1629,19 @@
         }, [open, selectedHost]);
         let chooseAnotherHost = () => {
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCodexNotice(void 0), setCodexAvailable(!1), codexProbeAvailable.current = !1, setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
-        }, requestDeepSeekSignIn = async () => {
+        };
+        React.useEffect(() => {
+          if (!needsAuthorization) return;
+          let timer = window.setInterval(() => {
+            props.control("devices").then(async (list) => {
+              setDevices(list), setNeedsAuthorization(!1), setAuthorizationResolved(!0), setStatus(await props.control("status").catch(() => {
+              }));
+            }).catch(() => {
+            });
+          }, 1500);
+          return () => window.clearInterval(timer);
+        }, [needsAuthorization]);
+        let requestDeepSeekSignIn = async () => {
           let transport = globalThis.__DSH_TRANSPORT__, callbackOrigin = transport?.streamBaseUrl !== void 0 ? new URL(transport.streamBaseUrl).origin : window.location.origin, result = await props.control("settings.configure", {
             // No `role`: a device has one identity, and the control writes only the Server address plus this
             // sign-in. Sending a role here was the last thing that made one look like a runtime switch.
@@ -1909,11 +1921,11 @@
                         onClick: () => setEditingServerUrl(!0)
                       }, loginServerUrl)
                     ),
-                    React.createElement(
-                      "button",
-                      { type: "button", disabled: busy || loginServerUrl.trim() === "", onClick: () => void signInClient() },
-                      t(busy ? "signingIn" : "deepseekSignIn")
-                    ),
+                    React.createElement("button", {
+                      type: "button",
+                      disabled: busy || status?.authorizing === !0 || loginServerUrl.trim() === "",
+                      onClick: () => void signInClient()
+                    }, t(busy || status?.authorizing === !0 ? "signingIn" : "deepseekSignIn")),
                     awaitingDeepSeek ? React.createElement(
                       "p",
                       { className: "dshRemoteServiceAddress" },
