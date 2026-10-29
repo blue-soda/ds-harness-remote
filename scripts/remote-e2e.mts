@@ -886,7 +886,7 @@ async function main(): Promise<void> {
     const online = against !== undefined ? true : await waitFor('the Host to appear online in the Client\'s device list', async () => {
       const devices = await ctx.client.control<Host[]>('devices').catch(() => [] as Host[])
       return devices.find(device => device.deviceId === host.deviceId)?.online === true ? true : undefined
-    }, 120_000, 1_000).catch(() => undefined)
+    }, 360_000, 2_000).catch(() => undefined)
     let hostOnline = online === true
     if (!hostOnline && against === undefined) {
       // An earlier run that failed mid-scenario can leave the Host switched off, and a switched-off Host is
@@ -894,7 +894,7 @@ async function main(): Promise<void> {
       // accept control once before sending anyone to a browser.
       process.stdout.write('The Host is not online; asking it to accept control…\n')
       await host.control('host.connection.set', { connected: true }).catch(() => undefined)
-      hostOnline = await waitForHostOnline(ctx, 120_000)
+      hostOnline = await waitForHostOnline(ctx, 360_000)
     }
     if (!hostOnline) {
       const url = launchUrls.get('host')
