@@ -1636,8 +1636,6 @@
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCodexNotice(void 0), setCodexAvailable(!1), codexProbeAvailable.current = !1, setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
         };
         React.useEffect(() => {
-          let self = status?.deviceId;
-          if (self !== void 0 && devices.some((device) => device.deviceId === self && device.online === !0)) return;
           let timer = window.setInterval(() => {
             (async () => {
               let next = await props.control("status").catch(() => {

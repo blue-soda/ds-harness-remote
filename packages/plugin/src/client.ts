@@ -2343,9 +2343,7 @@ window.__ModuleLoader__.load({
       // device list is unreadable; once it is readable this device may still be offline until its host connection
       // lands. Both are polled, so the card ends on "connected" without the user reopening it.
       React.useEffect(() => {
-        const self = status?.deviceId
-        const online = self !== undefined && devices.some(device => device.deviceId === self && device.online === true)
-        if (online) return
+        // No early exit: this device stays online until the reconciliation clears it on a DSH sign-out, and that is
         const timer = window.setInterval(() => {
           void (async () => {
             const next = await props.control<RemoteStatus>('status').catch(() => undefined)
