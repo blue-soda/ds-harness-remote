@@ -237,31 +237,14 @@ export class CodexRemoteDomain {
         idempotencyKey: call.params.idempotencyKey,
       }))
     }
-    // Forks are separate rows that share one thread id, so the list hands each row out under a unique key
-    // (`<id>~<createdAt>~<n>`). Anything that comes back with such a key is resolved to the real id here, before the
-    // thread authority or an upstream call sees it: a resume must never be sent a row key.
-    if (isRecord(call.params) && typeof call.params.threadId === 'string') {
-      const rowKey: string = call.params.threadId
-      const separator = rowKey.indexOf('~')
-      if (separator > 0) (call.params as { threadId: string }).threadId = rowKey.slice(0, separator)
-    }
     if (call.method === 'thread/list') {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params)) as {
         data: Record<string, unknown>[]
       }
-      const authorized = filterThreadListByWorkspaceAuthority(
+      return filterThreadListByWorkspaceAuthority(
         result,
         await this.readWorkspaceAuthority(result.data),
-      ) as { data: Record<string, unknown>[] }
-      // A fork keeps the thread id and differs by name, preview and createdAt. The row key carries createdAt plus the
-      // row position so two rows can never collide, and the id stays first so it can be resolved above.
-      return {
-        ...authorized,
-        data: authorized.data.map((row, index) => ({
-          ...row,
-          id: `${String(row.id)}~${String(row.createdAt ?? '')}~${index}`,
-        })),
-      }
+      )
     }
     if (call.method === 'thread/start') {
       const cwd = await this.requireCodexWorkspacePath(call.params.cwd as string)
