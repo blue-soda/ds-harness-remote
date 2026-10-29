@@ -14109,7 +14109,7 @@ var HostServerConnection = class {
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
         }
-        if (code === "DEVICE_REVOKED") {
+        if (code === "DEVICE_REVOKED" || code === "AUTH_INVALID") {
           try {
             await this.api.clearAuthorization();
           } catch (clearError) {

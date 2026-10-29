@@ -200,7 +200,9 @@ export class HostServerConnection {
               ? 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.'
               : 'Host authorization failed. Run /remote login or authorize this Host again in Remote settings.')
         }
-        if (code === 'DEVICE_REVOKED') {
+        // An invalid credential is as dead as a revoked one: keep it and the reconciler believes this device is still
+        // authorized, so the automatic re-authorization from DSH's session never runs and the panel just says "sign in".
+        if (code === 'DEVICE_REVOKED' || code === 'AUTH_INVALID') {
           try {
             await this.api.clearAuthorization()
           } catch (clearError) {

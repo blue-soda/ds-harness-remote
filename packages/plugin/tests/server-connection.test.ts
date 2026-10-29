@@ -341,7 +341,10 @@ describe('HostServerConnection', () => {
             expect(server.isReconnecting()).toBe(false)
           }
           expect(api.refreshCredentials).toHaveBeenCalledTimes(scenario === 'refresh-rejected' ? 1 : 0)
-          expect(api.clearAuthorization).toHaveBeenCalledTimes(scenario.startsWith('revoked') ? 1 : 0)
+          // A revoked credential and an invalid one are both dead: both are cleared so the reconciler re-authorizes.
+          expect(api.clearAuthorization).toHaveBeenCalledTimes(
+            scenario.startsWith('revoked') || scenario === 'refresh-rejected' ? 1 : 0,
+          )
           if (scenario !== 'stopped') expect(server.lastError()).toBe(
             scenario.startsWith('replaced') ? 'CONNECTION_REPLACED' : scenario.startsWith('revoked') ? 'DEVICE_REVOKED' : 'AUTH_INVALID',
           )
