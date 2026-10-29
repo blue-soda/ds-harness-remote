@@ -482,7 +482,7 @@ export class PluginControlRuntime {
         hostControl: { enabled: current.hostControl?.enabled ?? true, paused: !connected },
       }))
     }
-    return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
+    // The panel polls status while it is open, so a DSH sign-in must be noticed here too - not only when the card is\n    // opened or refreshed, which is when settings are read.\n    void this.reconcileWithDeepSeek()\n    return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
   }
   private deepSeekReconciledAt = 0
   /** Guards against re-entry through configure(), which reads the settings view back. */
