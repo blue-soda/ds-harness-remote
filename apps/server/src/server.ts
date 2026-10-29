@@ -102,6 +102,13 @@ export function createRemoteServer(config: Config) {
   /** Web sessions: digest -> owning account and expiry. */
   const sessions = new Map<string, { account: string; expires: number }>()
   const limits = new Map<string, { count: number; until: number }>()
+  /** Per-minute limits are environment-tunable: a self-hosted Server behind one NAT IP needs more than a default. */
+  function rateLimit(name: string, fallback: number): number {
+    const raw = process.env[`DSH_SERVER_RATE_${name.toUpperCase()}`]
+    const value = raw === undefined ? Number.NaN : Number(raw)
+    return Number.isFinite(value) && value > 0 ? value : fallback
+  }
+
   function rate(key: string, max: number) {
     for (const [k, v] of limits) if (v.until < Date.now()) limits.delete(k)
     let entry = limits.get(key)
@@ -231,9 +238,9 @@ export function createRemoteServer(config: Config) {
       res.end(asset); return
     }
     if (method === 'GET' && (path === '/health' || path === '/healthz' || path === '/ready')) { json(res, 200, { status: 'ok' }); return }
-    rate(`api:${req.socket.remoteAddress ?? ''}`, 240)
+    rate(`api:${req.socket.remoteAddress ?? ''}`, rateLimit('api', 240))
     if (method === 'POST' && path === '/api/v1/auth/login') {
-      rate(`login:${req.socket.remoteAddress ?? ''}`, 20)
+      rate(`login:${req.socket.remoteAddress ?? ''}`, rateLimit('login', 20))
       // A QR-only deployment refuses password entry outright, so the bound
       // external identity stays the single source of truth for the account.
       if (config.passwordLoginDisabled === true) throw new ApiError('METHOD_NOT_ALLOWED', 403)
@@ -245,7 +252,7 @@ export function createRemoteServer(config: Config) {
     }
     if (method === 'POST' && path === '/api/v1/auth/deepseek') {
       if (deepseek === undefined) throw new ApiError('METHOD_NOT_FOUND', 404)
-      rate(`deepseek:${req.socket.remoteAddress ?? ''}`, 30)
+      rate(`deepseek:${req.socket.remoteAddress ?? ''}`, rateLimit('deepseek', 30))
       const { token } = deepseekSchema.parse(await body(req))
       // The grant is only ever used to ask the platform who it belongs to. It is
       // not stored, so a compromised Server yields accounts, not DeepSeek access.
@@ -268,7 +275,7 @@ export function createRemoteServer(config: Config) {
       json(res, 200, { ...profile(accountName), ...issueSession(res, accountName) }); return
     }
     if (method === 'POST' && path === '/api/v1/auth/register') {
-      rate(`register:${req.socket.remoteAddress ?? ''}`, 10)
+      rate(`register:${req.socket.remoteAddress ?? ''}`, rateLimit('register', 10))
       const registration = registerSchema.parse(await body(req))
       // Closed unless a registration code is configured; compare in constant time.
       if (config.registrationCode === undefined || config.registrationCode === ''
@@ -286,7 +293,7 @@ export function createRemoteServer(config: Config) {
       const requested = new URL(req.url ?? '/', url).searchParams.get('provider')
       // The provider reports its own name; a mismatch is a client bug worth surfacing.
       if (requested !== null && requested !== oauth.name) throw new ApiError('METHOD_NOT_FOUND', 404)
-      rate(`oauth:${req.socket.remoteAddress ?? ''}`, 60)
+      rate(`oauth:${req.socket.remoteAddress ?? ''}`, rateLimit('oauth', 60))
       for (const [key, session] of qrSessions) if (session.expires <= Date.now()) qrSessions.delete(key)
       if (qrSessions.size >= 256) throw new ApiError('RATE_LIMITED', 429)
       const qrId = `${oauth.name}-qr-${secret()}`
