@@ -1821,6 +1821,8 @@ window.__ModuleLoader__.load({
       const codexWorkspaceListId = 'dsh-remote-codex-workspace-list'
       const [busy, setBusy] = React.useState(false)
       const [needsAuthorization, setNeedsAuthorization] = React.useState(false)
+      // Sticky once true: a refresh that reads the old "not stored" answer must not flash the sign-in view.
+      const authorizedOnce = React.useRef(false)
       /**
        * Whether the local credential check has answered yet.
        *
@@ -1973,6 +1975,7 @@ window.__ModuleLoader__.load({
               setBusy(true)
               setError(undefined)
               setQrExpired(false)
+              authorizedOnce.current = true
               setNeedsAuthorization(false)
               try {
                 const [nextDevices, nextStatus] = await Promise.all([
@@ -2167,6 +2170,7 @@ window.__ModuleLoader__.load({
           setStatus(nextStatus)
           if (!nextStatus.available) {
             setDevices([])
+            authorizedOnce.current = true
             setNeedsAuthorization(false)
             setAuthorizationResolved(true)
             setSelectedHost(undefined)
@@ -2193,6 +2197,7 @@ window.__ModuleLoader__.load({
           } catch {
             // A Host without this endpoint keeps the old order: the Host list
             // first, corrected by the device query's outcome.
+            authorizedOnce.current = true
             setNeedsAuthorization(false)
           } finally {
             setAuthorizationResolved(true)
@@ -2205,7 +2210,7 @@ window.__ModuleLoader__.load({
             // the state a fresh device is in. Only apply that rule when the Host
             // answered the local-credential question; without it (an older Host)
             // the device query stays the only signal, as it always was.
-            if (storedLocally !== undefined) setNeedsAuthorization(authorizationStillNeeded(storedLocally, nextDevices.length))
+            if (!authorizedOnce.current && storedLocally !== undefined) setNeedsAuthorization(authorizationStillNeeded(storedLocally, nextDevices.length))
             if (selectedHost !== undefined) {
               const nextSelectedHost = nextDevices.find(device => device.deviceId === selectedHost.deviceId)
               if (nextSelectedHost === undefined) {
@@ -2228,6 +2233,7 @@ window.__ModuleLoader__.load({
             // stored credential has gone stale), and being signed out is not an error to report. The panel asks
             // for the sign-in the user can act on instead of describing what failed.
             setDevices([])
+            authorizedOnce.current = false
             setNeedsAuthorization(true)
             setSelectedHost(undefined)
             setWorkspaces([])
@@ -2339,6 +2345,7 @@ window.__ModuleLoader__.load({
             const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
             if (list === undefined) return
             setDevices(list)
+            authorizedOnce.current = true
             setNeedsAuthorization(false)
             setAuthorizationResolved(true)
           })()
@@ -2416,6 +2423,7 @@ window.__ModuleLoader__.load({
           }
           setDevices(await props.control<RemoteDevice[]>('devices'))
           setStatus(await props.control<RemoteStatus>('status'))
+          authorizedOnce.current = true
           setNeedsAuthorization(false)
           setAuthorizationResolved(true)
           // A message about a previous sign-out must not outlive a successful
@@ -2462,6 +2470,7 @@ window.__ModuleLoader__.load({
       await props.control('client.device.revoke')
       // The device is gone from the account, so the panel goes back to asking for authorization.
       setDevices([])
+      authorizedOnce.current = false
       setNeedsAuthorization(true)
       setStatus(await props.control<RemoteStatus>('status'))
     } catch (reason) {
@@ -2480,6 +2489,7 @@ window.__ModuleLoader__.load({
         try {
           await props.control('settings.logout')
           setDevices([])
+          authorizedOnce.current = false
           setNeedsAuthorization(true)
           setQrSession(undefined)
           setQrExpired(false)
