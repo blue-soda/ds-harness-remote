@@ -26214,7 +26214,6 @@ function isActiveWriterMessage(message) {
 }
 
 // src/control-runtime.ts
-var DEEPSEEK_RECONCILE_INTERVAL_MS = 1e4;
 var PluginControlRuntime = class {
   constructor(config, identityDirectory, settings, client, host, deepseekSession = void 0) {
     this.config = config;
@@ -26544,7 +26543,6 @@ var PluginControlRuntime = class {
     }
     return this.client === void 0 ? this.hostOnlyStatus() : await this.client.status();
   }
-  deepSeekReconciledAt = 0;
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
@@ -26568,8 +26566,6 @@ var PluginControlRuntime = class {
         return;
       }
       if (session === void 0 || authorized) return;
-      if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
-      this.deepSeekReconciledAt = Date.now();
       if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
       void (async () => {
         try {

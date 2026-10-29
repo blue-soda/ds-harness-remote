@@ -63,7 +63,6 @@ export interface DeepSeekSignInRequest {
  * forwards it once and forgets it.
  */
 /** How often DSH's session is reconciled with the Server authorization. */
-const DEEPSEEK_RECONCILE_INTERVAL_MS = 10_000
 
 export interface DeepSeekSessionSource {
   /** The signed-in account's platform grant, or undefined when signed out. */
@@ -494,7 +493,6 @@ export class PluginControlRuntime {
     }
     return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
   }
-  private deepSeekReconciledAt = 0
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
@@ -521,9 +519,6 @@ export class PluginControlRuntime {
         return
       }
       if (session === undefined || authorized) return
-      // The exchange is the expensive half (a platform round trip), so it keeps the ten-second throttle.
-      if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
-      this.deepSeekReconciledAt = Date.now()
       if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
       // Not awaited: opening the card waits on the local half only, while the exchange takes as long as the platform
       // check.
