@@ -2343,6 +2343,29 @@ window.__ModuleLoader__.load({
       // An unauthorized card with a DSH session is waiting for the automatic authorization, not idle: say "signing in".
   const signingIn = busy || status?.authorizing === true || (needsAuthorization && status?.hasDeepSeekSession === true)
 
+  // While the card says "signing in", read the state a few times so the successful authorization is noticed without
+  // a standing poll: at most five tries, one second apart, stopping as soon as the device is authorized.
+  React.useEffect(() => {
+    if (!signingIn) return
+    let tries = 0
+    const timer = window.setInterval(() => {
+      tries += 1
+      void (async () => {
+        const next = await props.control<RemoteStatus>('status').catch(() => undefined)
+        if (next !== undefined) setStatus(next)
+        const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
+        if (list !== undefined) {
+          setDevices(list)
+          authorizedOnce.current = true
+          setNeedsAuthorization(false)
+          setAuthorizationResolved(true)
+        }
+      })()
+      if (tries >= 5) window.clearInterval(timer)
+    }, 1_000)
+    return () => window.clearInterval(timer)
+  }, [signingIn])
+
   const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
         const transport = (globalThis as typeof globalThis & {
           __DSH_TRANSPORT__?: { streamBaseUrl?: string }
