@@ -26388,7 +26388,8 @@ var PluginControlRuntime = class {
     if (this.host !== void 0 && !hostPaused) {
       try {
         this.host.reconnectHost?.();
-      } catch {
+      } catch (error) {
+        console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
       }
     }
     await this.settings.replace(editableConfig(next));
@@ -26507,7 +26508,8 @@ var PluginControlRuntime = class {
     if (this.deepseekSession !== void 0) {
       try {
         deepseekSignedOut = await this.deepseekSession.signOut();
-      } catch {
+      } catch (error) {
+        console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
         deepseekSignedOut = false;
       }
     }
@@ -26556,6 +26558,7 @@ var PluginControlRuntime = class {
     try {
       const session = await this.deepseekSession.read();
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
+      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
       if (session !== void 0 && !authorized) {
         if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
         try {
@@ -26566,7 +26569,8 @@ var PluginControlRuntime = class {
       } else if (session === void 0 && authorized) {
         await this.logout();
       }
-    } catch {
+    } catch (error) {
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
     } finally {
       this.reconcilingWithDeepSeek = false;
     }

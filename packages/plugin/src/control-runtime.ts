@@ -313,7 +313,10 @@ export class PluginControlRuntime {
     if (this.host !== undefined && !hostPaused) {
       try {
         this.host.reconnectHost?.()
-      } catch {
+      } catch (error) {
+      // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is
+      // invisible to the user, who only sees the sign-in button.
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
         // The panel's status reports whatever happened next.
       }
     }
@@ -452,7 +455,10 @@ export class PluginControlRuntime {
     if (this.deepseekSession !== undefined) {
       try {
         deepseekSignedOut = await this.deepseekSession.signOut()
-      } catch {
+      } catch (error) {
+      // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is
+      // invisible to the user, who only sees the sign-in button.
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
         deepseekSignedOut = false
       }
     }
@@ -504,6 +510,7 @@ export class PluginControlRuntime {
     try {
       const session = await this.deepseekSession.read()
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
+      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
       if (session !== undefined && !authorized) {
         // The panel polls this flag: an automatic authorization in flight must not look like "never signed in".
         if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
@@ -515,7 +522,10 @@ export class PluginControlRuntime {
       } else if (session === undefined && authorized) {
         await this.logout()
       }
-    } catch {
+    } catch (error) {
+      // Diagnostics: the code alone (no tokens, no payloads) - an automatic authorization that fails silently is
+      // invisible to the user, who only sees the sign-in button.
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
       // Leave the state as it is: the next poll tries again.
     } finally {
       this.reconcilingWithDeepSeek = false
