@@ -523,17 +523,27 @@ export class PluginControlRuntime {
     this.reconcilingWithDeepSeek = true
     try {
       const session = await this.deepseekSession.read()
+      const present = session !== undefined
+      if (present !== this.deepSeekSessionPresent) {
+        // DSH just signed in (or out): answer on the next poll, not after a backoff that belonged to the old state.
+        this.deepSeekSessionPresent = present
+        this.deepSeekReconcileFailures = 0
+        this.deepSeekReconciledAt = 0
+      }
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
-      if (session !== undefined && !authorized) {
-        await this.configure({ provider: 'deepseek' })
-      } else if (session === undefined && authorized) {
+      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: present, authorized })}`)
+      if (present && !authorized) {
+        // configure() needs the Server it authorizes against; without it the call fails with `Server URL is required`.
+        await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
+      } else if (!present && authorized) {
         await this.logout()
       }
       this.deepSeekReconcileFailures = 0
-    } catch {
+    } catch (error) {
       // Back off instead of trying again in ten seconds: a rate-limited authorization used to be retried at the same
       // rate, which kept the Server rejecting this host and left it offline for the whole matrix run.
       this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6)
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? ''), message: String((error as Error)?.message ?? '') })}`)
     } finally {
       this.reconcilingWithDeepSeek = false
     }

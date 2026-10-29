@@ -26568,15 +26568,23 @@ var PluginControlRuntime = class {
     this.reconcilingWithDeepSeek = true;
     try {
       const session = await this.deepseekSession.read();
+      const present = session !== void 0;
+      if (present !== this.deepSeekSessionPresent) {
+        this.deepSeekSessionPresent = present;
+        this.deepSeekReconcileFailures = 0;
+        this.deepSeekReconciledAt = 0;
+      }
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
-      if (session !== void 0 && !authorized) {
-        await this.configure({ provider: "deepseek" });
-      } else if (session === void 0 && authorized) {
+      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: present, authorized })}`);
+      if (present && !authorized) {
+        await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
+      } else if (!present && authorized) {
         await this.logout();
       }
       this.deepSeekReconcileFailures = 0;
-    } catch {
+    } catch (error) {
       this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6);
+      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? ""), message: String(error?.message ?? "") })}`);
     } finally {
       this.reconcilingWithDeepSeek = false;
     }
