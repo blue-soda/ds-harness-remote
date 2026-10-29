@@ -1645,7 +1645,7 @@
           }, 1500);
           return () => window.clearInterval(timer);
         }, [devices, status?.deviceId]);
-        let requestDeepSeekSignIn = async () => {
+        let signingIn = busy || status?.authorizing === !0 || needsAuthorization && status?.hasDeepSeekSession === !0, requestDeepSeekSignIn = async () => {
           let transport = globalThis.__DSH_TRANSPORT__, callbackOrigin = transport?.streamBaseUrl !== void 0 ? new URL(transport.streamBaseUrl).origin : window.location.origin, result = await props.control("settings.configure", {
             // No `role`: a device has one identity, and the control writes only the Server address plus this
             // sign-in. Sending a role here was the last thing that made one look like a runtime switch.
@@ -1927,9 +1927,9 @@
                     ),
                     React.createElement("button", {
                       type: "button",
-                      disabled: busy || status?.authorizing === !0 || loginServerUrl.trim() === "",
+                      disabled: busy || signingIn || loginServerUrl.trim() === "",
                       onClick: () => void signInClient()
-                    }, t(busy || status?.authorizing === !0 ? "signingIn" : "deepseekSignIn")),
+                    }, t(signingIn ? "signingIn" : "deepseekSignIn")),
                     awaitingDeepSeek ? React.createElement(
                       "p",
                       { className: "dshRemoteServiceAddress" },

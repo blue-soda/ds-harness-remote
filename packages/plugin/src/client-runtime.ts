@@ -448,6 +448,8 @@ export class ClientModeRuntime {
 
   /** True while the plugin is exchanging DSH's DeepSeek credential for this device's Server credentials. */
   authorizingWithDeepSeek = false
+  /** Whether DSH held a DeepSeek session at the last reconciliation. */
+  hasDeepSeekSession = false
 
   status(): Record<string, unknown> {
     const targetStatus = this.gatewaySwitch.supportsCarrier()
@@ -456,6 +458,7 @@ export class ClientModeRuntime {
     return {
       available: this.config.serverUrl !== undefined,
       authorizing: this.authorizingWithDeepSeek,
+      hasDeepSeekSession: this.hasDeepSeekSession,
       identityReady: this.identity !== undefined,
       deviceId: this.identity?.deviceId,
       deviceName: this.identity?.name,

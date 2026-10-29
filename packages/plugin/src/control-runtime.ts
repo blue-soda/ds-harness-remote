@@ -513,6 +513,7 @@ export class PluginControlRuntime {
     try {
       const session = await this.deepseekSession.read()
       this.absentDeepSeekSessions = session === undefined ? this.absentDeepSeekSessions + 1 : 0
+      if (this.client !== undefined) this.client.hasDeepSeekSession = session !== undefined
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
       if (session !== undefined && !authorized) {

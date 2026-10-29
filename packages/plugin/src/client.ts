@@ -95,6 +95,8 @@ interface RemoteStatus {
   hostAuthorizationAvailable: boolean
   /** True while the plugin is exchanging DSH's credential for this device's Server credentials. */
   authorizing?: boolean
+  /** Whether DSH holds a DeepSeek session, so an unauthorized card knows a sign-in is under way. */
+  hasDeepSeekSession?: boolean
   host?: {
     deviceId?: string
     configured: boolean
@@ -2353,7 +2355,10 @@ window.__ModuleLoader__.load({
         return () => window.clearInterval(timer)
       }, [devices, status?.deviceId])
 
-      const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
+      // An unauthorized card with a DSH session is waiting for the automatic authorization, not idle: say "signing in".
+  const signingIn = busy || status?.authorizing === true || (needsAuthorization && status?.hasDeepSeekSession === true)
+
+  const requestDeepSeekSignIn = async (): Promise<{ pending: boolean; authorizeUrl?: string }> => {
         const transport = (globalThis as typeof globalThis & {
           __DSH_TRANSPORT__?: { streamBaseUrl?: string }
         }).__DSH_TRANSPORT__
@@ -2695,9 +2700,9 @@ window.__ModuleLoader__.load({
                         }, loginServerUrl)),
                     React.createElement('button', {
                       type: 'button',
-                      disabled: busy || status?.authorizing === true || loginServerUrl.trim() === '',
+                      disabled: busy || signingIn || loginServerUrl.trim() === '',
                       onClick: () => void signInClient(),
-                    }, t(busy || status?.authorizing === true ? 'signingIn' : 'deepseekSignIn')),
+                    }, t(signingIn ? 'signingIn' : 'deepseekSignIn')),
                     awaitingDeepSeek ? React.createElement('p', { className: 'dshRemoteServiceAddress' },
                       t(pendingAuthorizeUrl === undefined ? 'deepseekSignInRequesting' : 'deepseekSignInWaiting'),
                       pendingAuthorizeUrl === undefined ? null : React.createElement('a', {

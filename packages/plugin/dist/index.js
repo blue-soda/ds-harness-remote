@@ -21922,11 +21922,14 @@ var ClientModeRuntime = class {
   }
   /** True while the plugin is exchanging DSH's DeepSeek credential for this device's Server credentials. */
   authorizingWithDeepSeek = false;
+  /** Whether DSH held a DeepSeek session at the last reconciliation. */
+  hasDeepSeekSession = false;
   status() {
     const targetStatus = this.gatewaySwitch.supportsCarrier() ? this.gatewaySwitch.status() : this.proxySwitch?.status() ?? this.gatewaySwitch.status();
     return {
       available: this.config.serverUrl !== void 0,
       authorizing: this.authorizingWithDeepSeek,
+      hasDeepSeekSession: this.hasDeepSeekSession,
       identityReady: this.identity !== void 0,
       deviceId: this.identity?.deviceId,
       deviceName: this.identity?.name,
@@ -26560,6 +26563,7 @@ var PluginControlRuntime = class {
     try {
       const session = await this.deepseekSession.read();
       this.absentDeepSeekSessions = session === void 0 ? this.absentDeepSeekSessions + 1 : 0;
+      if (this.client !== void 0) this.client.hasDeepSeekSession = session !== void 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
       if (session !== void 0 && !authorized) {
