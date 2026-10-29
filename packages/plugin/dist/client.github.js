@@ -1634,25 +1634,7 @@
         }, [open, selectedHost]);
         let chooseAnotherHost = () => {
           setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCodexNotice(void 0), setCodexAvailable(!1), codexProbeAvailable.current = !1, setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
-        };
-        React.useEffect(() => {
-          let timer = window.setInterval(() => {
-            (async () => {
-              let next = await props.control("status").catch(() => {
-              });
-              if (next !== void 0 && setStatus(next), (await props.control("authorization.local").catch(() => {
-              }))?.stored === !1) {
-                setDevices([]), setNeedsAuthorization(!0);
-                return;
-              }
-              let list = await props.control("devices").catch(() => {
-              });
-              list !== void 0 && (setDevices(list), authorizedOnce.current = !0, setNeedsAuthorization(!1), setAuthorizationResolved(!0));
-            })();
-          }, 1500);
-          return () => window.clearInterval(timer);
-        }, [devices, status?.deviceId]);
-        let signingIn = busy || status?.authorizing === !0 || needsAuthorization && status?.hasDeepSeekSession === !0, requestDeepSeekSignIn = async () => {
+        }, signingIn = busy || status?.authorizing === !0 || needsAuthorization && status?.hasDeepSeekSession === !0, requestDeepSeekSignIn = async () => {
           let transport = globalThis.__DSH_TRANSPORT__, callbackOrigin = transport?.streamBaseUrl !== void 0 ? new URL(transport.streamBaseUrl).origin : window.location.origin, result = await props.control("settings.configure", {
             // No `role`: a device has one identity, and the control writes only the Server address plus this
             // sign-in. Sending a role here was the last thing that made one look like a runtime switch.

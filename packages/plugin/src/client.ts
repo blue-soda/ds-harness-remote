@@ -2339,32 +2339,6 @@ window.__ModuleLoader__.load({
        * A signed-out DSH has no grant to lend, so the Host starts the official
        * browser authorization instead and hands back the page to open.
        */
-      // Two waits live here. While the plugin authorizes itself from DSH's credential (or a clicked sign-in runs), the
-      // device list is unreadable; once it is readable this device may still be offline until its host connection
-      // lands. Both are polled, so the card ends on "connected" without the user reopening it.
-      React.useEffect(() => {
-        // No early exit: this device stays online until the reconciliation clears it on a DSH sign-out, and that is
-        const timer = window.setInterval(() => {
-          void (async () => {
-            const next = await props.control<RemoteStatus>('status').catch(() => undefined)
-            if (next !== undefined) setStatus(next)
-            const authorization = await props.control<{ stored?: boolean }>('authorization.local').catch(() => undefined)
-      if (authorization?.stored === false) {
-        // The reconciliation just cleared this device (DSH signed out): the card must not keep showing a session.
-        setDevices([])
-        setNeedsAuthorization(true)
-        return
-      }
-      const list = await props.control<RemoteDevice[]>('devices').catch(() => undefined)
-            if (list === undefined) return
-            setDevices(list)
-            authorizedOnce.current = true
-            setNeedsAuthorization(false)
-            setAuthorizationResolved(true)
-          })()
-        }, 1_500)
-        return () => window.clearInterval(timer)
-      }, [devices, status?.deviceId])
 
       // An unauthorized card with a DSH session is waiting for the automatic authorization, not idle: say "signing in".
   const signingIn = busy || status?.authorizing === true || (needsAuthorization && status?.hasDeepSeekSession === true)
