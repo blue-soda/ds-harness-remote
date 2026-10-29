@@ -111,9 +111,6 @@ export class PluginControlRuntime {
     private readonly host: HostAuthorizationControl | undefined,
     private readonly deepseekSession: DeepSeekSessionSource | undefined = undefined,
   ) {
-    // DSH can be signed in or out while the panel is closed: keep the reconciliation alive without it. The
-    // exchange itself stays throttled; this timer only performs local reads.
-    setInterval(() => { void this.reconcileWithDeepSeek() }, 30_000).unref()
   }
 
   /**
@@ -455,6 +452,8 @@ export class PluginControlRuntime {
     // account and this sign-out has no observable effect. A failure is reported
     // through the flag rather than hidden, because the local credentials are
     // already gone at this point and the user should know what remains.
+    // The panel derives "signing in" from this flag; a sign-out must clear it or the card stays on "signing in".
+    if (this.client !== undefined) this.client.hasDeepSeekSession = false
     let deepseekSignedOut = false
     if (this.deepseekSession !== undefined) {
       try {
@@ -497,7 +496,6 @@ export class PluginControlRuntime {
   }
   private deepSeekReconciledAt = 0
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
-  private absentDeepSeekSessions = 0
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
 
@@ -516,7 +514,6 @@ export class PluginControlRuntime {
     this.reconcilingWithDeepSeek = true
     try {
       const session = await this.deepseekSession.read()
-      this.absentDeepSeekSessions = session === undefined ? this.absentDeepSeekSessions + 1 : 0
       if (this.client !== undefined) this.client.hasDeepSeekSession = session !== undefined
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
@@ -528,7 +525,7 @@ export class PluginControlRuntime {
         } finally {
           if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
         }
-      } else if (this.absentDeepSeekSessions >= 2 && authorized) {
+      } else if (session === undefined && authorized) {
         // DSH is already signed out, so nothing is released: clear this device only.
         await this.logout({ releaseDeepSeek: false })
       }

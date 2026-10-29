@@ -26223,9 +26223,6 @@ var PluginControlRuntime = class {
     this.client = client;
     this.host = host;
     this.deepseekSession = deepseekSession;
-    setInterval(() => {
-      void this.reconcileWithDeepSeek();
-    }, 3e4).unref();
   }
   /**
    * The DeepSeek grant whose Server authorization this runtime already completed.
@@ -26510,6 +26507,7 @@ var PluginControlRuntime = class {
       const directory = await ensureDeviceDirectory(this.identityDirectory, config.serverUrl);
       await new ServerCredentialStore(directory).clear();
     }
+    if (this.client !== void 0) this.client.hasDeepSeekSession = false;
     let deepseekSignedOut = false;
     if (this.deepseekSession !== void 0) {
       try {
@@ -26548,7 +26546,6 @@ var PluginControlRuntime = class {
   }
   deepSeekReconciledAt = 0;
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
-  absentDeepSeekSessions = 0;
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
   /**
@@ -26565,7 +26562,6 @@ var PluginControlRuntime = class {
     this.reconcilingWithDeepSeek = true;
     try {
       const session = await this.deepseekSession.read();
-      this.absentDeepSeekSessions = session === void 0 ? this.absentDeepSeekSessions + 1 : 0;
       if (this.client !== void 0) this.client.hasDeepSeekSession = session !== void 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
       console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
@@ -26576,7 +26572,7 @@ var PluginControlRuntime = class {
         } finally {
           if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
         }
-      } else if (this.absentDeepSeekSessions >= 2 && authorized) {
+      } else if (session === void 0 && authorized) {
         await this.logout({ releaseDeepSeek: false });
       }
     } catch (error) {
