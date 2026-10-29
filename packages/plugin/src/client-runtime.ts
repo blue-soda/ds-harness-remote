@@ -446,12 +446,16 @@ export class ClientModeRuntime {
     return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer)
   }
 
+  /** True while the plugin is exchanging DSH's DeepSeek credential for this device's Server credentials. */
+  authorizingWithDeepSeek = false
+
   status(): Record<string, unknown> {
     const targetStatus = this.gatewaySwitch.supportsCarrier()
       ? this.gatewaySwitch.status()
       : this.proxySwitch?.status() ?? this.gatewaySwitch.status()
     return {
       available: this.config.serverUrl !== undefined,
+      authorizing: this.authorizingWithDeepSeek,
       identityReady: this.identity !== undefined,
       deviceId: this.identity?.deviceId,
       deviceName: this.identity?.name,

@@ -505,7 +505,13 @@ export class PluginControlRuntime {
       const session = await this.deepseekSession.read()
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
       if (session !== undefined && !authorized) {
-        await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
+        // The panel polls this flag: an automatic authorization in flight must not look like "never signed in".
+        if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
+        try {
+          await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
+        } finally {
+          if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
+        }
       } else if (session === undefined && authorized) {
         await this.logout()
       }

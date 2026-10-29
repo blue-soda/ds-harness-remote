@@ -21920,10 +21920,13 @@ var ClientModeRuntime = class {
   registerControl(connection, webServer) {
     return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer);
   }
+  /** True while the plugin is exchanging DSH's DeepSeek credential for this device's Server credentials. */
+  authorizingWithDeepSeek = false;
   status() {
     const targetStatus = this.gatewaySwitch.supportsCarrier() ? this.gatewaySwitch.status() : this.proxySwitch?.status() ?? this.gatewaySwitch.status();
     return {
       available: this.config.serverUrl !== void 0,
+      authorizing: this.authorizingWithDeepSeek,
       identityReady: this.identity !== void 0,
       deviceId: this.identity?.deviceId,
       deviceName: this.identity?.name,
@@ -26554,7 +26557,12 @@ var PluginControlRuntime = class {
       const session = await this.deepseekSession.read();
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
       if (session !== void 0 && !authorized) {
-        await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
+        if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
+        try {
+          await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
+        } finally {
+          if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
+        }
       } else if (session === void 0 && authorized) {
         await this.logout();
       }
