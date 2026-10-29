@@ -493,6 +493,8 @@ export class PluginControlRuntime {
   }
   /** Last reconciliation, so a polling panel cannot hammer the Server. */
   private deepSeekReconciledAt = 0
+  /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
+  private deepSeekReconcileFailures = 0
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
 
@@ -503,10 +505,15 @@ export class PluginControlRuntime {
    * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
    * as it was - being signed out is a state, not an error.
    */
+  /** Ten seconds after a success, doubling per failure, capped at five minutes. */
+  private reconcileInterval(): number {
+    return Math.min(DEEPSEEK_RECONCILE_INTERVAL_MS * 2 ** this.deepSeekReconcileFailures, 5 * 60_000)
+  }
+
   private async reconcileWithDeepSeek(): Promise<void> {
     if (this.deepseekSession === undefined || this.reconcilingWithDeepSeek) return
     const now = Date.now()
-    if (now - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
+    if (now - this.deepSeekReconciledAt < this.reconcileInterval()) return
     this.deepSeekReconciledAt = now
     this.reconcilingWithDeepSeek = true
     try {
@@ -517,8 +524,11 @@ export class PluginControlRuntime {
       } else if (session === undefined && authorized) {
         await this.logout()
       }
+      this.deepSeekReconcileFailures = 0
     } catch {
-      // The next poll tries again; nothing is authorized or dropped on a failure.
+      // Back off instead of trying again in ten seconds: a rate-limited authorization used to be retried at the same
+      // rate, which kept the Server rejecting this host and left it offline for the whole matrix run.
+      this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6)
     } finally {
       this.reconcilingWithDeepSeek = false
     }

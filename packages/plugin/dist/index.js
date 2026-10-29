@@ -26541,6 +26541,8 @@ var PluginControlRuntime = class {
   }
   /** Last reconciliation, so a polling panel cannot hammer the Server. */
   deepSeekReconciledAt = 0;
+  /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
+  deepSeekReconcileFailures = 0;
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
   /**
@@ -26550,10 +26552,14 @@ var PluginControlRuntime = class {
    * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
    * as it was - being signed out is a state, not an error.
    */
+  /** Ten seconds after a success, doubling per failure, capped at five minutes. */
+  reconcileInterval() {
+    return Math.min(DEEPSEEK_RECONCILE_INTERVAL_MS * 2 ** this.deepSeekReconcileFailures, 5 * 6e4);
+  }
   async reconcileWithDeepSeek() {
     if (this.deepseekSession === void 0 || this.reconcilingWithDeepSeek) return;
     const now = Date.now();
-    if (now - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
+    if (now - this.deepSeekReconciledAt < this.reconcileInterval()) return;
     this.deepSeekReconciledAt = now;
     this.reconcilingWithDeepSeek = true;
     try {
@@ -26564,7 +26570,9 @@ var PluginControlRuntime = class {
       } else if (session === void 0 && authorized) {
         await this.logout();
       }
+      this.deepSeekReconcileFailures = 0;
     } catch {
+      this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6);
     } finally {
       this.reconcilingWithDeepSeek = false;
     }
