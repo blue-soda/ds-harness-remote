@@ -46,3 +46,6 @@ after either upstream is upgraded are recorded in
 
 `0.5.4` changes no wire format: a connection displaced by another instance (`CONNECTION_REPLACED`, Server code `4003`) is no longer terminal. It logs that it is standing by and retries every five minutes (`reconnect.replacedRetryMs`, default `300000`) instead of stopping forever, so the device comes back once the other instance leaves. Everything above still applies.
 
+
+0.5.5 changes no wire format: the plugin's Server authorization now follows DSH's DeepSeek session in both directions (signed in on DSH authorizes the device; signed out on DSH signs it out and disconnects), throttled to one reconciliation per ten seconds. Account creation stays a Server-side setting; accounts are matched by platform id. Everything above still applies.
+

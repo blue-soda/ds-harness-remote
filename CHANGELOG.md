@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.5 - 2026-10-29
+
+- DSH and the remote plugin sign in and out together again (user decision, 2026-10-29). Signing in to DSH's DeepSeek account now authorizes this device on the Server without a click, and signing out of DSH signs the plugin out, which also disconnects; the reverse direction (the plugin's own sign-in and sign-out touching DSH's DeepSeek session) was already in place. The "only authorize a sign-in the user started" gate is gone: the Server still confirms the grant with the platform and matches the account by platform id, and with account creation enabled a DSH account the Server has never seen becomes a new account - the trade the user accepted. Reconciliation runs from the settings view the panel already polls, throttled to once per ten seconds, and never turns a failure into an error: being signed out stays a state.
 ## 0.5.4 - 2026-10-20
 
 - A displaced connection is a standby instead of a dead end. When another instance takes this device identity over, the Server closes the older socket with `4003` and the plugin used to log "another instance is using this Host identity" and stop reconnecting for good - so after the winning instance went away the device stayed offline, with no indication why (two Android clients saw a Desktop offline for a day that way). The displaced side now logs that it is standing by and retries every five minutes (`reconnect.replacedRetryMs`, default `300000`), taking over as soon as the other instance leaves. The interval is deliberately longer than the Server heartbeat's 40-65 s reap window, so two live instances cannot displace each other in a loop. Authentication failures still stop retries, and replacing this peer's own transport is still ignored.

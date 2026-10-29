@@ -511,3 +511,13 @@ Cannot read properties of undefined (reading 'signal')` 与 `[cordis-client-runn
 
 **规则**：包装/转发 DSH 网关方法时**不得按其已知签名重建参数** ✗ —— 一律 `...rest` 透传 ✓；升级 DSH 时至少
 用**发布版 rc** 跑一次"装插件 / 不装插件"的 A/B 渲染对照 ✓（本次就是靠它一眼定位 ✓）。
+
+### 2026-10-29 用户决定：恢复 DSH 与 Remote 的登录/登出绑定（覆盖上节）
+
+**允许借用 DSH 的 DeepSeek 会话自动授权，并允许 Server 建号**。实现：control-runtime.ts 的 \econcileWithDeepSeek()\，挂在面板本来就会轮询的 \settingsView()\ 上、每 10 秒最多一次：
+
+- DSH 已登录 DeepSeek → 自动授权本设备（不再要求「登录流程由本次请求发起」）；
+- DSH 退出登录 → 插件一并登出并断开连接；
+- 反方向（插件登录/登出 → DSH 登录/登出）原本就已生效，不变。
+
+**代价（已知并接受）**：若某台机器的 DSH 登录的是另一个 DeepSeek 账号，Server 会为它新建账号并注册设备 —— 这正是 2026-10-14「空账号」的成因；**不做兜底**。账号仍按 \deepseek:<平台 id>\ 命中，不信任插件自称身份。上节保留为历史记录（当时为何把两者拆开）。
