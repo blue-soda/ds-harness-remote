@@ -26223,6 +26223,9 @@ var PluginControlRuntime = class {
     this.client = client;
     this.host = host;
     this.deepseekSession = deepseekSession;
+    setInterval(() => {
+      void this.reconcileWithDeepSeek();
+    }, 3e4).unref();
   }
   /**
    * The DeepSeek grant whose Server authorization this runtime already completed.
@@ -26582,6 +26585,10 @@ var PluginControlRuntime = class {
       this.reconcilingWithDeepSeek = false;
     }
   }
+  /**
+   * Keeps the reconciliation alive without the panel: DSH can be signed in or out while the card is closed, and the
+   * plugin has to follow. Only local reads - the exchange itself is throttled to one per ten seconds.
+   */
   async settingsView() {
     void this.reconcileWithDeepSeek();
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));

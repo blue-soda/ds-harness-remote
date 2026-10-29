@@ -110,7 +110,11 @@ export class PluginControlRuntime {
     private readonly client: ClientModeRuntime | undefined,
     private readonly host: HostAuthorizationControl | undefined,
     private readonly deepseekSession: DeepSeekSessionSource | undefined = undefined,
-  ) {}
+  ) {
+    // DSH can be signed in or out while the panel is closed: keep the reconciliation alive without it. The
+    // exchange itself stays throttled; this timer only performs local reads.
+    setInterval(() => { void this.reconcileWithDeepSeek() }, 30_000).unref()
+  }
 
   /**
    * The DeepSeek grant whose Server authorization this runtime already completed.
@@ -537,6 +541,11 @@ export class PluginControlRuntime {
       this.reconcilingWithDeepSeek = false
     }
   }
+
+  /**
+   * Keeps the reconciliation alive without the panel: DSH can be signed in or out while the card is closed, and the
+   * plugin has to follow. Only local reads - the exchange itself is throttled to one per ten seconds.
+   */
 
   private async settingsView(): Promise<PluginSettingsView> {
     // Not awaited: the reconciliation reaches the Server, and this view answers the control route that the
