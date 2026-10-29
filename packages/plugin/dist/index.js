@@ -26354,12 +26354,6 @@ var PluginControlRuntime = class {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
       }
       const session = await this.deepseekSession.read();
-      const present = session !== void 0;
-      if (present !== this.deepSeekSessionPresent) {
-        this.deepSeekSessionPresent = present;
-        this.deepSeekReconcileFailures = 0;
-        this.deepSeekReconciledAt = 0;
-      }
       if (session === void 0) {
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
@@ -26541,50 +26535,30 @@ var PluginControlRuntime = class {
     }
     return this.client === void 0 ? this.hostOnlyStatus() : await this.client.status();
   }
-  /** Last reconciliation, so a polling panel cannot hammer the Server. */
   deepSeekReconciledAt = 0;
-  /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
-  deepSeekReconcileFailures = 0;
-  /** Whether DSH held a DeepSeek session on the previous reconciliation. */
-  deepSeekSessionPresent = false;
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
   /**
-   * Keep this device's Server authorization in step with DSH's DeepSeek session, in both directions.
+   * Keep this device's Server credentials in step with DSH's DeepSeek session - that session is the credential, and
+   * the Server verifies it before issuing this device its own tokens.
    *
-   * Signed in on DSH but not on the Server: authorize with the account DSH already holds. Signed out on DSH while the
-   * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
-   * as it was - being signed out is a state, not an error.
+   * Three cases: DSH signed in and this device not authorized -> authorize; DSH signed out and this device authorized
+   * -> sign out; otherwise nothing. At most once per ten seconds, from the settings poll the panel already makes.
    */
-  /** Ten seconds after a success, doubling per failure, capped at five minutes. */
-  reconcileInterval() {
-    return Math.min(DEEPSEEK_RECONCILE_INTERVAL_MS * 2 ** this.deepSeekReconcileFailures, 5 * 6e4);
-  }
   async reconcileWithDeepSeek() {
     if (this.deepseekSession === void 0 || this.reconcilingWithDeepSeek) return;
-    const now = Date.now();
-    if (now - this.deepSeekReconciledAt < this.reconcileInterval()) return;
-    this.deepSeekReconciledAt = now;
+    if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
+    this.deepSeekReconciledAt = Date.now();
     this.reconcilingWithDeepSeek = true;
     try {
       const session = await this.deepseekSession.read();
-      const present = session !== void 0;
-      if (present !== this.deepSeekSessionPresent) {
-        this.deepSeekSessionPresent = present;
-        this.deepSeekReconcileFailures = 0;
-        this.deepSeekReconciledAt = 0;
-      }
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
-      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: present, authorized })}`);
-      if (present && !authorized) {
+      if (session !== void 0 && !authorized) {
         await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
-      } else if (!present && authorized) {
+      } else if (session === void 0 && authorized) {
         await this.logout();
       }
-      this.deepSeekReconcileFailures = 0;
-    } catch (error) {
-      this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6);
-      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? ""), message: String(error?.message ?? "") })}`);
+    } catch {
     } finally {
       this.reconcilingWithDeepSeek = false;
     }

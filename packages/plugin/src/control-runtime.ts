@@ -268,16 +268,6 @@ export class PluginControlRuntime {
         throw new ClientModeError('METHOD_NOT_ALLOWED', 'DeepSeek account sign-in is unavailable in this profile.')
       }
       const session = await this.deepseekSession.read()
-      const present = session !== undefined
-      if (present !== this.deepSeekSessionPresent) {
-        // DSH just signed in (or out): answer on the next poll, not after a backoff that belonged to the old state.
-        this.deepSeekSessionPresent = present
-        this.deepSeekReconcileFailures = 0
-        this.deepSeekReconciledAt = 0
-      }
-      // The grant counts once the user has asked for this sign-in: they completed the browser round trip, so the
-      // account DSH holds now is the one they authorized. What DSH held *before* any click is not an answer to a
-      // question nobody asked, and that is the case this gate exists for.
       // B (user decision 2026-10-29): an existing DSH DeepSeek session is enough - remote and DSH sign in and out
       // together. The Server still confirms the grant with the platform and matches the account by platform id.
       if (session === undefined) {
@@ -494,56 +484,33 @@ export class PluginControlRuntime {
     }
     return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
   }
-  /** Last reconciliation, so a polling panel cannot hammer the Server. */
   private deepSeekReconciledAt = 0
-  /** Consecutive failures, which double the wait: a rate-limited Server must not be hit at the same rate. */
-  private deepSeekReconcileFailures = 0
-  /** Whether DSH held a DeepSeek session on the previous reconciliation. */
-  private deepSeekSessionPresent = false
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
 
-  /**
-   * Keep this device's Server authorization in step with DSH's DeepSeek session, in both directions.
-   *
-   * Signed in on DSH but not on the Server: authorize with the account DSH already holds. Signed out on DSH while the
-   * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
-   * as it was - being signed out is a state, not an error.
-   */
-  /** Ten seconds after a success, doubling per failure, capped at five minutes. */
-  private reconcileInterval(): number {
-    return Math.min(DEEPSEEK_RECONCILE_INTERVAL_MS * 2 ** this.deepSeekReconcileFailures, 5 * 60_000)
-  }
 
+  /**
+   * Keep this device's Server credentials in step with DSH's DeepSeek session - that session is the credential, and
+   * the Server verifies it before issuing this device its own tokens.
+   *
+   * Three cases: DSH signed in and this device not authorized -> authorize; DSH signed out and this device authorized
+   * -> sign out; otherwise nothing. At most once per ten seconds, from the settings poll the panel already makes.
+   */
   private async reconcileWithDeepSeek(): Promise<void> {
     if (this.deepseekSession === undefined || this.reconcilingWithDeepSeek) return
-    const now = Date.now()
-    if (now - this.deepSeekReconciledAt < this.reconcileInterval()) return
-    this.deepSeekReconciledAt = now
+    if (Date.now() - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
+    this.deepSeekReconciledAt = Date.now()
     this.reconcilingWithDeepSeek = true
     try {
       const session = await this.deepseekSession.read()
-      const present = session !== undefined
-      if (present !== this.deepSeekSessionPresent) {
-        // DSH just signed in (or out): answer on the next poll, not after a backoff that belonged to the old state.
-        this.deepSeekSessionPresent = present
-        this.deepSeekReconcileFailures = 0
-        this.deepSeekReconciledAt = 0
-      }
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
-      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: present, authorized })}`)
-      if (present && !authorized) {
-        // configure() needs the Server it authorizes against; without it the call fails with `Server URL is required`.
+      if (session !== undefined && !authorized) {
         await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
-      } else if (!present && authorized) {
+      } else if (session === undefined && authorized) {
         await this.logout()
       }
-      this.deepSeekReconcileFailures = 0
-    } catch (error) {
-      // Back off instead of trying again in ten seconds: a rate-limited authorization used to be retried at the same
-      // rate, which kept the Server rejecting this host and left it offline for the whole matrix run.
-      this.deepSeekReconcileFailures = Math.min(this.deepSeekReconcileFailures + 1, 6)
-      console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? ''), message: String((error as Error)?.message ?? '') })}`)
+    } catch {
+      // Leave the state as it is: the next poll tries again.
     } finally {
       this.reconcilingWithDeepSeek = false
     }
