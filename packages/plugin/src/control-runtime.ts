@@ -62,6 +62,9 @@ export interface DeepSeekSignInRequest {
  * it is a bearer credential for the user's DeepSeek account, so the plugin
  * forwards it once and forgets it.
  */
+/** How often DSH's session is reconciled with the Server authorization. */
+const DEEPSEEK_RECONCILE_INTERVAL_MS = 10_000
+
 export interface DeepSeekSessionSource {
   /** The signed-in account's platform grant, or undefined when signed out. */
   read(): Promise<{ token: string } | undefined>
@@ -269,8 +272,9 @@ export class PluginControlRuntime {
       // The grant counts once the user has asked for this sign-in: they completed the browser round trip, so the
       // account DSH holds now is the one they authorized. What DSH held *before* any click is not an answer to a
       // question nobody asked, and that is the case this gate exists for.
-      const counted = session !== undefined && this.deepSeekSignIn !== undefined
-      if (!counted) {
+      // B (user decision 2026-10-29): an existing DSH DeepSeek session is enough - remote and DSH sign in and out
+      // together. The Server still confirms the grant with the platform and matches the account by platform id.
+      if (session === undefined) {
         // Ask the user, in the browser, for the account they actually want. Nothing is authorized yet, so the
         // settings are left untouched. The panel shows the button again for as long as this keeps being the
         // answer; being signed out is not an error, so no error is raised.
@@ -487,8 +491,41 @@ export class PluginControlRuntime {
     }
     return this.client === undefined ? this.hostOnlyStatus() : await this.client.status()
   }
+  /** Last reconciliation, so a polling panel cannot hammer the Server. */
+  private deepSeekReconciledAt = 0
+  /** Guards against re-entry through configure(), which reads the settings view back. */
+  private reconcilingWithDeepSeek = false
+
+  /**
+   * Keep this device's Server authorization in step with DSH's DeepSeek session, in both directions.
+   *
+   * Signed in on DSH but not on the Server: authorize with the account DSH already holds. Signed out on DSH while the
+   * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
+   * as it was - being signed out is a state, not an error.
+   */
+  private async reconcileWithDeepSeek(): Promise<void> {
+    if (this.deepseekSession === undefined || this.reconcilingWithDeepSeek) return
+    const now = Date.now()
+    if (now - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return
+    this.deepSeekReconciledAt = now
+    this.reconcilingWithDeepSeek = true
+    try {
+      const session = await this.deepseekSession.read()
+      const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
+      if (session !== undefined && !authorized && this.deepSeekSignIn !== true) {
+        await this.configure({ provider: 'deepseek' })
+      } else if (session === undefined && authorized) {
+        await this.logout()
+      }
+    } catch {
+      // The next poll tries again; nothing is authorized or dropped on a failure.
+    } finally {
+      this.reconcilingWithDeepSeek = false
+    }
+  }
 
   private async settingsView(): Promise<PluginSettingsView> {
+    await this.reconcileWithDeepSeek()
     const config = this.settings === undefined ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()))
     const associations = await this.associations(config)
     // One identity means one association: the panel no longer has a role to pick.

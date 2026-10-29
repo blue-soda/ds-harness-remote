@@ -642,6 +642,12 @@ export class ClientModeRuntime {
     this.server.reloadCredentials()
   }
 
+  /** Whether this device holds Server credentials, i.e. the panel shows it as signed in. */
+  async hasServerAuthorization(): Promise<boolean> {
+    if (this.server.hasStoredAuthorization === undefined) return false
+    return await this.server.hasStoredAuthorization().catch(() => false)
+  }
+
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
     if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
     if (!enabled) {

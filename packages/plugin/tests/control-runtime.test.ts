@@ -402,7 +402,7 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
    * whichever DeepSeek account DSH happened to hold, and with account creation enabled on the Server that
    * produced a brand-new *empty* account - the "a new device lands in an empty account" report.
    */
-  it('asks for the browser authorization instead of signing in from a DSH session nobody authorized', async () => {
+  it('authorizes with the DSH session nobody clicked for, because DSH and the plugin sign in together', async () => {
     const directory = await temporaryDirectory()
     const settings = settingsBinding({})
     const calls: string[] = []
@@ -429,14 +429,14 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
 
     const answer = await handler('settings.configure', { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }, signal())
 
-    expect(answer).toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required', authorizeUrl: 'https://platform.example/authorize' } })
-    expect(startSignIn).toHaveBeenCalledOnce()
-    // Nothing was registered or verified: that grant belongs to DSH, not to a sign-in the user just performed.
-    expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toEqual([])
-    expect(calls.filter(url => url.endsWith('/devices/register'))).toEqual([])
+    expect(answer).toMatchObject({ ok: true, value: { status: 'authorized' } })
+    // The browser round trip is not requested: the session is already there.
+    expect(startSignIn).not.toHaveBeenCalled()
+    expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toHaveLength(1)
+    expect(calls.filter(url => url.endsWith('/devices/register'))).toHaveLength(1)
   })
 
-  it('accepts the grant DSH already held once the user has asked for a sign-in', async () => {
+  it('accepts the grant DSH already holds without asking for a browser round trip', async () => {
     const directory = await temporaryDirectory()
     const settings = settingsBinding({})
     const calls: string[] = []
@@ -463,10 +463,9 @@ describe('PluginControlRuntime DeepSeek sign-in', () => {
     ))
     const payload = { serverUrl: 'https://sakakibara.ink:8443', provider: 'deepseek' }
 
-    // The click still asks first: nothing is authorized from a session the user never asked to use.
-    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true, value: { status: 'deepseek-sign-in-required' } })
-    expect(calls).toEqual([])
-
+    // B (2026-10-29): an existing DSH session is enough; nothing asks first and nothing is left pending.
+    await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
+    expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toHaveLength(1)
     // Once they have asked, the account DSH holds is the one they authorized.
     await expect(handler('settings.configure', payload, signal())).resolves.toMatchObject({ ok: true })
     expect(calls.filter(url => url.endsWith('/api/v1/auth/deepseek'))).toHaveLength(1)

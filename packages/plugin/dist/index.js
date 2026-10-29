@@ -13521,7 +13521,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.4";
+var PLUGIN_VERSION = "0.5.5";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -22086,6 +22086,11 @@ var ClientModeRuntime = class {
   reloadCredentials() {
     this.server.reloadCredentials();
   }
+  /** Whether this device holds Server credentials, i.e. the panel shows it as signed in. */
+  async hasServerAuthorization() {
+    if (this.server.hasStoredAuthorization === void 0) return false;
+    return await this.server.hasStoredAuthorization().catch(() => false);
+  }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
     if (!enabled) {
@@ -26203,6 +26208,7 @@ function isActiveWriterMessage(message) {
 }
 
 // src/control-runtime.ts
+var DEEPSEEK_RECONCILE_INTERVAL_MS = 1e4;
 var PluginControlRuntime = class {
   constructor(config, identityDirectory, settings, client, host, deepseekSession = void 0) {
     this.config = config;
@@ -26349,8 +26355,7 @@ var PluginControlRuntime = class {
         throw new ClientModeError("METHOD_NOT_ALLOWED", "DeepSeek account sign-in is unavailable in this profile.");
       }
       const session = await this.deepseekSession.read();
-      const counted = session !== void 0 && this.deepSeekSignIn !== void 0;
-      if (!counted) {
+      if (session === void 0) {
         const started = await this.deepseekSession.startSignIn({
           callbackOrigin: typeof value.callbackOrigin === "string" ? value.callbackOrigin : "",
           loginSource: value.loginSource === "desktop" ? "desktop" : "web",
@@ -26534,7 +26539,38 @@ var PluginControlRuntime = class {
     }
     return this.client === void 0 ? this.hostOnlyStatus() : await this.client.status();
   }
+  /** Last reconciliation, so a polling panel cannot hammer the Server. */
+  deepSeekReconciledAt = 0;
+  /** Guards against re-entry through configure(), which reads the settings view back. */
+  reconcilingWithDeepSeek = false;
+  /**
+   * Keep this device's Server authorization in step with DSH's DeepSeek session, in both directions.
+   *
+   * Signed in on DSH but not on the Server: authorize with the account DSH already holds. Signed out on DSH while the
+   * Server still has this device: sign out here too, which also disconnects. Throttled, and a failure leaves the state
+   * as it was - being signed out is a state, not an error.
+   */
+  async reconcileWithDeepSeek() {
+    if (this.deepseekSession === void 0 || this.reconcilingWithDeepSeek) return;
+    const now = Date.now();
+    if (now - this.deepSeekReconciledAt < DEEPSEEK_RECONCILE_INTERVAL_MS) return;
+    this.deepSeekReconciledAt = now;
+    this.reconcilingWithDeepSeek = true;
+    try {
+      const session = await this.deepseekSession.read();
+      const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
+      if (session !== void 0 && !authorized && this.deepSeekSignIn !== true) {
+        await this.configure({ provider: "deepseek" });
+      } else if (session === void 0 && authorized) {
+        await this.logout();
+      }
+    } catch {
+    } finally {
+      this.reconcilingWithDeepSeek = false;
+    }
+  }
   async settingsView() {
+    await this.reconcileWithDeepSeek();
     const config = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
     const associations = await this.associations(config);
     const association = associations.host;
