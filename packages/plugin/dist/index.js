@@ -26727,7 +26727,7 @@ function redact(value, key = "") {
 // src/codex/session-id.ts
 function parseCodexSessionId(value) {
   if (typeof value !== "string") return void 0;
-  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
+  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._~-]{0,511})$/.exec(value);
   return match === null ? void 0 : { sessionId: value, threadId: match[1] };
 }
 
