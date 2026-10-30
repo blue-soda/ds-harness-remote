@@ -1,11 +1,13 @@
 ## English
 
-- **DSH and Remote sign in and out together.** Signing in to DSH's DeepSeek account now authorizes this device on the Server without an extra click, and signing out of DSH signs Remote out and disconnects it. The other direction was already there. With account creation enabled on the Server, a DSH account the Server has never seen becomes a new account - that is the accepted trade; accounts are still matched by platform id, never by a claim the plugin makes.
-- Everything from **0.5.1** to **0.5.4** ships here too: sign-in only through the browser authorization, Codex off by default, the credential-lock reclaim, the dsh 0.2.1-rc.2 gateway compatibility, forked Codex sessions showing as separate rows, and the reconnecting/standby fixes.
+- **Codex conversations open again on every client.** 0.5.5 published a Codex Session id as `<threadId>~<createdAt>~<n>` to keep the rows Codex lists for one thread apart. That key then travelled back as the Session id, so a full DSH client asking for the conversation's history or files was told the identifier was invalid, or got a history that no longer matched the Session it asked for. A Codex Session is `codex:<threadId>` again, and the Host lists each thread once instead of once per rollout file. A Session cached from 0.5.5 still resolves to its thread.
+- **Why the extra rows are gone:** they are not separate branches. The Codex App Server only opens a thread's current rollout - resuming a superseded one is refused, and history reads take no path at all - so the rows only ever led to the same conversation.
+- Everything from **0.5.1** to **0.5.5** ships here too: sign-in that follows DSH, Codex off by default, the credential-lock reclaim, dsh 0.2.1-rc.2 gateway compatibility, and the standby/reconnect fixes.
 
 ## 中文
 
-- **DSH 与 Remote 一起登录、一起登出。** 在 DSH 上登录 DeepSeek 账号后，本设备会自动在 Server 上完成授权（无需再点一次）；在 DSH 上退出登录时，Remote 会一并退出并断开连接。反方向原本就已生效。Server 开启建号时，Server 没见过的 DSH 账号会被建成新账号 —— 这是已接受的取舍；账号仍按平台 id 匹配，绝不信任插件自称的身份。
-- **0.5.1**–**0.5.4** 的全部内容同样包含在本版：登录只经浏览器授权、Codex 默认关闭、凭据刷新锁回收、对 dsh 0.2.1-rc.2 的网关兼容、Codex 分叉会话独立显示，以及重连/待命相关修复。
+- **Codex 会话在所有客户端上恢复可打开。** 0.5.5 把 Codex Session id 发布成 `<threadId>~<createdAt>~<n>`，想借此区分 Codex 为同一个 thread 列出的多行。这个键随后又作为 Session id 传回来，于是完整 DSH 客户端请求该会话的历史或文件时会被告知标识无效，或者拿到的历史与它请求的会话对不上。现在 Codex Session 重新是 `codex:<threadId>`，Host 每个 thread 只列一行，而不是每个 rollout 文件一行。0.5.5 缓存下来的 Session 仍会解析回它的 thread。
+- **那些多出来的行为什么没有了：** 它们并不是独立分支。Codex App Server 只打开 thread 的当前 rollout —— resume 一个已被取代的 rollout 会被拒绝，历史读取根本没有 path 参数 —— 所以那些行最终都指向同一个会话。
+- **0.5.1**–**0.5.5** 的全部内容同样包含在本版：跟随 DSH 的登录、Codex 默认关闭、凭据刷新锁回收、对 dsh 0.2.1-rc.2 的网关兼容，以及待命/重连修复。
 
-[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.5.4...v0.5.5) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.5/README.md)
+[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.5.5...v0.5.6) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.6/README.md)

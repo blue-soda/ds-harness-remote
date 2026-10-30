@@ -49,3 +49,5 @@ after either upstream is upgraded are recorded in
 
 0.5.5 changes no wire format: the plugin's Server authorization now follows DSH's DeepSeek session in both directions (signed in on DSH authorizes the device; signed out on DSH signs it out and disconnects), throttled to one reconciliation per ten seconds. Account creation stays a Server-side setting; accounts are matched by platform id. Everything above still applies.
 
+`0.5.6` changes no wire format either, and restores the shape 0.5.5 got wrong: a Codex Session is again `codex:<threadId>`, and `thread/list` reports each thread once (the freshest rollout) instead of publishing `<id>~<createdAt>~<n>` row keys. A client key from 0.5.5 still resolves to its thread id on the Host, so a cached Session keeps loading. Everything above still applies.
+

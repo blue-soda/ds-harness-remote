@@ -45,3 +45,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 
 0.5.5 不改线协议：插件的 Server 授权现在双向跟随 DSH 的 DeepSeek 会话（DSH 已登录则自动授权本设备；DSH 退出则插件一并登出并断开），对账每 10 秒最多一次。是否建号仍由 Server 侧配置决定，账号按平台 id 匹配。上面的内容仍然适用。
 
+`0.5.6` 同样不改线协议，并恢复了 0.5.5 弄错的形状：Codex Session 重新是 `codex:<threadId>`，`thread/list` 每个 thread 只报一行（最新的 rollout），不再发布 `<id>~<createdAt>~<n>` 行键。0.5.5 产生的客户端键仍会在 Host 上解析回真实 thread id，所以缓存中的 Session 继续可用。上面的内容仍然适用。
+
