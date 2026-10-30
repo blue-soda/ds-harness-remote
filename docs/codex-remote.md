@@ -132,3 +132,14 @@ node scripts/verify-dsh-plugin.mjs                                          # �
 后续恢复策略、跨平台矩阵与长期稳定性仍以 [TODO](../TODO.md) 为准；不应把 TODO 中的目标能力
 描述为已完成。
 
+
+## 会话键的复合格式（Host 内部，向后兼容）
+
+`thread/list` 返回的行使用 **`<id>~<createdAt>~<n>`** 作为 `id`，用于把 Codex 分叉出来的同 id 会话区分开。
+这是 **Host 侧的编码**，线协议格式没有变化：
+
+- **旧 Client + 新 Host**：旧 Client 把 `id` 当不透明字符串回传，Host 在 `codex.app.call` 入口把第一个 `~` 之前的部分
+  当作真实 thread id（`rowKey.indexOf('~')`），再做权限校验与上游调用，因此正常工作；
+- **新 Client + 旧 Host**：旧 Host 返回纯 id，没有 `~`，新 Client 原样透传，同样正常；
+- **要求**：任何消费 `thread/list` 的客户端都必须把 `id` 视为**不透明**，不得自行拆分、或把带 `~` 的键直接当 Codex
+  thread id 使用。历史接口（`dsh/sessionHistory`）在前缀里使用的是**还原后的真实 id**。
