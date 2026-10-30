@@ -1,7 +1,7 @@
 # 记录：Android 原生 Files/Terminal 接入（2026-09-21 起）
 
 Android Harness 会话接入 Files/Terminal 与只读预览的过程、契约与验收边界。
-**当前仍然生效的约束**摘要见 `AGENTS.md` 同名条目。
+**当前仍然生效的约束**摘要见 `docs/decisions.md` 同名条目。
 
 Android Harness 会话已接入 Files/Terminal：官方 workspaceFiles 目录与分页文本只读预览，
 terminal 创建/list/follow/retain/write/resize/close；不对 CodeX 投影开放。终端使用本地打包

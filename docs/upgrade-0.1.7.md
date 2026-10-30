@@ -15,8 +15,8 @@
 
 ## 二、开工前提（必须遵守）
 
-1. 先通读仓库 `AGENTS.md`、`README.md`、`README.zh.md`、`TODO.md`、`docs/protocol.md`、
-   `docs/plugin-integration.md`，并遵守 AGENTS.md 的「Implementation Rules」「Test Policy」
+1. 先通读仓库 `docs/decisions.md`、`README.md`、`README.zh.md`、`TODO.md`、`docs/protocol.md`、
+   `docs/plugin-integration.md`，并遵守 docs/decisions.md 的「Implementation Rules」「Test Policy」
    「Documentation Rules」（官方 ApiProxy/TypertGateway 为唯一业务面、allowlist 固定、
    fail-closed、禁写日志、不新增自定义 Harness 业务适配层等）。
 2. 只读参考 deepseek-harness 源码做对照，常用命令（PowerShell 下 tag 引用必须用
@@ -26,7 +26,7 @@
    git -C F:\workspace\github\deepseek-harness show "dsh-v0.1.7-alpha.1:<路径>"
    ```
 3. 不修改 deepseek-harness 仓库；不修改用户未要求改动的部分；不提交 `node_modules`、构建产物等
-   （AGENTS.md 规则 9）。
+   （docs/decisions.md 规则 9）。
 4. 每个改动点先读现状代码再动手；所有结论以源码为准，下述评估结论如有出入以源码为准并记录差异。
 
 ## 三、已知评估结论（实施依据，按优先级）
@@ -123,9 +123,9 @@
   （`harnessSessionGeneration` 对 0.1.7 仍为 v3，V4 仅 on-disk 未发布）、`$events` 协议、
   terminal 端点、commands.execute `submittedAttachments` 参数、typert-protocol 导出
   （全部增量）。
-- 文档同步：`README.md`/`README.zh.md`/`AGENTS.md`/`TODO.md`/`CHANGELOG.md`/`docs/**`
+- 文档同步：`README.md`/`README.zh.md`/`docs/decisions.md`/`TODO.md`/`CHANGELOG.md`/`docs/**`
   （含 `docs/design/`、`packages/plugin/README.md`、`apps/android/README.md`、
-  `apps/vscode/README.md`）的版本矩阵、状态表、能力描述加入 0.1.7-alpha.1；按 AGENTS.md
+  `apps/vscode/README.md`）的版本矩阵、状态表、能力描述加入 0.1.7-alpha.1；按 docs/decisions.md
   要求保持 README/AGENTS/TODO 与实现一致。
 
 ## 四、实施顺序建议
@@ -140,7 +140,7 @@
 pnpm install
 pnpm --filter './packages/**' -r build
 pnpm -r check
-pnpm -r test            # 允许的既有 Windows 平台假设失败例外见 AGENTS.md
+pnpm -r test            # 允许的既有 Windows 平台假设失败例外见 docs/decisions.md
 NODE_ENV=production pnpm -r build
 node scripts/verify-dsh-plugin.mjs
 git diff --check
@@ -159,6 +159,6 @@ git diff --check
 ## 六、交付物
 
 1. 代码改动（含新增/更新的测试，遵循 Test Policy：只为核心状态机/协议/权限面补测试）。
-2. 同步后的文档（README 中英文、AGENTS.md、TODO.md、docs 相关页）。
+2. 同步后的文档（README 中英文、docs/decisions.md、TODO.md、docs 相关页）。
 3. 一份升级说明（本次改动摘要、0.1.7 支持范围、遗留风险与后续验证项），写入 CHANGELOG
    或 PR 描述。

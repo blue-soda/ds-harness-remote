@@ -1,7 +1,7 @@
 # CodeX 虚拟 Workspace / Session 接入——完整需求提示词
 
 > 将本文整体作为编码 Agent 的任务提示词使用。实现前必须阅读仓库根目录的
-> `AGENTS.md`、`README.md`、`README.zh.md`、`TODO.md`、`docs/protocol.md` 与实际代码。
+> `docs/decisions.md`、`README.md`、`README.zh.md`、`TODO.md`、`docs/protocol.md` 与实际代码。
 
 ## 任务
 

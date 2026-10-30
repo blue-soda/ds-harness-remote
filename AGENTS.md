@@ -269,7 +269,7 @@ instead"、"discards a restore that lands after the user answered"，以及端�
 
 - `README.md`：面向用户的默认英文入口；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
 - `README.zh.md`：与根 README 对应的中文版本；功能和版本信息必须同步。
-- `AGENTS.md`：面向编码 Agent，写仓库结构、进度、命令和实现约束。
+- `docs/decisions.md`：面向编码 Agent，写仓库结构、进度、命令和实现约束。
 - `TODO.md`：未完成任务与优先级。
 - `apps/server/README.md`、`apps/server/README.zh.md`：开源自部署 Server 的实际能力、配置、运行方式和验证边界。
 - `docs/server.md`：完整 Server 项目的产品/功能设计，并说明本仓库自部署版本的范围。
@@ -278,7 +278,7 @@ instead"、"discards a restore that lands after the user answered"，以及端�
 - `docs/config-and-role.md`：设备身份契约（一台设备一份身份、deviceId 终身不变、迁移与吊销即删行、控制开关语义）与配置写回路径（按需阅读，勿写入本文件）。
 - `docs/incidents/`：按需阅读的排查记录（叙事与验收过程；其中的**当前约束**已摘要进本文件）。
 - `docs/release.md`、`docs/validation-history.md`：发版清单与实测复盘、按日期追加的验证历史（按需阅读）。
-- `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
+- `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`docs/decisions.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
 

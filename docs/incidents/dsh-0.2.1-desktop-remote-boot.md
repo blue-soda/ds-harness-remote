@@ -1,7 +1,7 @@
 # 排查记录：DSH 0.2.1 Desktop 远程模式启动失败（2026-10-06）
 
 本文是一次完整排查的原始记录，含被证伪的假设与取证方法，供后续遇到同类现象时对照。
-**当前仍然生效的约束**摘要见 `AGENTS.md` 同名条目。
+**当前仍然生效的约束**摘要见 `docs/decisions.md` 同名条目。
 
 现象：Desktop 作为 Client 选中远程 CodeX 工作区后，渲染进程的启动判定失败
 （`Error: web boot: 48 entries did not activate`），其中 `@deepseek-ai/dsh-client-locale: failed`，

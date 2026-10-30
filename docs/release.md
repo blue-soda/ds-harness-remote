@@ -2,7 +2,7 @@
 
 本仓库以 `@blue-soda/dsh-remote` 发布到 npm（GitHub 仓库同时是 DSH 的 GitHub 安装边界）。
 本文记录发布入口、发版清单与三次发布的实测复盘。**仍会直接导致失败的三条硬规则**摘要见
-`AGENTS.md` 的 Project Structure 小节。
+`docs/decisions.md` 的 Project Structure 小节。
 
 ## 包名、归属与安装边界
 
