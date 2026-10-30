@@ -96,3 +96,22 @@ Android **307**、WebRTC 62、Client Core 39、VS Code 13、Browser 1、Crypto 7
 `werift-rtc.test.ts` 的 `lan`/`p2p` 断言在本机虚拟网卡环境下的历史失败、以及
 `docs/protocol.md` §8.1.2 / `docs/server.md` / `docs/plugin-integration.md` 仍在描述已删除的
 `/api/v1/devices/register-owned-role` 端点（跨仓库契约，需与独立 Server 仓库一同确认后再改）。
+
+2026-10-30 Codex 同一 thread 的多条 rollout 与 Session 标识修正：
+
+- 现象：把 `thread/list` 的行键 `<id>~<createdAt>~<n>` 当作 Session id 发布后，DSH 客户端拿这个 id 请求
+  历史/文件/终端会失败 —— 客户端侧 `~` 不匹配直接 `CODEX_SESSION_INVALID`，历史页还会因 Host 还原成真实
+  thread id 而撞上"history header id 与请求 id 不一致"。
+- 实测（真实 Codex 0.165.0-alpha.1.2，`codex app-server` + `~/.codex` 只读核对）：`thread/list` 会为同一个
+  thread id 返回多行（38 个 thread / 45 行，7 行为重复），每行对应一个 rollout 文件；`thread/read` 只读
+  state DB `threads.rollout_path` 指向的当前 rollout；`thread/resume|fork` 带被取代的 rollout `path` 被上游
+  拒绝（`cannot resume paginated thread … with stale path … omit path and resume by thread id`）；
+  `thread/read` / `thread/turns/list` 没有 `path` 参数。**即被取代的 rollout 没有可读写的入口**，行键再花哨
+  也只能落回同一个 thread。
+- 结论与修正：Session 标识恢复为 `codex:<threadId>`；Host 在 `thread/list` 按 thread id 去重、保留
+  `updatedAt` 最新的一行（与 state DB 的 `rollout_path` 逐条一致：45 行 0 处不符）；客户端 catalog 同样按
+  thread id 去重；旧复合键只作为输入兼容，在文件、终端、流与历史四个入口统一解析回真实 thread id。
+- 验证：Plugin **413 通过 / 47 文件**、Client Core **41 通过**；`check`、`verify-dsh-plugin.mjs`、
+  `git diff --check` 通过；构建产物（`dist/index.js`）对真实 Codex 只读跑通 `thread/list`（29 行、无重复、
+  无 `~`）与旧键 `dsh/sessionHistory`（命中真实 thread id）。
+- 未覆盖：真实 Desktop 跨机 UI 点击回归；上游若将来提供按 rollout 读取的接口，才谈得上"每个分支一个 Session"。

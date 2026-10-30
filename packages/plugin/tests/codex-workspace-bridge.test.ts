@@ -90,6 +90,21 @@ describe('CodeX workspace and terminal bridge', () => {
     await bridge.closeAll()
   })
 
+  // Regression: the release that published `<threadId>~<createdAt>~<n>` Session ids made every file and
+  // terminal call fail with CODEX_SESSION_INVALID, because the id parser only accepted the bare thread id.
+  // A Client still holding one of those keys keeps its workspace: the key resolves to its thread.
+  it('resolves a legacy composite Session id to its thread', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-codex-legacy-'))
+    await writeFile(join(root, 'hello.txt'), 'hello')
+    const resolved: string[] = []
+    const bridge = new CodexWorkspaceBridge(async thread => { resolved.push(thread); return root }, () => true)
+    await expect(bridge.call('workspaceFiles/list', {
+      args: { workspaceFileScopeId: 'codex:01a188f0-7f9d-7262-aaf2-67273dbf9a24~1793298885~0', path: '.' },
+    }, signal)).resolves.toMatchObject({ ok: true, value: { entries: [{ name: 'hello.txt' }] } })
+    expect(resolved).toEqual(['01a188f0-7f9d-7262-aaf2-67273dbf9a24'])
+    await bridge.closeAll(); await rm(root, { recursive: true, force: true })
+  })
+
   it('answers the official terminal environment, shells and info shapes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-codex-'))
     const resolved = await realpath(root)

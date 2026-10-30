@@ -84,12 +84,7 @@ describe('CodexRemoteDomain', () => {
     await domain.start()
 
     const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-    // Row keys keep forked rows apart; the real id is the part before the first separator.
-    const rows = {
-      ...(result as Record<string, unknown>),
-      data: (result as { data: Array<Record<string, unknown>> }).data.map(row => ({ ...row, id: String(row.id).split('~')[0] })),
-    }
-    expect(rows).toMatchObject({ data: [
+    expect(result).toMatchObject({ data: [
       { id: 'allowed-thread', cwd: root, projectId: 'allowed-project' },
       { id: 'outside-thread', cwd: outside, projectId: 'outside-project' },
       { id: 'project-only-thread', projectId: 'allowed-project' },
@@ -136,12 +131,7 @@ describe('CodexRemoteDomain', () => {
       await domain.start()
 
       const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-      // Row keys keep forked rows apart; the real id is the part before the first separator.
-      const rows = {
-        ...(result as Record<string, unknown>),
-        data: (result as { data: Array<Record<string, unknown>> }).data.map(row => ({ ...row, id: String(row.id).split('~')[0] })),
-      }
-      expect(rows).toMatchObject({ data: [
+      expect(result).toMatchObject({ data: [
         { id: 'allowed-thread', cwd: root },
         { id: 'outside-thread', cwd: outside },
         { id: 'unprojected-thread', cwd: `${root}-unprojected` },
@@ -149,14 +139,15 @@ describe('CodexRemoteDomain', () => {
       expect(JSON.stringify(result)).not.toContain('project-only-thread')
       expect(JSON.stringify(result)).not.toContain('missing-cwd')
       expect(app.calls.filter(call => call.method === 'thread/list')).toHaveLength(1)
-      // A Codex fork keeps the thread id, so the rows have to come back under unique keys - and whatever the
-      // client sends back from a row key must reach the App Server as the real thread id.
-      const rowKeys = (result as { data: Array<{ id: string }> }).data.map(row => row.id)
-      expect(new Set(rowKeys).size).toBe(rowKeys.length)
-      expect(rowKeys.every(key => key.includes('~'))).toBe(true)
-      await domain.call('connection-1', { method: 'thread/resume', params: { threadId: rowKeys[0] } })
+      // The wire identity stays the real thread id. A Client built against the release
+      // that published `<id>~<createdAt>~<n>` keys still reaches the App Server with it.
+      const rowIds = (result as { data: Array<{ id: string }> }).data.map(row => row.id)
+      expect(rowIds).toEqual(['allowed-thread', 'outside-thread', 'unprojected-thread'])
+      await domain.call('connection-1', {
+        method: 'thread/resume', params: { threadId: 'allowed-thread~1793298885~0' },
+      })
       expect(app.calls.find(call => call.method === 'thread/resume')?.params).toMatchObject({
-        threadId: rowKeys[0]?.split('~')[0],
+        threadId: 'allowed-thread',
       })
       await expect(domain.call('connection-1', {
         method: 'thread/read', params: { threadId: 'unprojected-thread' },
@@ -170,6 +161,28 @@ describe('CodexRemoteDomain', () => {
       await domain.close()
     },
   )
+
+  // Regression: one Codex thread whose history was rewritten (a re-send, a fork) is listed once per
+  // rollout file, under the same thread id. The list used to publish a `<id>~<createdAt>~<n>` row key
+  // to keep them apart, which then travelled back as a Session id and made the Host reject history and
+  // file requests ("CODEX_SESSION_INVALID"). Only the current rollout can be opened, so the thread is
+  // reported once, under its real id, and the row that is kept is the freshest one.
+  it('reports a thread once, keeping the rollout the App Server can open', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    app.duplicateThreadRows = true
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+
+    const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
+    const rows = (result as { data: Array<Record<string, unknown>> }).data
+    expect(rows.filter(row => row.id === 'allowed-thread')).toEqual([
+      expect.objectContaining({ id: 'allowed-thread', name: 'current rollout', updatedAt: 2 }),
+    ])
+    expect(JSON.stringify(result)).not.toContain('superseded rollout')
+    expect(rows.map(row => row.id)).toEqual(['allowed-thread', 'outside-thread', 'project-only-thread'])
+    await domain.close()
+  })
 
   it('starts new threads only from CodeX advertised workspace paths', async () => {
     const { base, root, outside } = await directories()
@@ -726,6 +739,8 @@ class FakeAppServer implements CodexAppServerLike {
   rejectTurnStartBusy = false
   rejectSettings = false
   projectListMode: 'normal' | 'empty' | 'unsupported' = 'normal'
+  /** Emit a second, superseded rollout row for `allowed-thread`, as a rewritten Codex history does. */
+  duplicateThreadRows = false
 
   constructor(private readonly root: string, private readonly outside = root) {}
 
@@ -737,7 +752,14 @@ class FakeAppServer implements CodexAppServerLike {
     if (method === 'account/read') return { account: { type: 'chatgpt', email: 'private@example.com' }, requiresOpenaiAuth: true }
     if (method === 'thread/list') return {
       data: [
-        { id: 'allowed-thread', projectId: 'allowed-project', cwd: this.root, createdAt: 1, updatedAt: 2, path: 'private rollout path' },
+        ...(this.duplicateThreadRows
+          // The superseded rollout comes first on purpose: freshness, not position, must keep the row
+          // that points at the thread's current rollout.
+          ? [{ id: 'allowed-thread', projectId: 'allowed-project', cwd: this.root,
+              createdAt: 1, updatedAt: 1, name: 'superseded rollout' }]
+          : []),
+        { id: 'allowed-thread', projectId: 'allowed-project', cwd: this.root, createdAt: 1, updatedAt: 2,
+          ...(this.duplicateThreadRows ? { name: 'current rollout' } : {}), path: 'private rollout path' },
         { id: 'outside-thread', projectId: 'outside-project', cwd: this.outside, createdAt: 1, updatedAt: 2, path: 'private rollout path' },
         { id: 'project-only-thread', projectId: 'allowed-project', createdAt: 1, updatedAt: 2, path: 'private rollout path' },
         { id: 'unprojected-thread', cwd: `${this.root}-unprojected`, createdAt: 1, updatedAt: 2, path: 'private rollout path' },

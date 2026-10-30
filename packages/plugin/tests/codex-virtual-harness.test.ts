@@ -353,6 +353,44 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  // Regression: Codex lists a thread whose history was rewritten (a re-send, a fork) once per rollout
+  // file, under one thread id. Two rows produced two Sessions with the same id, and the release that
+  // "fixed" that by publishing `<id>~<createdAt>~<n>` broke every Session id consumer instead. One
+  // Session per thread, under the real id, is what both the App Server and the wire contract support.
+  it('lists a rewritten CodeX thread once, under its real id, and keeps the current rollout', async () => {
+    const client = fakeCodex([
+      { ...codexThread('thr_1', '/workspace/repo', 'Superseded rollout'), updatedAt: 1_700_000_050 },
+      { ...codexThread('thr_1', '/workspace/repo', 'Current rollout'), updatedAt: 1_700_000_200 },
+    ])
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+
+    const result = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
+
+    expect(result).toMatchObject({ ok: true, value: { items: [expect.objectContaining({ sessionId: 'codex:thr_1' })] } })
+    expect(JSON.stringify(result)).toContain('Current rollout')
+    expect(JSON.stringify(result)).not.toContain('Superseded rollout')
+    await target.close()
+  })
+
+  // A Client that cached a Session id from the composite-row-key release must not be left with a
+  // history that cannot load: the key resolves to its thread, and the projected history is the
+  // thread's, so the id the native UI holds keeps working until the next catalog read replaces it.
+  it('loads history for a Session id cached from the composite-row-key release', async () => {
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+
+    const result = await target.dispatch('session/history', {
+      args: { request: { sessionId: 'codex:thr_1~1700000100~0' } },
+    }, new AbortController().signal)
+
+    expect(result).toMatchObject({ ok: true, value: { events: expect.any(Array), hasMore: expect.any(Boolean) } })
+    expect((result as { value: { events: unknown[] } }).value.events.length).toBeGreaterThan(0)
+    // The App Server was asked for the thread, not for the row key.
+    expect(client.request.mock.calls.find(([method]) => method === 'dsh/sessionHistory')?.[1])
+      .toMatchObject({ threadId: 'thr_1' })
+    await target.close()
+  })
+
   it('does not mark listed CodeX Sessions blank when thread/list omits turns', async () => {
     const client = fakeCodex()
     const originalRequest = client.request.getMockImplementation() as

@@ -7,6 +7,9 @@ export const TERMINAL_CALLS = new Set(['terminal/environment', 'terminal/shells'
   'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close'])
 export const TERMINAL_STREAMS = new Set(['terminal/follow', 'terminal/retain'])
 const id = z.string().regex(/^[A-Za-z0-9_:-]{1,256}$/)
+// A Session key may carry the composite `~` form an earlier release published; the
+// terminal id itself must not, because the CodeX bridge refuses it there.
+const sessionKey = z.string().regex(/^[A-Za-z0-9_:~-]{1,512}$/)
 
 /** Host-lifetime device ownership survives transport reconnects; never supplied by the client. */
 export class TerminalPolicy {
@@ -19,7 +22,7 @@ export class TerminalPolicy {
       'Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / 远程终端未开启，请在 Host 的 Remote 设置中开启「远程终端」，开关切换后立即保存并生效。')
     const args = z.object({ args: z.record(z.unknown()) }).strict().parse(payload).args
     const rawSessionId = args.agentId ?? args.sessionId
-    const sessionId = id.parse(rawSessionId)
+    const sessionId = sessionKey.parse(rawSessionId)
     // CodeX sessions are deliberately opaque keys here. Their thread/cwd
     // authority is resolved by the CodeX Host domain, never by Harness lookup.
     const codexSession = parseCodexSessionId(sessionId)

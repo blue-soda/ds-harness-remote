@@ -133,13 +133,22 @@ node scripts/verify-dsh-plugin.mjs                                          # �
 描述为已完成。
 
 
-## 会话键的复合格式（Host 内部，向后兼容）
+## 会话标识与同一 thread 的多条 rollout（Host 侧，向后兼容）
 
-`thread/list` 返回的行使用 **`<id>~<createdAt>~<n>`** 作为 `id`，用于把 Codex 分叉出来的同 id 会话区分开。
-这是 **Host 侧的编码**，线协议格式没有变化：
+公开的 Session 标识仍然是 **`codex:<threadId>`**，`<threadId>` 就是 Codex 的真实 thread id；线协议格式没有变化。
 
-- **旧 Client + 新 Host**：旧 Client 把 `id` 当不透明字符串回传，Host 在 `codex.app.call` 入口把第一个 `~` 之前的部分
-  当作真实 thread id（`rowKey.indexOf('~')`），再做权限校验与上游调用，因此正常工作；
-- **新 Client + 旧 Host**：旧 Host 返回纯 id，没有 `~`，新 Client 原样透传，同样正常；
-- **要求**：任何消费 `thread/list` 的客户端都必须把 `id` 视为**不透明**，不得自行拆分、或把带 `~` 的键直接当 Codex
-  thread id 使用。历史接口（`dsh/sessionHistory`）在前缀里使用的是**还原后的真实 id**。
+Codex 会为同一个 thread id 列出多条 `thread/list` 记录：一次重发、一次 fork，或后续 resume 另写了一个 rollout 文件时，
+每个 rollout 文件都会成为一行。这些行的 `id` 相同，而 `path`、`createdAt`、`updatedAt`、名称和预览不同。
+**App Server 只能打开该 thread 的当前 rollout**，这一点在本机 Codex 0.165.0-alpha.1.2 上实测确认：
+
+- `thread/resume` / `thread/fork` 带一个已被取代的 rollout `path` 会被拒绝，错误信息本身要求改用 thread id
+  （`cannot resume paginated thread … with stale path … omit path and resume by thread id`）；
+- `thread/read` 与 `thread/turns/list` 没有 `path` 参数，即使传了也会被忽略，读到的仍是当前 rollout。
+
+因此那些行并不存在可独立读写的分支。Host 在 `thread/list` 里按 thread id 去重，只保留 `updatedAt` 最新的那一行；
+它与 state DB 的 `threads.rollout_path` 逐条一致（真实库核对：38 个 thread / 45 行 / 0 处不符）。下游必须继续把 `id`
+当作不透明字符串。
+
+历史教训：有一版把行键 `<id>~<createdAt>~<n>` 当作 Session id 发布，想借此“区分”这些行。它既不能让任何一行独立可读
+（Host 仍然只能解析回 thread id），又让 `~` 进入了 Session id，使文件与终端入口的 id 校验直接失败
+（`CODEX_SESSION_INVALID`）。现在不再产生这种键；Host 仍会把它解析回真实 thread id，所以旧 Client 缓存的键继续可用。

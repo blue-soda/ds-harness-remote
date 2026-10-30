@@ -22,6 +22,7 @@ import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
 import type { CodexRemoteDomain } from './domain.js'
+import { resolveCodexThreadKey } from './session-id.js'
 
 export type PublishCodexFrame = (
   event: 'codex.app.frame' | 'codex.app.stream.closed' | 'codex.app.capability',
@@ -115,8 +116,11 @@ export class CodexPeerBridge {
       method: 'thread/read',
       params: { threadId: params.threadId, includeTurns: false },
     })
-    this.streams.set(params.streamId, params.threadId)
-    return { opened: true, streamId: params.streamId, threadId: params.threadId }
+    // Store the real thread id: inbound frames are matched against it, and a Client
+    // built against the composite-row-key release may still open a stream with one.
+    const threadId = resolveCodexThreadKey(params.threadId)
+    this.streams.set(params.streamId, threadId)
+    return { opened: true, streamId: params.streamId, threadId }
   }
 
   closeStream(input: unknown): { closed: true; streamId: string } {

@@ -145,7 +145,9 @@ export class CodexRemoteClient {
     const result = await this.call('thread/list', params, false, signal)
     if (!isRecord(result) || !Array.isArray(result.data)) throw invalidResponse('thread list')
     return {
-      sessions: result.data.map(projectCodexThread).filter((value): value is DisplaySession => value !== undefined),
+      sessions: uniqueCodexThreadRows(result.data)
+        .map(projectCodexThread)
+        .filter((value): value is DisplaySession => value !== undefined),
       ...(typeof result.nextCursor === 'string' ? { nextCursor: result.nextCursor } : {}),
     }
   }
@@ -322,6 +324,65 @@ export function projectCodexThread(value: unknown): DisplaySession | undefined {
     ...(typeof value.archived === 'boolean' ? { archived: value.archived } : {}),
     ...(typeof value.isPinned === 'boolean' ? { pinned: value.isPinned } : {}),
   }
+}
+
+const THREAD_ID_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u
+/**
+ * The row key an earlier release published for every `thread/list` row:
+ * `<threadId>~<createdAt>~<n>`.
+ */
+const LEGACY_ROW_KEY = /^([A-Za-z0-9][A-Za-z0-9._-]{0,255})~[^~]{0,64}~[0-9]{1,9}$/u
+
+/**
+ * The real Codex thread id behind a Session id or a `thread/list` row key.
+ *
+ * The public Session id is `codex:<threadId>`, and every App Server call wants
+ * that bare `<threadId>`. One release instead published `<threadId>~<createdAt>~<n>`
+ * so that the rows Codex reports for one thread stayed distinguishable; those keys
+ * still resolve here, because a Client built against that release may send them.
+ * @param key - the part after `codex:`, or a raw row id.
+ * @returns the thread id, or undefined when the key is neither form.
+ */
+export function codexThreadIdFromKey(key: string): string | undefined {
+  if (THREAD_ID_KEY.test(key)) return key
+  return LEGACY_ROW_KEY.exec(key)?.[1]
+}
+
+function rowFreshness(row: Record<string, unknown>): number {
+  for (const field of ['updatedAt', 'createdAt'] as const) {
+    const value = row[field]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return 0
+}
+
+/**
+ * Keep one `thread/list` row per Codex thread, in first-seen order.
+ *
+ * `thread/list` scans rollout files as well as the state DB, so a thread whose
+ * history was rewritten - a re-send, a fork, a segment written by a later resume -
+ * comes back once per rollout file, under the same thread id. The App Server can
+ * only open a thread's *current* rollout: `thread/resume` with a superseded path is
+ * refused outright ("cannot resume paginated thread ... with stale path"), and
+ * `thread/read` / `thread/turns/list` ignore a `path` argument, so a row for a stale
+ * rollout leads to the same thread the current row already opens. Showing it anyway
+ * produced duplicate Sessions that could not be told apart.
+ *
+ * The row that points at the current rollout is the freshest one: `updatedAt` is the
+ * rollout's last write, and it matched `threads.rollout_path` for every duplicated
+ * thread in a real Codex 0.165 store (38 threads, 45 rows, 0 mismatches).
+ * @param values - the rows as the App Server returned them.
+ * @returns one row per thread, the freshest one, invalid rows dropped.
+ */
+export function uniqueCodexThreadRows(values: readonly unknown[]): Record<string, unknown>[] {
+  const byThread = new Map<string, Record<string, unknown>>()
+  for (const value of values) {
+    if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0) continue
+    const threadId = codexThreadIdFromKey(value.id) ?? value.id
+    const current = byThread.get(threadId)
+    if (current === undefined || rowFreshness(value) > rowFreshness(current)) byThread.set(threadId, value)
+  }
+  return [...byThread.values()]
 }
 
 /**

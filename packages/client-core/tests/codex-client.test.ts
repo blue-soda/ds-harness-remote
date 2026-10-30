@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   CodexRemoteClient,
+  codexThreadIdFromKey,
   createCodexTimelineState,
   deriveCodexCwdWorkspaces,
   projectCodexHistory,
   projectCodexThread,
   reduceCodexTimelineFrame,
+  uniqueCodexThreadRows,
 } from '../src/codex-client.js'
 
 describe('Codex display projection', () => {
@@ -51,6 +53,31 @@ describe('Codex display projection', () => {
       status: 'waiting',
       pinned: true,
     })
+  })
+
+  it('keeps one row per thread and the freshest rollout of it', () => {
+    // Codex lists a thread once per rollout file; only the current rollout can be opened, and the
+    // state DB's `rollout_path` matched the row with the latest `updatedAt` in a real 0.165 store.
+    const rows = uniqueCodexThreadRows([
+      { id: 'thr_1', name: 'superseded', createdAt: 10, updatedAt: 20 },
+      { id: 'thr_1', name: 'current', createdAt: 10, updatedAt: 30 },
+      { id: 'thr_2', name: 'other', createdAt: 5, updatedAt: 15 },
+      { id: 'thr_1', name: 'stale later in the list', createdAt: 10, updatedAt: 25 },
+      { name: 'no id' },
+      null,
+    ])
+    expect(rows).toEqual([
+      { id: 'thr_1', name: 'current', createdAt: 10, updatedAt: 30 },
+      { id: 'thr_2', name: 'other', createdAt: 5, updatedAt: 15 },
+    ])
+  })
+
+  it('resolves a legacy composite row key to its thread id', () => {
+    expect(codexThreadIdFromKey('thr_1')).toBe('thr_1')
+    expect(codexThreadIdFromKey('01a188f0-7f9d-7262-aaf2-67273dbf9a24~1793298885~0'))
+      .toBe('01a188f0-7f9d-7262-aaf2-67273dbf9a24')
+    expect(codexThreadIdFromKey('thr_1~~2')).toBe('thr_1')
+    expect(codexThreadIdFromKey('not a thread id')).toBeUndefined()
   })
 
   it('derives deterministic fallback workspaces from unique Thread cwd values', () => {

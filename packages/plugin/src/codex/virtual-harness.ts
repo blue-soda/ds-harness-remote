@@ -3,6 +3,7 @@ import {
   CodexRemoteClient,
   deriveCodexCwdWorkspaces,
   projectCodexThread,
+  uniqueCodexThreadRows,
   type DisplaySession,
 } from '@dsh-remote/client-core'
 import type {
@@ -11,6 +12,7 @@ import type {
   TypertRpcResult,
 } from '../typert-gateway-contract.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
+import { parseCodexSessionId } from './session-id.js'
 import { decodeByteValue } from '../rpc-binary-attachments.js'
 import { CODEX_HISTORY_MAX_MESSAGES } from './method-policy.js'
 import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
@@ -1918,7 +1920,7 @@ async function loadCatalog(
       updatedAt: workspace.updatedAt,
     }))
   }
-  const projected = threads.map(thread => {
+  const projected = uniqueCodexThreadRows(threads).map(thread => {
     const session = projectCodexThread(thread)
     return session === undefined ? undefined : { thread, session }
   }).filter((value): value is { thread: JsonRecord; session: DisplaySession } => value !== undefined)
@@ -2769,10 +2771,9 @@ function sessionIdFromAddress(address: JsonRecord): string {
 }
 
 function nativeThreadId(sessionId: string): string {
-  if (!sessionId.startsWith(CODEX_SESSION_PREFIX) || sessionId.length === CODEX_SESSION_PREFIX.length) {
-    throw new Error('The selected Session does not belong to CodeX.')
-  }
-  return sessionId.slice(CODEX_SESSION_PREFIX.length)
+  const parsed = parseCodexSessionId(sessionId)
+  if (parsed === undefined) throw new Error('The selected Session does not belong to CodeX.')
+  return parsed.threadId
 }
 
 function activeTurnId(value: unknown): string | undefined {

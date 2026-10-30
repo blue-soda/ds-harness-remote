@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync 
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, posix, relative, resolve } from 'node:path'
-import { deriveCodexCwdWorkspaces } from '@dsh-remote/client-core'
+import { deriveCodexCwdWorkspaces, uniqueCodexThreadRows } from '@dsh-remote/client-core'
 import type { CodexAppFrameData, CodexAppStreamClosedData, CodexPermissionPreset } from '@dsh-remote/protocol'
 import type { ResolvedCodexConfig } from '../config.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
@@ -23,6 +23,7 @@ import {
 } from './method-policy.js'
 import { CodexPeerBridge, type PublishCodexFrame } from './peer-bridge.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
+import { resolveCodexThreadKey } from './session-id.js'
 import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual-harness.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -237,13 +238,11 @@ export class CodexRemoteDomain {
         idempotencyKey: call.params.idempotencyKey,
       }))
     }
-    // Forks are separate rows that share one thread id, so the list hands each row out under a unique key
-    // (`<id>~<createdAt>~<n>`). Anything that comes back with such a key is resolved to the real id here, before the
-    // thread authority or an upstream call sees it: a resume must never be sent a row key.
+    // A Client built against the release that published composite row keys may still
+    // send one; resolve it here, before the workspace authority or an upstream call
+    // sees it, because every App Server method takes the bare thread id.
     if (isRecord(call.params) && typeof call.params.threadId === 'string') {
-      const rowKey: string = call.params.threadId
-      const separator = rowKey.indexOf('~')
-      if (separator > 0) (call.params as { threadId: string }).threadId = rowKey.slice(0, separator)
+      (call.params as { threadId: string }).threadId = resolveCodexThreadKey(call.params.threadId)
     }
     if (call.method === 'thread/list') {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params)) as {
@@ -253,14 +252,14 @@ export class CodexRemoteDomain {
         result,
         await this.readWorkspaceAuthority(result.data),
       ) as { data: Record<string, unknown>[] }
-      // A fork keeps the thread id and differs by name, preview and createdAt. The row key carries createdAt plus the
-      // row position so two rows can never collide, and the id stays first so it can be resolved above.
+      // One Session per thread. Codex lists a thread once per rollout file it finds
+      // (a re-send or a fork writes another), but the App Server can only open the
+      // thread's current rollout, so the extra rows are Sessions that all lead to the
+      // same place. Their ids stay the real thread id: the wire identity is
+      // `codex:<threadId>` and a row key belongs nowhere near it.
       return {
         ...authorized,
-        data: authorized.data.map((row, index) => ({
-          ...row,
-          id: `${String(row.id)}~${String(row.createdAt ?? '')}~${index}`,
-        })),
+        data: uniqueCodexThreadRows(authorized.data),
       }
     }
     if (call.method === 'thread/start') {

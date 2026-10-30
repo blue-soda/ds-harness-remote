@@ -1446,8 +1446,11 @@ UI 排版、静态说明和 Admin 普通筛选不属于协议 conformance。
 ### CodeX Session workspace and terminal scope
 
 A Remote `workspaceFileScopeId` or terminal `agentId` may identify either a Harness
-Session or a CodeX Session. CodeX sessions use the form `codex:<threadId>` and are
-resolved by the Host; they are never looked up as Harness agents. The Host obtains
+Session or a CodeX Session. CodeX sessions use the form `codex:<threadId>`, where
+`<threadId>` is the bare Codex thread id, and are resolved by the Host; they are never
+looked up as Harness agents. A row key from the retired `<threadId>~<createdAt>~<n>`
+form still resolves to its thread id, so a Client built against that release keeps
+working. The Host obtains
 the current CodeX thread `cwd`, creates an independent workspace-file scope and
 terminal context per thread, and applies the same path normalization, realpath,
 symlink, size, terminal ownership, and Remote settings checks as Harness sessions.
