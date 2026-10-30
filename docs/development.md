@@ -146,7 +146,15 @@ node apps/server/dist/main.js          # 或 systemd 服务 / Docker Compose
 见[release.md](release.md)。三条硬规则：`break-hard-links.mjs` → `cd packages/plugin && npm publish --access public` →
 2FA 需要 OTP。版本号**五处**必须一致（根与包的 `package.json`、两个 `dsh-plugin.json`、`src/version.ts`）。
 
-## 7. 改代码前的必读
+## 7. 当前验证基线（2026-10-30）
+
+- `pnpm -r check`、`node scripts/verify-dsh-plugin.mjs` 通过；`git diff --check` 干净
+- 插件单测 **407 通过 / 47 文件**；Protocol 234/7、Server 49/5、Android 307、WebRTC 62、Client Core 39、VS Code 13、Browser 1、Crypto 7
+- 端到端矩阵 **22 场景 / 141 断言全绿**（`scripts/remote-e2e.mts`，1071 秒，含 `slow` 场景）
+- 已知环境相关抖动：`tests/werift-rtc.test.ts`（网卡/防火墙），以连跑两次一致为准
+- 历史记录（当时的构建与实机结论）见[验证历史](validation-history.md)
+
+## 8. 改代码前的必读
 
 [decisions.md](decisions.md) 记录了不变量（设备身份、`role` 只在连接上、控制开关语义、恢复阶梯、登录/登出绑定、
 allowlist、日志禁写内容等）。改动这些行为前先读它；`docs/incidents/` 有历史排查过程。
