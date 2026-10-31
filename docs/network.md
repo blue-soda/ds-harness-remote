@@ -153,6 +153,7 @@ Relay 通过已建立的 WSS 转发 Base64URL 编码的 Noise ciphertext。它�
 - WebRTC DataChannel 名称为 `dsh`，使用 `ordered: true`。
 - Relay frame 携带 `connectionId`、目标设备、递增诊断 counter 与 Noise ciphertext。
 - Noise transport 单消息上限为 65,535 bytes；超过 48 KiB 的业务消息先在 secure channel 层分片，完整消息上限为 4 MiB。
+- 历史页必须落在单条 4 MiB 消息内：Host 把 `session/follow` / `session/page` / `session.history` 的 `maxMessages` 钳到 50（DSH 自己分页的下限）。DSH 默认请求 500 条并要求两个 Turn 起点才截断，只有一个长 Turn 的会话会返回整份日志——真实案例 6.0 MB 的 follow snapshot 无法加密，发送失败会断开整条连接，表现为所有会话卡在"历史加载中"直到超时。单个帧仍然超限时只关闭该 stream 并回 `RESPONSE_TOO_LARGE`，不再断开 peer。
 - WebRTC 层还会对较大的 Noise ciphertext 做透明 chunking，以适配不同 DataChannel 实现的发送限制；重组发生在 Noise 之下，不改变加密语义。
 - 图片 Prompt、attachment response 与 File Viewer range read 还有各自的有界业务分块和并发限制。
 

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
+import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 import { CodexWorkspaceBridge, type RemoteTerminalProcess, type RemoteTerminalSpawner } from '../src/codex-workspace-bridge.js'
 import { TerminalPolicy } from '../src/terminal-policy.js'
 import { RpcError } from '../src/rpc-router.js'
@@ -259,6 +260,79 @@ describe('HarnessRemoteBridge', () => {
     await expect(other.call({ endpoint: 'terminal/list', payload: { args: { sessionId: 'codex:one' } } }))
       .resolves.toEqual({ ok: true, value: [] })
     await bridge.closeAll(); await other.closeAll(); await rm(root, { recursive: true, force: true })
+  })
+
+  // Regression: a session with one long Turn is paged by `maxMessages` (the turn window never finds the
+  // second Turn start), and DSH's client asks for 500 of them. One real session was 6 MB, so its follow
+  // snapshot exceeded the 4 MiB secure-message limit: the frame could not be encrypted, the peer
+  // connection dropped, and every Session on it sat on "history loading" until a timeout.
+  it('bounds a history page so one secure message can carry it', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { records: [], hasMore: false } }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    await expect(bridge.call({
+      endpoint: 'session/page',
+      payload: { args: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        throughSeq: 10,
+        maxMessages: 500,
+        turnWindow: { minMessages: 200, minTurns: 2 },
+      } },
+    })).resolves.toMatchObject({ ok: true })
+    expect(dispatch).toHaveBeenLastCalledWith('session/page', {
+      args: expect.objectContaining({
+        maxMessages: 50,
+        turnWindow: { minMessages: 50, minTurns: 2 },
+      }),
+    }, expect.any(AbortSignal))
+
+    // Endpoints outside the history surface keep the window they were given.
+    await bridge.call({ endpoint: 'session/list', payload: { args: { maxMessages: 500 } } })
+    expect(dispatch).toHaveBeenLastCalledWith('session/list', { args: { maxMessages: 500 } }, expect.any(AbortSignal))
+  })
+
+  it('bounds the opening follow snapshot and fails only that stream when a frame cannot be encrypted', async () => {
+    const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
+    const open = vi.fn(async () => (async function* () {
+      yield { type: 'snapshot', records: [] }
+    })())
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    await bridge.openStream({
+      streamId: 'session-stream-1',
+      endpoint: 'session/follow',
+      payload: { args: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        assistantStream: true,
+        maxMessages: 500,
+        turnWindow: { minMessages: 50, minTurns: 2 },
+      } },
+    })
+    expect(open).toHaveBeenCalledWith('session/follow', {
+      args: expect.objectContaining({ maxMessages: 50 }),
+    }, expect.any(AbortSignal))
+
+    // A frame larger than the secure-message limit must close this one stream, and the
+    // remaining frames must not be sent: a throw here used to disconnect the whole peer.
+    const huge = vi.fn(async () => (async function* () {
+      yield { blob: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES + 1) }
+      yield { type: 'after' }
+    })())
+    const big = new HarnessRemoteBridge(gateway({ open: huge }), publish)
+    await big.openStream({ streamId: 'session-stream-2', endpoint: 'session/follow', payload: { args: {} } })
+
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith(
+      'harness.remote.stream.closed',
+      expect.objectContaining({ streamId: 'session-stream-2', reason: 'failed' }),
+    ))
+    const closed = publish.mock.calls.find(call => call[0] === 'harness.remote.stream.closed'
+      && (call[1] as { streamId?: string }).streamId === 'session-stream-2')?.[1] as {
+      failure?: { code: string }
+    }
+    expect(closed.failure?.code).toBe('RESPONSE_TOO_LARGE')
+    expect(publish.mock.calls.some(call => call[0] === 'harness.remote.frame'
+      && (call[1] as { streamId?: string }).streamId === 'session-stream-2')).toBe(false)
+    await bridge.closeAll(); await big.closeAll()
   })
 
   it('releases the device reservation when a CodeX terminal cannot start', async () => {

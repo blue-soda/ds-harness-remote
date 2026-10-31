@@ -28268,6 +28268,9 @@ var directoryListSchema2 = external_exports.object({
 var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
+var STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024;
+var REMOTE_HISTORY_MAX_MESSAGES = 50;
+var REMOTE_HISTORY_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow", "session/page", "session/history"]);
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -28395,7 +28398,11 @@ var HarnessRemoteBridge = class {
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
+      const nativePayload = normalizeWorkspaceRequestPayload(
+        params.endpoint,
+        clampRemoteHistoryPayload(params.endpoint, params.payload),
+        this.harnessVersion
+      );
       const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
@@ -28542,7 +28549,15 @@ var HarnessRemoteBridge = class {
     this.streams.set(params.streamId, { controller });
     let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal);
+      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(
+        params.endpoint,
+        normalizeWorkspaceChangesPayload(
+          params.endpoint,
+          clampRemoteHistoryPayload(params.endpoint, params.payload),
+          this.harnessVersion
+        ),
+        controller.signal
+      );
       controller.signal.throwIfAborted();
     } catch (error) {
       this.streams.delete(params.streamId);
@@ -28583,11 +28598,21 @@ var HarnessRemoteBridge = class {
     try {
       for await (const value of source) {
         if (signal.aborted) break;
-        await this.publish("harness.remote.frame", {
+        const frame = {
           streamId,
           hasValue: true,
           ...value === void 0 ? {} : { value: collectRpcAttachments(value) }
-        });
+        };
+        if (streamFrameBytes(frame) > MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+          failure2 = {
+            code: "RESPONSE_TOO_LARGE",
+            message: "The Harness stream frame is too large for the secure Remote channel.",
+            details: { maxBytes: MAX_SECURE_MESSAGE_BYTES }
+          };
+          reason = "failed";
+          break;
+        }
+        await this.publish("harness.remote.frame", frame);
       }
       if (signal.aborted) reason = "cancelled";
     } catch (error) {
@@ -28608,6 +28633,21 @@ var HarnessRemoteBridge = class {
     for (const [id4, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id4);
   }
 };
+function clampRemoteHistoryPayload(endpoint, payload) {
+  if (!REMOTE_HISTORY_ENDPOINTS.has(endpoint) || !isRecord14(payload)) return payload;
+  const args = isRecord14(payload.args) ? payload.args : payload;
+  const requested = typeof args.maxMessages === "number" && Number.isFinite(args.maxMessages) ? args.maxMessages : REMOTE_HISTORY_MAX_MESSAGES;
+  const maxMessages = Math.min(Math.max(1, Math.floor(requested)), REMOTE_HISTORY_MAX_MESSAGES);
+  const turnWindow = isRecord14(args.turnWindow) ? args.turnWindow : void 0;
+  const nextArgs = { ...args, maxMessages };
+  if (turnWindow !== void 0) {
+    nextArgs.turnWindow = typeof turnWindow.minMessages === "number" && Number.isFinite(turnWindow.minMessages) ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) } : turnWindow;
+  }
+  return isRecord14(payload.args) ? { ...payload, args: nextArgs } : nextArgs;
+}
+function streamFrameBytes(frame) {
+  return new TextEncoder().encode(JSON.stringify(frame)).byteLength;
+}
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
   if (!isRecord14(payload) || !isRecord14(payload.args) || Object.hasOwn(payload.args, "path")) return payload;

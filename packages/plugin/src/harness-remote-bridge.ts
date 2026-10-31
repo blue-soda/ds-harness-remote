@@ -14,6 +14,7 @@ import {
   MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
   MAX_ALPHA_STREAMS_PER_CONNECTION,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  MAX_SECURE_MESSAGE_BYTES,
   TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
@@ -98,6 +99,23 @@ const directoryListSchema = z.object({
 const MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION
 const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
+/** Envelope bytes a published stream event adds around the frame it carries. */
+const STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024
+/**
+ * Largest history window a Remote page or follow snapshot may ask for.
+ *
+ * DSH's own client asks for up to 500 messages, and its turn window needs two Turn
+ * starts to cut earlier. A session with a single long Turn therefore comes back as
+ * its entire log: one real session (6.0 MB, 190 steps in its only Turn) exceeded the
+ * 4 MiB secure-message limit, the follow snapshot could not be encrypted, the peer
+ * connection was reopened, and every later Session sat on "history loading" until a
+ * timeout. 50 is the floor DSH itself uses (`PAGE_MESSAGES`), and the largest
+ * 50-message window of that session is 2.1 MiB, so one page fits one secure message.
+ * Older pages still arrive through `hasMore`.
+ */
+const REMOTE_HISTORY_MAX_MESSAGES = 50
+/** Endpoints whose single page has to fit in one secure message. */
+const REMOTE_HISTORY_ENDPOINTS = new Set(['session/follow', 'session/page', 'session/history'])
 
 /** Fixed v0.1.2 Typert Remote subset exposed to authenticated peers. */
 export const HARNESS_REMOTE_ALLOWLIST = [
@@ -234,7 +252,11 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      const nativePayload = normalizeWorkspaceRequestPayload(
+        params.endpoint,
+        clampRemoteHistoryPayload(params.endpoint, params.payload),
+        this.harnessVersion,
+      )
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
@@ -393,7 +415,15 @@ export class HarnessRemoteBridge {
     let source: AsyncIterable<unknown>
     try {
       source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
-        ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal)
+        ?? await this.gateway.open(
+          params.endpoint,
+          normalizeWorkspaceChangesPayload(
+            params.endpoint,
+            clampRemoteHistoryPayload(params.endpoint, params.payload),
+            this.harnessVersion,
+          ),
+          controller.signal,
+        )
       controller.signal.throwIfAborted()
     } catch (error) {
       this.streams.delete(params.streamId)
@@ -438,11 +468,24 @@ export class HarnessRemoteBridge {
     try {
       for await (const value of source) {
         if (signal.aborted) break
-        await this.publish('harness.remote.frame', {
+        const frame = {
           streamId,
-          hasValue: true,
+          hasValue: true as const,
           ...(value === undefined ? {} : { value: collectRpcAttachments(value) }),
-        })
+        }
+        // A frame that cannot be encrypted must fail this stream, not the peer
+        // connection: the transport closes the channel when a send throws, which
+        // used to leave every other Session on the same connection unanswerable.
+        if (streamFrameBytes(frame) > MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+          failure = {
+            code: 'RESPONSE_TOO_LARGE',
+            message: 'The Harness stream frame is too large for the secure Remote channel.',
+            details: { maxBytes: MAX_SECURE_MESSAGE_BYTES },
+          }
+          reason = 'failed'
+          break
+        }
+        await this.publish('harness.remote.frame', frame)
       }
       if (signal.aborted) reason = 'cancelled'
     } catch (error) {
@@ -463,6 +506,40 @@ export class HarnessRemoteBridge {
     for (const [id, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id)
     for (const [id, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id)
   }
+}
+
+/**
+ * Clamp one history request to a window that fits the encrypted channel.
+ *
+ * DSH's client asks for 500 messages plus a two-Turn window. On a session whose only
+ * Turn is long, that returns the whole log in one page, which the 4 MiB secure-message
+ * limit cannot carry. Bounding the window keeps the first page and each older page
+ * inside one message; the client still walks backwards through `hasMore`.
+ * @param endpoint - the Gateway endpoint being called.
+ * @param payload - the call payload as the client sent it.
+ * @returns the payload with a bounded history window, or the payload unchanged.
+ */
+export function clampRemoteHistoryPayload(endpoint: string, payload: unknown): unknown {
+  if (!REMOTE_HISTORY_ENDPOINTS.has(endpoint) || !isRecord(payload)) return payload
+  const args = isRecord(payload.args) ? payload.args : payload
+  const requested = typeof args.maxMessages === 'number' && Number.isFinite(args.maxMessages)
+    ? args.maxMessages
+    : REMOTE_HISTORY_MAX_MESSAGES
+  const maxMessages = Math.min(Math.max(1, Math.floor(requested)), REMOTE_HISTORY_MAX_MESSAGES)
+  const turnWindow = isRecord(args.turnWindow) ? args.turnWindow : undefined
+  const nextArgs: Record<string, unknown> = { ...args, maxMessages }
+  if (turnWindow !== undefined) {
+    nextArgs.turnWindow = typeof turnWindow.minMessages === 'number' && Number.isFinite(turnWindow.minMessages)
+      ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) }
+      : turnWindow
+  }
+  // Some callers pass `{ args }`, others the argument object itself; keep whichever shape arrived.
+  return isRecord(payload.args) ? { ...payload, args: nextArgs } : nextArgs
+}
+
+/** Bytes one published stream frame occupies before the event envelope is added. */
+function streamFrameBytes(frame: HarnessRemoteFrameData): number {
+  return new TextEncoder().encode(JSON.stringify(frame)).byteLength
 }
 
 /**
