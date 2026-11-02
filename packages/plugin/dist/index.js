@@ -28477,7 +28477,10 @@ var HarnessRemoteBridge = class {
       this.logger?.warn("harness remote call failed", {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
-        code: this.gateway.failure(error).code
+        code: this.gateway.failure(error).code,
+        // The code alone is what the client sees; the message is the only thing that says WHY the
+        // Host threw (a strict-schema rejection, an oversized page, a session the gateway lost).
+        message: error instanceof Error ? error.message : String(error)
       });
       throw error;
     }
@@ -28614,6 +28617,10 @@ var HarnessRemoteBridge = class {
     } catch (error) {
       this.streams.delete(params.streamId);
       controller.abort();
+      this.logger?.warn("harness remote stream open failed", {
+        endpoint: params.endpoint,
+        message: error instanceof Error ? error.message : String(error)
+      });
       throw error;
     }
   }
@@ -28780,30 +28787,57 @@ var HarnessRemoteBridge = class {
 };
 function withHistoryWindow(payload, maxMessages) {
   if (!isRecord14(payload)) return payload;
-  const wrapper = isRecord14(payload.request) ? "request" : isRecord14(payload.args) ? "args" : void 0;
-  const args = wrapper === void 0 ? payload : payload[wrapper];
-  const turnWindow = isRecord14(args.turnWindow) ? args.turnWindow : void 0;
-  const nextArgs = { ...args, maxMessages };
-  if (turnWindow !== void 0) {
-    nextArgs.turnWindow = typeof turnWindow.minMessages === "number" && Number.isFinite(turnWindow.minMessages) ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) } : turnWindow;
+  if (Array.isArray(payload.args)) {
+    const [first, ...rest] = payload.args;
+    return isRecord14(first) ? { ...payload, args: [windowedParams(first, maxMessages), ...rest] } : payload;
   }
-  return wrapper === void 0 ? nextArgs : { ...payload, [wrapper]: nextArgs };
+  if (isRecord14(payload.args)) return { ...payload, args: windowedParams(payload.args, maxMessages) };
+  return windowedParams(payload, maxMessages);
+}
+function windowedParams(params, maxMessages) {
+  return isRecord14(params.request) ? { ...params, request: windowedRequest(params.request, maxMessages) } : windowedRequest(params, maxMessages);
+}
+function windowedRequest(request, maxMessages) {
+  const turnWindow = isRecord14(request.turnWindow) ? request.turnWindow : void 0;
+  const next = { ...request, maxMessages };
+  if (turnWindow !== void 0) {
+    next.turnWindow = typeof turnWindow.minMessages === "number" && Number.isFinite(turnWindow.minMessages) ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) } : turnWindow;
+  }
+  return next;
 }
 function historyPageSizes(start) {
   const sizes = [start];
   for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
   return sizes;
 }
+function historyRequestOf(payload) {
+  let node = payload;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!isRecord14(node)) return void 0;
+    if (Array.isArray(node.args)) {
+      node = node.args[0];
+      continue;
+    }
+    if (isRecord14(node.args)) {
+      node = node.args;
+      continue;
+    }
+    if (isRecord14(node.request)) {
+      node = node.request;
+      continue;
+    }
+    return node;
+  }
+  return void 0;
+}
 function requestedMaxMessages(payload) {
-  if (!isRecord14(payload)) return void 0;
-  const args = isRecord14(payload.args) ? payload.args : isRecord14(payload.request) ? payload.request : payload;
-  const value = args.maxMessages;
+  const value = historyRequestOf(payload)?.maxMessages;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
 }
 function historyPageKey(payload) {
-  if (!isRecord14(payload)) return "default";
-  const args = isRecord14(payload.args) ? payload.args : isRecord14(payload.request) ? payload.request : payload;
-  const address = args.address ?? args.request ?? args.threadId ?? args.sessionId;
+  const request = historyRequestOf(payload);
+  if (request === void 0) return "default";
+  const address = request.address ?? request.request ?? request.threadId ?? request.sessionId;
   if (address === void 0) return "default";
   try {
     return JSON.stringify(address);

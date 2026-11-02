@@ -327,6 +327,64 @@ describe('HarnessRemoteBridge', () => {
     }), expect.any(AbortSignal))
   })
 
+  // The official stream RPC sends positional arguments whose params wrap the request:
+  // `{ args: [{ request }] }`. Rewriting the outer level left `maxMessages` beside the wrapper,
+  // which the Host rejected as `gateway/internal`.
+  it('rewrites the window inside positional stream arguments', async () => {
+    const opened: number[] = []
+    const open = vi.fn(async (_endpoint: string, payload: { args: [{ request: { maxMessages: number } }] }) => {
+      const size = payload.args[0].request.maxMessages
+      opened.push(size)
+      return (async function* () {
+        yield { type: 'snapshot', records: [], ...(size >= 50 ? { blob: OVER_BUDGET } : { blob: 'small' }) }
+      })()
+    })
+    const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    await expect(bridge.openStream({
+      streamId: 'session-stream-positional',
+      endpoint: 'session/follow',
+      payload: { args: [{ request: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        assistantStream: true,
+        maxMessages: 500,
+        turnWindow: { minMessages: 200, minTurns: 2 },
+      } }] },
+    })).resolves.toEqual({ opened: true, streamId: 'session-stream-positional' })
+
+    expect(opened).toEqual([500, 50, 30])
+    expect(open.mock.calls.every(([, payload]) => Array.isArray((payload as { args: unknown }).args)
+      && Object.keys((payload as { args: [{ request: object }] }).args[0]).length === 1)).toBe(true)
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith(
+      'harness.remote.frame',
+      expect.objectContaining({ value: { type: 'snapshot', records: [], blob: 'small' } }),
+    ))
+    await bridge.closeAll()
+  })
+
+  it('rewrites the window inside positional unary arguments', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: [{ request: { maxMessages: number } }] }) => ({
+      ok: true as const,
+      value: { records: [], ...(payload.args[0].request.maxMessages >= 50 ? { blob: OVER_BUDGET } : { blob: 'small' }) },
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    await expect(bridge.call({
+      endpoint: 'session/page',
+      payload: { args: [{ request: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        throughSeq: 42,
+        maxMessages: 500,
+        turnWindow: { minMessages: 200, minTurns: 2 },
+      } }] },
+    })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
+
+    const requests = dispatch.mock.calls.map(([, payload]) => (payload as { args: [{ request: { maxMessages: number } }] }).args[0].request)
+    expect(requests.map(request => request.maxMessages)).toEqual([500, 50, 30])
+    expect(dispatch.mock.calls.every(([, payload]) => Object.keys((payload as { args: [{ request: object }] }).args[0]).length === 1)).toBe(true)
+  })
+
   it('does not retry a history page that failed for a business reason', async () => {
     const failure = { ok: false as const, error: { code: 'session/not-found', message: 'gone', details: {} } }
     const dispatch = vi.fn(async () => failure)

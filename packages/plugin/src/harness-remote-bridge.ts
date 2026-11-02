@@ -287,6 +287,9 @@ export class HarnessRemoteBridge {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
         code: this.gateway.failure(error).code,
+        // The code alone is what the client sees; the message is the only thing that says WHY the
+        // Host threw (a strict-schema rejection, an oversized page, a session the gateway lost).
+        message: error instanceof Error ? error.message : String(error),
       })
       throw error
     }
@@ -434,6 +437,12 @@ export class HarnessRemoteBridge {
     } catch (error) {
       this.streams.delete(params.streamId)
       controller.abort()
+      // The RPC router only reports a code for a failed open; the message says whether the Host
+      // refused the request, the opening page was oversized, or measuring it threw.
+      this.logger?.warn('harness remote stream open failed', {
+        endpoint: params.endpoint,
+        message: error instanceof Error ? error.message : String(error),
+      })
       throw error
     }
   }
@@ -638,20 +647,36 @@ export class HarnessRemoteBridge {
  */
 function withHistoryWindow(payload: unknown, maxMessages: number): unknown {
   if (!isRecord(payload)) return payload
-  // Three carriers reach this point: the official Typert client wraps the call as `{ request }`,
-  // older/other callers as `{ args }`, and some pass the argument object directly. Rewriting the
-  // wrong level adds a stray `maxMessages` next to the wrapper, which the Host's strict schema
-  // rejects as an internal error - every history page then failed with `gateway/internal`.
-  const wrapper = isRecord(payload.request) ? 'request' : isRecord(payload.args) ? 'args' : undefined
-  const args = wrapper === undefined ? payload : payload[wrapper] as Record<string, unknown>
-  const turnWindow = isRecord(args.turnWindow) ? args.turnWindow : undefined
-  const nextArgs: Record<string, unknown> = { ...args, maxMessages }
+  // The wire shape depends on the carrier: the official RPC sends positional arguments
+  // (`{ args: [params] }`) whose params may themselves be `{ request }`, the unary Typert client
+  // sends `{ request }`, older callers `{ args: {...} }`, and some pass the request directly.
+  // Rewriting the wrong level leaves `maxMessages` beside the wrapper, which the Host rejects as
+  // an internal error (`args fields do not match the descriptor`).
+  if (Array.isArray(payload.args)) {
+    const [first, ...rest] = payload.args
+    return isRecord(first) ? { ...payload, args: [windowedParams(first, maxMessages), ...rest] } : payload
+  }
+  if (isRecord(payload.args)) return { ...payload, args: windowedParams(payload.args, maxMessages) }
+  return windowedParams(payload, maxMessages)
+}
+
+/** One params object, whose request may sit behind `request`, with a bounded page window. */
+function windowedParams(params: Record<string, unknown>, maxMessages: number): Record<string, unknown> {
+  return isRecord(params.request)
+    ? { ...params, request: windowedRequest(params.request, maxMessages) }
+    : windowedRequest(params, maxMessages)
+}
+
+/** One history request with a bounded page window; every other field is preserved. */
+function windowedRequest(request: Record<string, unknown>, maxMessages: number): Record<string, unknown> {
+  const turnWindow = isRecord(request.turnWindow) ? request.turnWindow : undefined
+  const next: Record<string, unknown> = { ...request, maxMessages }
   if (turnWindow !== undefined) {
-    nextArgs.turnWindow = typeof turnWindow.minMessages === 'number' && Number.isFinite(turnWindow.minMessages)
+    next.turnWindow = typeof turnWindow.minMessages === 'number' && Number.isFinite(turnWindow.minMessages)
       ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) }
       : turnWindow
   }
-  return wrapper === undefined ? nextArgs : { ...payload, [wrapper]: nextArgs }
+  return next
 }
 
 /** Windows to try for one page: the starting window, then every smaller fixed step. */
@@ -661,11 +686,22 @@ function historyPageSizes(start: number): number[] {
   return sizes
 }
 
+/** The innermost history request object, whichever wrapper the carrier used. */
+function historyRequestOf(payload: unknown): Record<string, unknown> | undefined {
+  let node: unknown = payload
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!isRecord(node)) return undefined
+    if (Array.isArray(node.args)) { node = node.args[0]; continue }
+    if (isRecord(node.args)) { node = node.args; continue }
+    if (isRecord(node.request)) { node = node.request; continue }
+    return node
+  }
+  return undefined
+}
+
 /** The window the client asked for, or undefined when it asked for none. */
 function requestedMaxMessages(payload: unknown): number | undefined {
-  if (!isRecord(payload)) return undefined
-  const args = isRecord(payload.args) ? payload.args : isRecord(payload.request) ? payload.request : payload
-  const value = args.maxMessages
+  const value = historyRequestOf(payload)?.maxMessages
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
 
@@ -677,9 +713,9 @@ function requestedMaxMessages(payload: unknown): number | undefined {
  * determines the size.
  */
 function historyPageKey(payload: unknown): string {
-  if (!isRecord(payload)) return 'default'
-  const args = isRecord(payload.args) ? payload.args : isRecord(payload.request) ? payload.request : payload
-  const address = args.address ?? args.request ?? args.threadId ?? args.sessionId
+  const request = historyRequestOf(payload)
+  if (request === undefined) return 'default'
+  const address = request.address ?? request.request ?? request.threadId ?? request.sessionId
   if (address === undefined) return 'default'
   try {
     return JSON.stringify(address)
