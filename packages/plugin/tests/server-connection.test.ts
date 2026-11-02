@@ -314,6 +314,76 @@ describe('HostServerConnection', () => {
     }
   })
 
+  // Measured on the live Server: a Host spent four hours presenting a credential the Server had
+  // invalidated. Every hello was refused (`hello.rejected AUTH_INVALID`, median gap 30 s) because the
+  // close reason was ignored and 4001 read as a retryable connection failure.
+  it.each([
+    ['AUTH_INVALID', 'AUTH_INVALID'],
+    ['CONTROL_DISABLED', 'CONTROL_DISABLED'],
+  ])('stops retrying when a rejected hello names %s', async (reason, expected) => {
+    vi.useFakeTimers()
+    try {
+      const sockets: FakeWebSocket[] = []
+      const api = {
+        baseUrl: 'https://dsh.r2049.cn',
+        authenticate: vi.fn(async () => ({ accessToken: 'stale-token' })),
+        clearAuthorization: vi.fn(async () => undefined),
+      } as unknown as HostServerApi
+      const server = new HostServerConnection(
+        { ...config(), reconnect: { enabled: true, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0, replacedRetryMs: 1 } },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', publicKey: 'host-pk', privateKey: 'host-sk' },
+        { trustedPeer: vi.fn(() => undefined), trustPeer: vi.fn() } as unknown as IdentityStore,
+        api,
+        { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+        logger(),
+        () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
+      )
+      server.start()
+      await vi.advanceTimersByTimeAsync(0)
+      sockets[0]!.open()
+      sockets[0]!.close(4001, reason)
+      await vi.advanceTimersByTimeAsync(2_000)
+
+      expect(server.lastError()).toBe(expected)
+      expect(api.authenticate).toHaveBeenCalledTimes(1)
+      expect(sockets).toHaveLength(1)
+      await server.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still retries a 4001 close whose reason names no known refusal', async () => {
+    vi.useFakeTimers()
+    try {
+      const sockets: FakeWebSocket[] = []
+      const api = {
+        baseUrl: 'https://dsh.r2049.cn',
+        authenticate: vi.fn(async () => ({ accessToken: 'access-token-value' })),
+      } as unknown as HostServerApi
+      const server = new HostServerConnection(
+        { ...config(), reconnect: { enabled: true, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0, replacedRetryMs: 1 } },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', publicKey: 'host-pk', privateKey: 'host-sk' },
+        { trustedPeer: vi.fn(() => undefined), trustPeer: vi.fn() } as unknown as IdentityStore,
+        api,
+        { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+        logger(),
+        () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
+      )
+      server.start()
+      await vi.advanceTimersByTimeAsync(0)
+      sockets[0]!.open()
+      sockets[0]!.close(4001, 'proxy detached')
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(api.authenticate).toHaveBeenCalledTimes(2)
+      expect(sockets.length).toBeGreaterThanOrEqual(2)
+      await server.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops reconnecting until account authorization is supplied', async () => {
     const keys = generateKeyPair(new Uint8Array(32).fill(13))
     const api = {

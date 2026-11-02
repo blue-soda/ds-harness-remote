@@ -14108,7 +14108,7 @@ var HostServerConnection = class {
           ...connectionFailureDetail(error)
         });
         if (TERMINAL_AUTH_ERRORS.has(code)) {
-          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
+          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : code === "CONTROL_DISABLED" ? 'This device is not accepting control. Turn on "Allow control of this device" to reconnect.' : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
         }
         if (code === "DEVICE_REVOKED" || code === "AUTH_INVALID") {
           try {
@@ -14248,8 +14248,8 @@ var HostServerConnection = class {
             finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
             return;
           }
-          if (acknowledged) this.terminalError = closeCode(event.code);
-          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code), event.reason || "Server control connection closed."));
+          if (acknowledged) this.terminalError = closeCode(event.code, event.reason);
+          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code, event.reason), event.reason || "Server control connection closed."));
         };
         void close();
       };
@@ -14744,6 +14744,7 @@ var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
   "AUTH_INVALID",
+  "CONTROL_DISABLED",
   "DEVICE_OWNERSHIP_REQUIRED",
   "DEVICE_REVOKED",
   "TOKEN_EXPIRED"
@@ -14961,14 +14962,25 @@ function errorCode2(error) {
 function isRetryable(error) {
   return !TERMINAL_AUTH_ERRORS.has(errorCode2(error)) && (!(error instanceof ServerApiError) || error.retryable);
 }
-function closeCode(code) {
+function closeCode(code, reason) {
   if (code === 4002) return "AUTH_INVALID";
   if (code === 4003) return "CONNECTION_REPLACED";
   if (code === 4004) return "DEVICE_REVOKED";
   if (code === 4007) return "RATE_LIMITED";
   if (code === 4011) return "UNSUPPORTED_VERSION";
+  if (code === 4001 && reason !== void 0 && REJECTED_HELLO_CODES.has(reason)) return reason;
   return "CONNECTION_FAILED";
 }
+var REJECTED_HELLO_CODES = /* @__PURE__ */ new Set([
+  "AUTH_REQUIRED",
+  "AUTH_INVALID",
+  "TOKEN_EXPIRED",
+  "DEVICE_REVOKED",
+  "CONTROL_DISABLED",
+  "MEMBERSHIP_REQUIRED",
+  "UNSUPPORTED_VERSION",
+  "RATE_LIMITED"
+]);
 
 // src/loopback-preview.ts
 import { randomBytes as randomBytes7, randomUUID } from "node:crypto";

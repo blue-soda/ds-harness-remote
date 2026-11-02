@@ -165,6 +165,8 @@ Host 的 Control WebSocket 支持带 jitter 的指数退避重连。单条逻辑
 
 **心跳与控制帧队列**：Server 的 `ping` 恰好在 Host 的 `onmessage` 里立即应答（`pong`），不进入串行业务帧队列。此前所有控制帧共用一个 `messageQueue`，一个慢处理器（设备查询、TURN 凭据）会把心跳饿到 45 秒超时，Server 判设备离线；而 socket 关闭时又无期限等待同一队列，重连任务因此永远不结束，只能重启进程。现在关闭路径最多排空 5 秒就继续重连，`stop()`/`resume()` 不会再排在卡住的 run 后面。
 
+**被拒绝的 hello**：Server 用 close code `4001` + close reason 指名拒绝原因（`AUTH_INVALID`、`TOKEN_EXPIRED`、`DEVICE_REVOKED`、`CONTROL_DISABLED` …）。Host 必须读这个 reason：只按 `4001` 归类会把"凭据已失效"误判成网络故障，于是每 30 秒拿同一个死 token 重试（真实案例持续 4 小时，直到重启）。终止类原因会停止重连，`AUTH_INVALID`/`DEVICE_REVOKED` 还会清掉本地授权，让自动重新授权接管；未知 reason 仍按可重试处理。
+
 业务连接断开后：
 
 1. 未完成 tunnel RPC 失败；

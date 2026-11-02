@@ -208,7 +208,9 @@ export class HostServerConnection {
             ? 'Another instance is using this Host identity. Standing by: retrying in five minutes, and taking over as soon as it leaves.'
             : code === 'SERVER_CREDENTIALS_BUSY'
               ? 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.'
-              : 'Host authorization failed. Run /remote login or authorize this Host again in Remote settings.')
+              : code === 'CONTROL_DISABLED'
+                ? 'This device is not accepting control. Turn on "Allow control of this device" to reconnect.'
+                : 'Host authorization failed. Run /remote login or authorize this Host again in Remote settings.')
         }
         // An invalid credential is as dead as a revoked one: keep it and the reconciler believes this device is still
         // authorized, so the automatic re-authorization from DSH's session never runs and the panel just says "sign in".
@@ -357,8 +359,8 @@ export class HostServerConnection {
             return
           }
           if (event.code === 4004) { finish(new ControlConnectionError('DEVICE_REVOKED', 'The Server revoked this Host device.')); return }
-          if (acknowledged) this.terminalError = closeCode(event.code)
-          finish(acknowledged ? undefined : new ControlConnectionError(closeCode(event.code), event.reason || 'Server control connection closed.'))
+          if (acknowledged) this.terminalError = closeCode(event.code, event.reason)
+          finish(acknowledged ? undefined : new ControlConnectionError(closeCode(event.code, event.reason), event.reason || 'Server control connection closed.'))
         }
         void close()
       }
@@ -928,6 +930,7 @@ const TERMINAL_AUTH_ERRORS = new Set([
   'SERVER_CREDENTIALS_BUSY',
   'ACCOUNT_AUTH_REQUIRED',
   'AUTH_INVALID',
+  'CONTROL_DISABLED',
   'DEVICE_OWNERSHIP_REQUIRED',
   'DEVICE_REVOKED',
   'TOKEN_EXPIRED',
@@ -1185,11 +1188,36 @@ export function socketFailureDetail(event: unknown): string {
 
 function errorCode(error: unknown): string { return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : 'CONNECTION_FAILED' }
 function isRetryable(error: unknown): boolean { return !TERMINAL_AUTH_ERRORS.has(errorCode(error)) && (!(error instanceof ServerApiError) || error.retryable) }
-function closeCode(code: number): string {
+/**
+ * The code a closed control socket should report.
+ *
+ * A rejected hello closes with 4001 and names the refusal in the close reason (for example
+ * `AUTH_INVALID`). Ignoring the reason made a refused credential look like a network failure, so the
+ * retry loop kept presenting the same dead token every thirty seconds - a real Host spent four hours
+ * doing that and stayed offline until the process restarted. Only the codes below are trusted from
+ * the reason; anything else stays a retryable connection failure.
+ * @param code - the WebSocket close code.
+ * @param reason - the close reason, when the peer supplied one.
+ * @returns the error code the connection loop classifies.
+ */
+function closeCode(code: number, reason?: string): string {
   if (code === 4002) return 'AUTH_INVALID'
   if (code === 4003) return 'CONNECTION_REPLACED'
   if (code === 4004) return 'DEVICE_REVOKED'
   if (code === 4007) return 'RATE_LIMITED'
   if (code === 4011) return 'UNSUPPORTED_VERSION'
+  if (code === 4001 && reason !== undefined && REJECTED_HELLO_CODES.has(reason)) return reason
   return 'CONNECTION_FAILED'
 }
+
+/** Refusals the Server states in the close reason of a rejected hello. */
+const REJECTED_HELLO_CODES = new Set([
+  'AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'TOKEN_EXPIRED',
+  'DEVICE_REVOKED',
+  'CONTROL_DISABLED',
+  'MEMBERSHIP_REQUIRED',
+  'UNSUPPORTED_VERSION',
+  'RATE_LIMITED',
+])
