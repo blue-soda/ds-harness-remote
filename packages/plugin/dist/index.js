@@ -16893,7 +16893,7 @@ var RemoteHarnessApiProxy = class {
       if (committed.transferId !== transferId || committed.totalBytes <= 0 || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
         throw new Error("The remote Host returned an invalid Harness API transfer descriptor.");
       }
-      const responseBytes = new Uint8Array(committed.totalBytes);
+      const responseBytes2 = new Uint8Array(committed.totalBytes);
       let offset = 0;
       for (let index = 0; index < committed.totalChunks; index += 1) {
         const result = await this.client.rpc(
@@ -16909,10 +16909,10 @@ var RemoteHarnessApiProxy = class {
         if (chunk.byteLength !== expectedBytes) {
           throw new Error("The remote Host returned an invalid Harness API transfer chunk.");
         }
-        responseBytes.set(chunk, offset);
+        responseBytes2.set(chunk, offset);
         offset += chunk.byteLength;
       }
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes2));
     } finally {
       if (opened) {
         await this.client.rpc("harness.api.transfer.close", { transferId }).catch(() => void 0);
@@ -17387,7 +17387,7 @@ var RemoteTypertGateway2 = class {
       if (committed.transferId !== transferId || committed.totalBytes <= 0 || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
         throw new Error("The remote Host returned an invalid Harness Remote transfer descriptor.");
       }
-      const responseBytes = new Uint8Array(committed.totalBytes);
+      const responseBytes2 = new Uint8Array(committed.totalBytes);
       let offset = 0;
       for (let index = 0; index < committed.totalChunks; index += 1) {
         const result = await this.client.rpc(
@@ -17403,10 +17403,10 @@ var RemoteTypertGateway2 = class {
         if (chunk.byteLength !== expectedBytes) {
           throw new Error("The remote Host returned an invalid Harness Remote transfer chunk.");
         }
-        responseBytes.set(chunk, offset);
+        responseBytes2.set(chunk, offset);
         offset += chunk.byteLength;
       }
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes2));
     } finally {
       if (opened) await this.client.rpc("harness.remote.transfer.close", { transferId }).catch(() => void 0);
     }
@@ -24797,22 +24797,22 @@ var CodexPeerBridge = class {
       });
       throw error;
     }
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
+    const responseBytes2 = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes2.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: "inline", response };
+    if (responseBytes2.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Codex response exceeds the bounded transfer limit.");
     }
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
       throw new RpcError("RATE_LIMITED", "Too many Codex response transfers are active.", void 0, true);
     }
-    const totalChunks = Math.ceil(responseBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
+    const totalChunks = Math.ceil(responseBytes2.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
     this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
+      bytes: responseBytes2,
       totalChunks,
       nextIndex: 0,
       touchedAt: Date.now()
     });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes2.byteLength, totalChunks };
   }
   readTransfer(input2) {
     this.requireOpen();
@@ -27418,8 +27418,8 @@ async function callHistoryWithRetry(callWithTimeout, payload, rpcId2, pageSizes)
   }
   throw new RpcError("INTERNAL_ERROR", "Failed to load session history with a fallback page size.");
 }
-function sessionHistoryFallbackPageSizes(requestedMaxMessages) {
-  const requested = normalizeSessionHistoryPageSize(requestedMaxMessages);
+function sessionHistoryFallbackPageSizes(requestedMaxMessages2) {
+  const requested = normalizeSessionHistoryPageSize(requestedMaxMessages2);
   const sizes = [];
   if (requested === void 0) {
     sizes.push(...SESSION_HISTORY_PAGE_SIZES);
@@ -27782,25 +27782,25 @@ var HarnessApiBridge = class {
     }
     const nativeRequest = callSchema2.parse(request);
     const response = await this.call(nativeRequest);
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) {
+    const responseBytes2 = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes2.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) {
       return { kind: "inline", response };
     }
-    if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
+    if (responseBytes2.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Harness API response exceeds the bounded transfer limit.");
     }
     this.pruneTransfers();
     if (this.outgoingTransfers.size >= MAX_ACTIVE_API_TRANSFERS) {
       throw new RpcError("RATE_LIMITED", "Too many Harness API response transfers are active.", void 0, true);
     }
-    const totalChunks = Math.ceil(responseBytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
+    const totalChunks = Math.ceil(responseBytes2.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
+      bytes: responseBytes2,
       totalChunks,
       nextIndex: 0,
       touchedAt: Date.now()
     });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes2.byteLength, totalChunks };
   }
   readTransfer(input2) {
     this.pruneTransfers();
@@ -28221,6 +28221,7 @@ function concatChunks2(chunks, totalBytes) {
 }
 
 // src/harness-remote-bridge.ts
+import { Buffer as Buffer4 } from "node:buffer";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema3 = external_exports.object({
@@ -28269,8 +28270,12 @@ var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024;
-var REMOTE_HISTORY_MAX_MESSAGES = 50;
-var REMOTE_HISTORY_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow", "session/page", "session/history"]);
+var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
+var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var MAX_HISTORY_PAGE_MESSAGES = 500;
+var REMOTE_HISTORY_CALL_ENDPOINTS = /* @__PURE__ */ new Set(["session/page", "session/history"]);
+var REMOTE_HISTORY_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow"]);
+var MAX_CACHED_HISTORY_PAGES = 64;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -28359,6 +28364,8 @@ var HarnessRemoteBridge = class {
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
+  /** Last page size that fit one secure message, per session, so probing is paid once. */
+  historyPageSizes = /* @__PURE__ */ new Map();
   /**
    * Answer one remote Gateway call.
    *
@@ -28398,12 +28405,8 @@ var HarnessRemoteBridge = class {
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(
-        params.endpoint,
-        clampRemoteHistoryPayload(params.endpoint, params.payload),
-        this.harnessVersion
-      );
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
+      const nativeResult = REMOTE_HISTORY_CALL_ENDPOINTS.has(params.endpoint) ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal) : params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -28494,22 +28497,22 @@ var HarnessRemoteBridge = class {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
     const response = await this.call(callSchema3.parse(request));
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
+    const responseBytes2 = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes2.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
+    if (responseBytes2.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Harness Remote response exceeds the bounded transfer limit.");
     }
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote response transfers are active.", void 0, true);
     }
-    const totalChunks = Math.ceil(responseBytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
+    const totalChunks = Math.ceil(responseBytes2.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
+      bytes: responseBytes2,
       totalChunks,
       nextIndex: 0,
       touchedAt: Date.now()
     });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes2.byteLength, totalChunks };
   }
   readTransfer(input2) {
     this.pruneTransfers();
@@ -28527,7 +28530,7 @@ var HarnessRemoteBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer4.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input2) {
@@ -28547,25 +28550,115 @@ var HarnessRemoteBridge = class {
     }
     const controller = new AbortController();
     this.streams.set(params.streamId, { controller });
-    let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(
-        params.endpoint,
-        normalizeWorkspaceChangesPayload(
-          params.endpoint,
-          clampRemoteHistoryPayload(params.endpoint, params.payload),
-          this.harnessVersion
-        ),
-        controller.signal
-      );
+      const nativePayload = normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion);
+      if (REMOTE_HISTORY_STREAM_ENDPOINTS.has(params.endpoint)) {
+        const opened = await this.openHistoryStream(params, nativePayload, controller.signal);
+        void this.pump(params.streamId, opened.source, controller.signal, opened.frame);
+        return { opened: true, streamId: params.streamId };
+      }
+      const source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, nativePayload, controller.signal);
       controller.signal.throwIfAborted();
+      void this.pump(params.streamId, source, controller.signal);
+      return { opened: true, streamId: params.streamId };
     } catch (error) {
       this.streams.delete(params.streamId);
       controller.abort();
       throw error;
     }
-    void this.pump(params.streamId, source, controller.signal);
-    return { opened: true, streamId: params.streamId };
+  }
+  /**
+   * Open a history stream with its opening page chosen by byte budget.
+   *
+   * `session/follow` yields one snapshot page and then live events. The snapshot cannot be
+   * retried after the stream is handed to the client, so each attempt is pulled here, measured,
+   * and closed again when it would not fit one secure message. The accepted iterator continues
+   * after that first frame, which the pump publishes before the live tail.
+   * @param params - the validated stream-open request.
+   * @param payload - the request payload after endpoint normalization.
+   * @param signal - the stream's cancellation signal.
+   * @returns the remaining source and the measured first frame.
+   */
+  async openHistoryStream(params, payload, signal) {
+    const { key, sizes } = this.historyPageSizesFor(payload);
+    for (const size of sizes) {
+      const source = await this.gateway.open(params.endpoint, withHistoryWindow(payload, size), signal);
+      const iterator = source[Symbol.asyncIterator]();
+      let first;
+      try {
+        first = await iterator.next();
+      } catch (error) {
+        await iterator.return?.();
+        throw error;
+      }
+      if (first.done === true) {
+        await iterator.return?.();
+        return { source: EMPTY_ASYNC_ITERABLE };
+      }
+      const frame = {
+        streamId: params.streamId,
+        hasValue: true,
+        ...first.value === void 0 ? {} : { value: collectRpcAttachments(first.value) }
+      };
+      if (streamFrameBytes(frame) <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+        this.rememberHistoryPageSize(key, size);
+        return { source: remainingIterable(iterator), frame };
+      }
+      await iterator.return?.();
+    }
+    throw new RpcError(
+      "RESPONSE_TOO_LARGE",
+      "The Harness history page is too large for the secure Remote channel. Request a smaller page.",
+      { maxBytes: MAX_SECURE_MESSAGE_BYTES },
+      true
+    );
+  }
+  /**
+   * Answer one unary history page with the largest window that still fits.
+   *
+   * DSH's client asks for 500 messages; a session whose only Turn is long answers that with
+   * its whole log, which the 4 MiB secure-message limit cannot carry. Each page is measured
+   * after attachment tagging (the form the wire carries) and the request steps down through
+   * {@link HISTORY_PAGE_SIZES} until it fits. Only a size overflow retries: a business failure
+   * is returned immediately.
+   * @param endpoint - the history endpoint being called.
+   * @param payload - the request payload after endpoint normalization.
+   * @param signal - the call's timeout signal.
+   * @returns the page, or `RESPONSE_TOO_LARGE` when even one message cannot cross.
+   */
+  async dispatchHistoryPage(endpoint, payload, signal) {
+    const { key, sizes } = this.historyPageSizesFor(payload);
+    for (const size of sizes) {
+      const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal);
+      if (!result.ok) return result;
+      const wire = collectRpcAttachments(result);
+      if (responseBytes(wire) <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
+        this.rememberHistoryPageSize(key, size);
+        return wire;
+      }
+    }
+    return {
+      ok: false,
+      error: {
+        code: "RESPONSE_TOO_LARGE",
+        message: "The Harness history page is too large for the secure Remote channel. Request a smaller page.",
+        details: { maxBytes: MAX_SECURE_MESSAGE_BYTES }
+      }
+    };
+  }
+  /** The ladder for one history request, starting from what last fit for this session. */
+  historyPageSizesFor(payload) {
+    const key = historyPageKey(payload);
+    const requested = requestedMaxMessages(payload) ?? HISTORY_PAGE_SIZES[0];
+    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, this.historyPageSizes.get(key) ?? requested));
+    return { key, sizes: historyPageSizes(start) };
+  }
+  rememberHistoryPageSize(key, size) {
+    if (this.historyPageSizes.size >= MAX_CACHED_HISTORY_PAGES && !this.historyPageSizes.has(key)) {
+      const oldest = this.historyPageSizes.keys().next().value;
+      if (oldest !== void 0) this.historyPageSizes.delete(oldest);
+    }
+    this.historyPageSizes.set(key, size);
   }
   closeStream(input2) {
     const params = streamCloseSchema3.parse(input2);
@@ -28581,6 +28674,7 @@ var HarnessRemoteBridge = class {
     this.streams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
+    this.historyPageSizes.clear();
     for (const [, stream] of streams) stream.controller.abort(reason);
     await this.codexWorkspace?.closeAll();
   }
@@ -28592,10 +28686,11 @@ var HarnessRemoteBridge = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not support Remote event transport.");
     }
   }
-  async pump(streamId, source, signal) {
+  async pump(streamId, source, signal, initialFrame) {
     let reason = "completed";
     let failure2;
     try {
+      if (initialFrame !== void 0 && !signal.aborted) await this.publish("harness.remote.frame", initialFrame);
       for await (const value of source) {
         if (signal.aborted) break;
         const frame = {
@@ -28633,11 +28728,9 @@ var HarnessRemoteBridge = class {
     for (const [id4, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id4);
   }
 };
-function clampRemoteHistoryPayload(endpoint, payload) {
-  if (!REMOTE_HISTORY_ENDPOINTS.has(endpoint) || !isRecord14(payload)) return payload;
+function withHistoryWindow(payload, maxMessages) {
+  if (!isRecord14(payload)) return payload;
   const args = isRecord14(payload.args) ? payload.args : payload;
-  const requested = typeof args.maxMessages === "number" && Number.isFinite(args.maxMessages) ? args.maxMessages : REMOTE_HISTORY_MAX_MESSAGES;
-  const maxMessages = Math.min(Math.max(1, Math.floor(requested)), REMOTE_HISTORY_MAX_MESSAGES);
   const turnWindow = isRecord14(args.turnWindow) ? args.turnWindow : void 0;
   const nextArgs = { ...args, maxMessages };
   if (turnWindow !== void 0) {
@@ -28645,9 +28738,39 @@ function clampRemoteHistoryPayload(endpoint, payload) {
   }
   return isRecord14(payload.args) ? { ...payload, args: nextArgs } : nextArgs;
 }
-function streamFrameBytes(frame) {
-  return new TextEncoder().encode(JSON.stringify(frame)).byteLength;
+function historyPageSizes(start) {
+  const sizes = [start];
+  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
+  return sizes;
 }
+function requestedMaxMessages(payload) {
+  if (!isRecord14(payload)) return void 0;
+  const args = isRecord14(payload.args) ? payload.args : payload;
+  const value = args.maxMessages;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
+}
+function historyPageKey(payload) {
+  if (!isRecord14(payload)) return "default";
+  const args = isRecord14(payload.args) ? payload.args : payload;
+  const address = args.address ?? args.request ?? args.threadId ?? args.sessionId;
+  if (address === void 0) return "default";
+  try {
+    return JSON.stringify(address);
+  } catch {
+    return "default";
+  }
+}
+function responseBytes(result) {
+  return Buffer4.byteLength(JSON.stringify(result), "utf8");
+}
+function streamFrameBytes(frame) {
+  return Buffer4.byteLength(JSON.stringify(frame), "utf8");
+}
+function remainingIterable(iterator) {
+  return { [Symbol.asyncIterator]: () => iterator };
+}
+var EMPTY_ASYNC_ITERABLE = { async *[Symbol.asyncIterator]() {
+} };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
   if (!isRecord14(payload) || !isRecord14(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
@@ -28701,7 +28824,7 @@ async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) 
   );
 }
 function decodeCanonicalBase643(value) {
-  const bytes = Buffer.from(value, "base64");
+  const bytes = Buffer4.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
 }

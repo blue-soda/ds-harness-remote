@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import type {
   HarnessApiTransferChunkParams,
   HarnessApiTransferCommitResult,
@@ -101,21 +102,24 @@ const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 /** Envelope bytes a published stream event adds around the frame it carries. */
 const STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024
+/** Envelope bytes an RPC response adds around the result it carries. */
+const RESPONSE_ENVELOPE_BYTES = 8 * 1024
 /**
- * Largest history window a Remote page or follow snapshot may ask for.
+ * Page sizes a history request steps down through when one page cannot cross the channel.
  *
- * DSH's own client asks for up to 500 messages, and its turn window needs two Turn
- * starts to cut earlier. A session with a single long Turn therefore comes back as
- * its entire log: one real session (6.0 MB, 190 steps in its only Turn) exceeded the
- * 4 MiB secure-message limit, the follow snapshot could not be encrypted, the peer
- * connection was reopened, and every later Session sat on "history loading" until a
- * timeout. 50 is the floor DSH itself uses (`PAGE_MESSAGES`), and the largest
- * 50-message window of that session is 2.1 MiB, so one page fits one secure message.
- * Older pages still arrive through `hasMore`.
+ * 50 is the floor DSH itself uses for a page (`PAGE_MESSAGES`); the smaller steps exist for
+ * sessions whose messages are individually huge, and 1 is the last chance before the page is
+ * reported as unrepresentable over Remote.
  */
-const REMOTE_HISTORY_MAX_MESSAGES = 50
-/** Endpoints whose single page has to fit in one secure message. */
-const REMOTE_HISTORY_ENDPOINTS = new Set(['session/follow', 'session/page', 'session/history'])
+const HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1] as const
+/** Largest window one page may ask for; DSH's own client tops out here. */
+const MAX_HISTORY_PAGE_MESSAGES = 500
+/** Unary endpoints whose single page has to fit in one secure message. */
+const REMOTE_HISTORY_CALL_ENDPOINTS = new Set(['session/page', 'session/history'])
+/** Stream endpoints whose opening page has to fit in one secure message frame. */
+const REMOTE_HISTORY_STREAM_ENDPOINTS = new Set(['session/follow'])
+/** How many sessions remember the page size that last fit. */
+const MAX_CACHED_HISTORY_PAGES = 64
 
 /** Fixed v0.1.2 Typert Remote subset exposed to authenticated peers. */
 export const HARNESS_REMOTE_ALLOWLIST = [
@@ -201,6 +205,8 @@ export class HarnessRemoteBridge {
   private readonly streams = new Map<string, ActiveRemoteStream>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
+  /** Last page size that fit one secure message, per session, so probing is paid once. */
+  private readonly historyPageSizes = new Map<string, number>()
 
   constructor(
     private readonly gateway: LocalTypertGateway,
@@ -252,14 +258,12 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(
-        params.endpoint,
-        clampRemoteHistoryPayload(params.endpoint, params.payload),
-        this.harnessVersion,
-      )
-      const nativeResult = params.endpoint === 'commands/execute'
-        ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-        : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
+      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      const nativeResult = REMOTE_HISTORY_CALL_ENDPOINTS.has(params.endpoint)
+        ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal)
+        : params.endpoint === 'commands/execute'
+          ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
+          : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -412,26 +416,131 @@ export class HarnessRemoteBridge {
     }
     const controller = new AbortController()
     this.streams.set(params.streamId, { controller })
-    let source: AsyncIterable<unknown>
     try {
-      source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
-        ?? await this.gateway.open(
-          params.endpoint,
-          normalizeWorkspaceChangesPayload(
-            params.endpoint,
-            clampRemoteHistoryPayload(params.endpoint, params.payload),
-            this.harnessVersion,
-          ),
-          controller.signal,
-        )
+      const nativePayload = normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion)
+      if (REMOTE_HISTORY_STREAM_ENDPOINTS.has(params.endpoint)) {
+        // The opening snapshot is the page that has to fit. Probe it here, so an oversized
+        // page steps down before the client is told the stream is open; the accepted first
+        // frame is buffered and published by the pump before the live tail.
+        const opened = await this.openHistoryStream(params, nativePayload, controller.signal)
+        void this.pump(params.streamId, opened.source, controller.signal, opened.frame)
+        return { opened: true, streamId: params.streamId }
+      }
+      const source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
+        ?? await this.gateway.open(params.endpoint, nativePayload, controller.signal)
       controller.signal.throwIfAborted()
+      void this.pump(params.streamId, source, controller.signal)
+      return { opened: true, streamId: params.streamId }
     } catch (error) {
       this.streams.delete(params.streamId)
       controller.abort()
       throw error
     }
-    void this.pump(params.streamId, source, controller.signal)
-    return { opened: true, streamId: params.streamId }
+  }
+
+  /**
+   * Open a history stream with its opening page chosen by byte budget.
+   *
+   * `session/follow` yields one snapshot page and then live events. The snapshot cannot be
+   * retried after the stream is handed to the client, so each attempt is pulled here, measured,
+   * and closed again when it would not fit one secure message. The accepted iterator continues
+   * after that first frame, which the pump publishes before the live tail.
+   * @param params - the validated stream-open request.
+   * @param payload - the request payload after endpoint normalization.
+   * @param signal - the stream's cancellation signal.
+   * @returns the remaining source and the measured first frame.
+   */
+  private async openHistoryStream(
+    params: HarnessRemoteStreamOpenParams,
+    payload: unknown,
+    signal: AbortSignal,
+  ): Promise<{ source: AsyncIterable<unknown>; frame?: HarnessRemoteFrameData }> {
+    const { key, sizes } = this.historyPageSizesFor(payload)
+    for (const size of sizes) {
+      const source = await this.gateway.open(params.endpoint, withHistoryWindow(payload, size), signal)
+      const iterator = source[Symbol.asyncIterator]()
+      let first: IteratorResult<unknown>
+      try {
+        first = await iterator.next()
+      } catch (error) {
+        await iterator.return?.()
+        throw error
+      }
+      if (first.done === true) {
+        await iterator.return?.()
+        return { source: EMPTY_ASYNC_ITERABLE }
+      }
+      const frame: HarnessRemoteFrameData = {
+        streamId: params.streamId,
+        hasValue: true,
+        ...(first.value === undefined ? {} : { value: collectRpcAttachments(first.value) }),
+      }
+      if (streamFrameBytes(frame) <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+        this.rememberHistoryPageSize(key, size)
+        return { source: remainingIterable(iterator), frame }
+      }
+      await iterator.return?.()
+    }
+    throw new RpcError(
+      'RESPONSE_TOO_LARGE',
+      'The Harness history page is too large for the secure Remote channel. Request a smaller page.',
+      { maxBytes: MAX_SECURE_MESSAGE_BYTES },
+      true,
+    )
+  }
+
+  /**
+   * Answer one unary history page with the largest window that still fits.
+   *
+   * DSH's client asks for 500 messages; a session whose only Turn is long answers that with
+   * its whole log, which the 4 MiB secure-message limit cannot carry. Each page is measured
+   * after attachment tagging (the form the wire carries) and the request steps down through
+   * {@link HISTORY_PAGE_SIZES} until it fits. Only a size overflow retries: a business failure
+   * is returned immediately.
+   * @param endpoint - the history endpoint being called.
+   * @param payload - the request payload after endpoint normalization.
+   * @param signal - the call's timeout signal.
+   * @returns the page, or `RESPONSE_TOO_LARGE` when even one message cannot cross.
+   */
+  private async dispatchHistoryPage(
+    endpoint: string,
+    payload: unknown,
+    signal: AbortSignal,
+  ): Promise<TypertRpcResult> {
+    const { key, sizes } = this.historyPageSizesFor(payload)
+    for (const size of sizes) {
+      const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal)
+      if (!result.ok) return result
+      const wire = collectRpcAttachments(result)
+      if (responseBytes(wire) <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
+        this.rememberHistoryPageSize(key, size)
+        return wire
+      }
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'RESPONSE_TOO_LARGE',
+        message: 'The Harness history page is too large for the secure Remote channel. Request a smaller page.',
+        details: { maxBytes: MAX_SECURE_MESSAGE_BYTES },
+      },
+    }
+  }
+
+  /** The ladder for one history request, starting from what last fit for this session. */
+  private historyPageSizesFor(payload: unknown): { key: string; sizes: number[] } {
+    const key = historyPageKey(payload)
+    const requested = requestedMaxMessages(payload) ?? HISTORY_PAGE_SIZES[0]
+    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, this.historyPageSizes.get(key) ?? requested))
+    return { key, sizes: historyPageSizes(start) }
+  }
+
+  private rememberHistoryPageSize(key: string, size: number): void {
+    if (this.historyPageSizes.size >= MAX_CACHED_HISTORY_PAGES && !this.historyPageSizes.has(key)) {
+      const oldest = this.historyPageSizes.keys().next().value
+      if (oldest !== undefined) this.historyPageSizes.delete(oldest)
+    }
+    this.historyPageSizes.set(key, size)
   }
 
   closeStream(input: unknown): { closed: boolean; streamId: string } {
@@ -449,6 +558,7 @@ export class HarnessRemoteBridge {
     this.streams.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
+    this.historyPageSizes.clear()
     for (const [, stream] of streams) stream.controller.abort(reason)
     await this.codexWorkspace?.closeAll()
   }
@@ -462,10 +572,18 @@ export class HarnessRemoteBridge {
     }
   }
 
-  private async pump(streamId: string, source: AsyncIterable<unknown>, signal: AbortSignal): Promise<void> {
+  private async pump(
+    streamId: string,
+    source: AsyncIterable<unknown>,
+    signal: AbortSignal,
+    initialFrame?: HarnessRemoteFrameData,
+  ): Promise<void> {
     let reason: HarnessRemoteStreamClosedData['reason'] = 'completed'
     let failure: HarnessRemoteStreamClosedData['failure']
     try {
+      // A history opener already measured its first frame against the same budget, so it is
+      // published as measured; everything after it still passes the size guard below.
+      if (initialFrame !== undefined && !signal.aborted) await this.publish('harness.remote.frame', initialFrame)
       for await (const value of source) {
         if (signal.aborted) break
         const frame = {
@@ -509,23 +627,18 @@ export class HarnessRemoteBridge {
 }
 
 /**
- * Clamp one history request to a window that fits the encrypted channel.
+ * Rewrite one history request to a page window that may fit the secure channel.
  *
- * DSH's client asks for 500 messages plus a two-Turn window. On a session whose only
- * Turn is long, that returns the whole log in one page, which the 4 MiB secure-message
- * limit cannot carry. Bounding the window keeps the first page and each older page
- * inside one message; the client still walks backwards through `hasMore`.
- * @param endpoint - the Gateway endpoint being called.
+ * Only the window changes: the cursor (`throughSeq` / `beforeSeq`) and every other argument
+ * stay as the client sent them, so a smaller page simply cuts later and `hasMore` reports the
+ * rest. `turnWindow.minMessages` is clamped too, because DSH rejects a minimum above the page.
  * @param payload - the call payload as the client sent it.
- * @returns the payload with a bounded history window, or the payload unchanged.
+ * @param maxMessages - the window this attempt uses.
+ * @returns the payload with the bounded window, in the shape it arrived.
  */
-export function clampRemoteHistoryPayload(endpoint: string, payload: unknown): unknown {
-  if (!REMOTE_HISTORY_ENDPOINTS.has(endpoint) || !isRecord(payload)) return payload
+function withHistoryWindow(payload: unknown, maxMessages: number): unknown {
+  if (!isRecord(payload)) return payload
   const args = isRecord(payload.args) ? payload.args : payload
-  const requested = typeof args.maxMessages === 'number' && Number.isFinite(args.maxMessages)
-    ? args.maxMessages
-    : REMOTE_HISTORY_MAX_MESSAGES
-  const maxMessages = Math.min(Math.max(1, Math.floor(requested)), REMOTE_HISTORY_MAX_MESSAGES)
   const turnWindow = isRecord(args.turnWindow) ? args.turnWindow : undefined
   const nextArgs: Record<string, unknown> = { ...args, maxMessages }
   if (turnWindow !== undefined) {
@@ -537,10 +650,57 @@ export function clampRemoteHistoryPayload(endpoint: string, payload: unknown): u
   return isRecord(payload.args) ? { ...payload, args: nextArgs } : nextArgs
 }
 
+/** Windows to try for one page: the starting window, then every smaller fixed step. */
+function historyPageSizes(start: number): number[] {
+  const sizes = [start]
+  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size)
+  return sizes
+}
+
+/** The window the client asked for, or undefined when it asked for none. */
+function requestedMaxMessages(payload: unknown): number | undefined {
+  if (!isRecord(payload)) return undefined
+  const args = isRecord(payload.args) ? payload.args : payload
+  const value = args.maxMessages
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
+
+/**
+ * Per-session cache key.
+ *
+ * Both history endpoints address the same session, so a window that fit the opening snapshot
+ * also seeds the older-page reads and vice versa; the page shape, not the endpoint, is what
+ * determines the size.
+ */
+function historyPageKey(payload: unknown): string {
+  if (!isRecord(payload)) return 'default'
+  const args = isRecord(payload.args) ? payload.args : payload
+  const address = args.address ?? args.request ?? args.threadId ?? args.sessionId
+  if (address === undefined) return 'default'
+  try {
+    return JSON.stringify(address)
+  } catch {
+    return 'default'
+  }
+}
+
+/** Bytes the encoded wire result occupies; attachments were already tagged by the caller. */
+function responseBytes(result: TypertRpcResult): number {
+  return Buffer.byteLength(JSON.stringify(result), 'utf8')
+}
+
 /** Bytes one published stream frame occupies before the event envelope is added. */
 function streamFrameBytes(frame: HarnessRemoteFrameData): number {
-  return new TextEncoder().encode(JSON.stringify(frame)).byteLength
+  return Buffer.byteLength(JSON.stringify(frame), 'utf8')
 }
+
+/** The rest of an iterator that already produced its first value. */
+function remainingIterable(iterator: AsyncIterator<unknown>): AsyncIterable<unknown> {
+  return { [Symbol.asyncIterator]: () => iterator }
+}
+
+/** A stream that yields nothing. */
+const EMPTY_ASYNC_ITERABLE: AsyncIterable<unknown> = { async *[Symbol.asyncIterator]() {} }
 
 /**
  * DSH 0.1.7 changed workspaceFiles/changes from a Session-wide feed to a

@@ -265,40 +265,109 @@ describe('HarnessRemoteBridge', () => {
   // Regression: a session with one long Turn is paged by `maxMessages` (the turn window never finds the
   // second Turn start), and DSH's client asks for 500 of them. One real session was 6 MB, so its follow
   // snapshot exceeded the 4 MiB secure-message limit: the frame could not be encrypted, the peer
-  // connection dropped, and every Session on it sat on "history loading" until a timeout.
-  it('bounds a history page so one secure message can carry it', async () => {
-    const dispatch = vi.fn(async () => ({ ok: true as const, value: { records: [], hasMore: false } }))
+  // connection dropped, and every Session on it sat on "history loading" until a timeout. Each attempt
+  // is now measured and the request steps down until the page fits.
+  it('steps a history page down until one secure message can carry it', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: { maxMessages: number } }) => pageOf(payload.args.maxMessages))
     const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
 
     await expect(bridge.call({
       endpoint: 'session/page',
       payload: { args: {
         address: { kind: 'session', sessionId: 'session-1' },
-        throughSeq: 10,
+        throughSeq: 42,
         maxMessages: 500,
         turnWindow: { minMessages: 200, minTurns: 2 },
       } },
-    })).resolves.toMatchObject({ ok: true })
-    expect(dispatch).toHaveBeenLastCalledWith('session/page', {
-      args: expect.objectContaining({
-        maxMessages: 50,
-        turnWindow: { minMessages: 50, minTurns: 2 },
-      }),
-    }, expect.any(AbortSignal))
+    })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
 
-    // Endpoints outside the history surface keep the window they were given.
+    const attempts = dispatch.mock.calls.map(([, payload]) => (payload as { args: Record<string, unknown> }).args)
+    expect(attempts.map(args => args['maxMessages'])).toEqual([500, 50, 30])
+    // Only the window changes: the cursor and address stay exactly as the client sent them.
+    expect(attempts.map(args => args['throughSeq'])).toEqual([42, 42, 42])
+    expect(attempts.every(args => (args['address'] as { sessionId: string }).sessionId === 'session-1')).toBe(true)
+    // The turn minimum follows the window down, or DSH rejects the page.
+    expect(attempts[2]!['turnWindow']).toEqual({ minMessages: 30, minTurns: 2 })
+
+    // Endpoints outside history keep the window the client asked for.
     await bridge.call({ endpoint: 'session/list', payload: { args: { maxMessages: 500 } } })
     expect(dispatch).toHaveBeenLastCalledWith('session/list', { args: { maxMessages: 500 } }, expect.any(AbortSignal))
   })
 
-  it('bounds the opening follow snapshot and fails only that stream when a frame cannot be encrypted', async () => {
+  it('does not retry a history page that failed for a business reason', async () => {
+    const failure = { ok: false as const, error: { code: 'session/not-found', message: 'gone', details: {} } }
+    const dispatch = vi.fn(async () => failure)
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    await expect(bridge.call({
+      endpoint: 'session/page',
+      payload: { args: { address: { kind: 'session', sessionId: 'missing' }, throughSeq: 1, maxMessages: 500 } },
+    })).resolves.toEqual(failure)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports RESPONSE_TOO_LARGE only after every smaller page fails too', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, _payload: { args: { maxMessages: number } }) => ({
+      ok: true as const,
+      value: { records: [], blob: OVER_BUDGET },
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    const result = await bridge.call({
+      endpoint: 'session/page',
+      payload: { args: { address: { kind: 'session', sessionId: 'session-1' }, throughSeq: 1, maxMessages: 500 } },
+    })
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'RESPONSE_TOO_LARGE' } })
+    const attempts = dispatch.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages)
+    expect(attempts).toEqual([500, 50, 30, 20, 12, 6, 3, 1])
+  })
+
+  it('starts the next page from the window that last fit', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: { maxMessages: number } }) => pageOf(payload.args.maxMessages))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+    const payload = {
+      args: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        throughSeq: 1,
+        maxMessages: 500,
+      },
+    }
+
+    await bridge.call({ endpoint: 'session/page', payload })
+    // An older page of the same session starts where the tail page ended up, not at 500 again.
+    await bridge.call({ endpoint: 'session/page', payload: { args: { ...payload.args, beforeSeq: 9 } } })
+
+    const attempts = dispatch.mock.calls.map(([, value]) => (value as { args: { maxMessages: number } }).args.maxMessages)
+    expect(attempts).toEqual([500, 50, 30, 30])
+
+    // The remembered window belongs to that session only.
+    await bridge.call({ endpoint: 'session/page', payload: { args: { ...payload.args, address: { kind: 'session', sessionId: 'session-2' } } } })
+    expect(dispatch.mock.calls.map(([, value]) => (value as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([500, 50, 30, 30, 500, 50, 30])
+  })
+
+  it('steps the opening follow snapshot down and publishes the accepted page once', async () => {
+    const opened: number[] = []
+    const closed: number[] = []
+    const open = vi.fn(async (_endpoint: string, payload: { args: { maxMessages: number } }) => {
+      const size = payload.args.maxMessages
+      opened.push(size)
+      return (async function* () {
+        try {
+          yield size >= 50
+            ? { type: 'snapshot', records: [], blob: OVER_BUDGET }
+            : { type: 'snapshot', records: [{ seq: 0 }] }
+          yield { type: 'event', seq: 1 }
+        } finally {
+          closed.push(size)
+        }
+      })()
+    })
     const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
-    const open = vi.fn(async () => (async function* () {
-      yield { type: 'snapshot', records: [] }
-    })())
     const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
 
-    await bridge.openStream({
+    await expect(bridge.openStream({
       streamId: 'session-stream-1',
       endpoint: 'session/follow',
       payload: { args: {
@@ -307,32 +376,88 @@ describe('HarnessRemoteBridge', () => {
         maxMessages: 500,
         turnWindow: { minMessages: 50, minTurns: 2 },
       } },
-    })
-    expect(open).toHaveBeenCalledWith('session/follow', {
-      args: expect.objectContaining({ maxMessages: 50 }),
-    }, expect.any(AbortSignal))
+    })).resolves.toEqual({ opened: true, streamId: 'session-stream-1' })
 
-    // A frame larger than the secure-message limit must close this one stream, and the
-    // remaining frames must not be sent: a throw here used to disconnect the whole peer.
-    const huge = vi.fn(async () => (async function* () {
-      yield { blob: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES + 1) }
-      yield { type: 'after' }
+    expect(opened).toEqual([500, 50, 30])
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(3))
+    const frames = publish.mock.calls
+      .filter(call => call[0] === 'harness.remote.frame')
+      .map(call => (call[1] as { value: unknown }).value)
+    // The accepted snapshot is published exactly once, followed by the live tail.
+    expect(frames).toEqual([
+      { type: 'snapshot', records: [{ seq: 0 }] },
+      { type: 'event', seq: 1 },
+    ])
+    expect(publish.mock.calls.at(-1)).toEqual([
+      'harness.remote.stream.closed',
+      { streamId: 'session-stream-1', reason: 'completed' },
+    ])
+    // Abandoned attempts were closed; the accepted one ended on its own.
+    await vi.waitFor(() => expect(closed).toEqual([500, 50, 30]))
+    await bridge.closeAll()
+  })
+
+  it('refuses a history stream when even one message cannot cross', async () => {
+    const open = vi.fn(async (_endpoint: string, _payload: { args: { maxMessages: number } }) => (async function* () {
+      yield { type: 'snapshot', records: [], blob: OVER_BUDGET }
     })())
-    const big = new HarnessRemoteBridge(gateway({ open: huge }), publish)
-    await big.openStream({ streamId: 'session-stream-2', endpoint: 'session/follow', payload: { args: {} } })
+    const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    await expect(bridge.openStream({
+      streamId: 'session-stream-2',
+      endpoint: 'session/follow',
+      payload: { args: { address: { kind: 'session', sessionId: 'session-1' }, maxMessages: 500 } },
+    })).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' })
+
+    expect(open.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([500, 50, 30, 20, 12, 6, 3, 1])
+    expect(publish).not.toHaveBeenCalled()
+    // A failed open leaves no stream behind.
+    expect(bridge.closeStream({ streamId: 'session-stream-2' })).toEqual({ closed: false, streamId: 'session-stream-2' })
+    await bridge.closeAll()
+  })
+
+  it('opens a history stream that ends before its first frame', async () => {
+    const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
+    const open = vi.fn(async () => (async function* () {})())
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    await expect(bridge.openStream({
+      streamId: 'session-stream-3',
+      endpoint: 'session/follow',
+      payload: { args: { address: { kind: 'session', sessionId: 'session-1' }, maxMessages: 500 } },
+    })).resolves.toEqual({ opened: true, streamId: 'session-stream-3' })
 
     await vi.waitFor(() => expect(publish).toHaveBeenCalledWith(
       'harness.remote.stream.closed',
-      expect.objectContaining({ streamId: 'session-stream-2', reason: 'failed' }),
+      { streamId: 'session-stream-3', reason: 'completed' },
     ))
-    const closed = publish.mock.calls.find(call => call[0] === 'harness.remote.stream.closed'
-      && (call[1] as { streamId?: string }).streamId === 'session-stream-2')?.[1] as {
+    expect(publish.mock.calls.some(call => call[0] === 'harness.remote.frame')).toBe(false)
+    await bridge.closeAll()
+  })
+
+  it('fails one oversized live frame instead of the peer connection', async () => {
+    const publish = vi.fn(async (_event: string, _data: unknown) => undefined)
+    const open = vi.fn(async () => (async function* () {
+      yield { blob: OVER_BUDGET }
+      yield { type: 'after' }
+    })())
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    // Not a history endpoint: the frame is checked in the pump, not by the opening probe.
+    await bridge.openStream({ streamId: 'live-stream-1', endpoint: '$events', payload: { args: {} } })
+
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith(
+      'harness.remote.stream.closed',
+      expect.objectContaining({ streamId: 'live-stream-1', reason: 'failed' }),
+    ))
+    const closed = publish.mock.calls.find(call => call[0] === 'harness.remote.stream.closed')?.[1] as {
       failure?: { code: string }
     }
     expect(closed.failure?.code).toBe('RESPONSE_TOO_LARGE')
-    expect(publish.mock.calls.some(call => call[0] === 'harness.remote.frame'
-      && (call[1] as { streamId?: string }).streamId === 'session-stream-2')).toBe(false)
-    await bridge.closeAll(); await big.closeAll()
+    expect(publish.mock.calls.some(call => call[0] === 'harness.remote.frame')).toBe(false)
+    await bridge.closeAll()
   })
 
   it('releases the device reservation when a CodeX terminal cannot start', async () => {
@@ -353,6 +478,17 @@ describe('HarnessRemoteBridge', () => {
     await failing.closeAll(); await other.closeAll(); await rm(root, { recursive: true, force: true })
   })
 })
+
+/** A blob larger than one secure message, so any page carrying it cannot be encrypted. */
+const OVER_BUDGET = 'x'.repeat(MAX_SECURE_MESSAGE_BYTES)
+
+/** A fake history page: too large at 50+ messages, small at 30 and below. */
+function pageOf(maxMessages: number): { ok: true; value: Record<string, unknown> } {
+  return {
+    ok: true,
+    value: { records: [], hasMore: true, ...(maxMessages >= 50 ? { blob: OVER_BUDGET } : { blob: 'small' }) },
+  }
+}
 
 function stubTerminalSpawner(): RemoteTerminalSpawner {
   return async (): Promise<RemoteTerminalProcess> => ({
