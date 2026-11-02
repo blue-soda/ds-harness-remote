@@ -294,6 +294,39 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenLastCalledWith('session/list', { args: { maxMessages: 500 } }, expect.any(AbortSignal))
   })
 
+  // The official DSH client wraps the call as `{ request: {...} }` (TypertRemoteMethod). Rewriting
+  // the top level instead of that request added a stray `maxMessages`, the Host's strict schema threw,
+  // and every Session failed with `gateway/internal`.
+  it('rewrites the window inside the official Typert request wrapper', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { request: { maxMessages: number } }) => pageOf(payload.request.maxMessages))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    await expect(bridge.call({
+      endpoint: 'session/page',
+      payload: { request: {
+        address: { kind: 'session', sessionId: 'session-1' },
+        throughSeq: 42,
+        maxMessages: 500,
+        turnWindow: { minMessages: 200, minTurns: 2 },
+      } },
+    })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
+
+    const requests = dispatch.mock.calls.map(([, payload]) => (payload as { request: Record<string, unknown> }).request)
+    expect(requests.map(request => request.maxMessages)).toEqual([500, 50, 30])
+    expect(dispatch.mock.calls.every(([, payload]) => !('maxMessages' in (payload as object)))).toBe(true)
+    expect(requests[2]!.turnWindow).toEqual({ minMessages: 30, minTurns: 2 })
+
+    // The remembered window is keyed on the session address, not on the whole request.
+    await bridge.call({ endpoint: 'session/page', payload: { request: {
+      address: { kind: 'session', sessionId: 'session-1' },
+      beforeSeq: 9,
+      maxMessages: 500,
+    } } })
+    expect(dispatch).toHaveBeenLastCalledWith('session/page', expect.objectContaining({
+      request: expect.objectContaining({ maxMessages: 30 }),
+    }), expect.any(AbortSignal))
+  })
+
   it('does not retry a history page that failed for a business reason', async () => {
     const failure = { ok: false as const, error: { code: 'session/not-found', message: 'gone', details: {} } }
     const dispatch = vi.fn(async () => failure)

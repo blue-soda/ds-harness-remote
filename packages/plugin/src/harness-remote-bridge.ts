@@ -638,7 +638,12 @@ export class HarnessRemoteBridge {
  */
 function withHistoryWindow(payload: unknown, maxMessages: number): unknown {
   if (!isRecord(payload)) return payload
-  const args = isRecord(payload.args) ? payload.args : payload
+  // Three carriers reach this point: the official Typert client wraps the call as `{ request }`,
+  // older/other callers as `{ args }`, and some pass the argument object directly. Rewriting the
+  // wrong level adds a stray `maxMessages` next to the wrapper, which the Host's strict schema
+  // rejects as an internal error - every history page then failed with `gateway/internal`.
+  const wrapper = isRecord(payload.request) ? 'request' : isRecord(payload.args) ? 'args' : undefined
+  const args = wrapper === undefined ? payload : payload[wrapper] as Record<string, unknown>
   const turnWindow = isRecord(args.turnWindow) ? args.turnWindow : undefined
   const nextArgs: Record<string, unknown> = { ...args, maxMessages }
   if (turnWindow !== undefined) {
@@ -646,8 +651,7 @@ function withHistoryWindow(payload: unknown, maxMessages: number): unknown {
       ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) }
       : turnWindow
   }
-  // Some callers pass `{ args }`, others the argument object itself; keep whichever shape arrived.
-  return isRecord(payload.args) ? { ...payload, args: nextArgs } : nextArgs
+  return wrapper === undefined ? nextArgs : { ...payload, [wrapper]: nextArgs }
 }
 
 /** Windows to try for one page: the starting window, then every smaller fixed step. */
@@ -660,7 +664,7 @@ function historyPageSizes(start: number): number[] {
 /** The window the client asked for, or undefined when it asked for none. */
 function requestedMaxMessages(payload: unknown): number | undefined {
   if (!isRecord(payload)) return undefined
-  const args = isRecord(payload.args) ? payload.args : payload
+  const args = isRecord(payload.args) ? payload.args : isRecord(payload.request) ? payload.request : payload
   const value = args.maxMessages
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
@@ -674,7 +678,7 @@ function requestedMaxMessages(payload: unknown): number | undefined {
  */
 function historyPageKey(payload: unknown): string {
   if (!isRecord(payload)) return 'default'
-  const args = isRecord(payload.args) ? payload.args : payload
+  const args = isRecord(payload.args) ? payload.args : isRecord(payload.request) ? payload.request : payload
   const address = args.address ?? args.request ?? args.threadId ?? args.sessionId
   if (address === undefined) return 'default'
   try {

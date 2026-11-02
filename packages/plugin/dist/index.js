@@ -28780,13 +28780,14 @@ var HarnessRemoteBridge = class {
 };
 function withHistoryWindow(payload, maxMessages) {
   if (!isRecord14(payload)) return payload;
-  const args = isRecord14(payload.args) ? payload.args : payload;
+  const wrapper = isRecord14(payload.request) ? "request" : isRecord14(payload.args) ? "args" : void 0;
+  const args = wrapper === void 0 ? payload : payload[wrapper];
   const turnWindow = isRecord14(args.turnWindow) ? args.turnWindow : void 0;
   const nextArgs = { ...args, maxMessages };
   if (turnWindow !== void 0) {
     nextArgs.turnWindow = typeof turnWindow.minMessages === "number" && Number.isFinite(turnWindow.minMessages) ? { ...turnWindow, minMessages: Math.min(turnWindow.minMessages, maxMessages) } : turnWindow;
   }
-  return isRecord14(payload.args) ? { ...payload, args: nextArgs } : nextArgs;
+  return wrapper === void 0 ? nextArgs : { ...payload, [wrapper]: nextArgs };
 }
 function historyPageSizes(start) {
   const sizes = [start];
@@ -28795,13 +28796,13 @@ function historyPageSizes(start) {
 }
 function requestedMaxMessages(payload) {
   if (!isRecord14(payload)) return void 0;
-  const args = isRecord14(payload.args) ? payload.args : payload;
+  const args = isRecord14(payload.args) ? payload.args : isRecord14(payload.request) ? payload.request : payload;
   const value = args.maxMessages;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
 }
 function historyPageKey(payload) {
   if (!isRecord14(payload)) return "default";
-  const args = isRecord14(payload.args) ? payload.args : payload;
+  const args = isRecord14(payload.args) ? payload.args : isRecord14(payload.request) ? payload.request : payload;
   const address = args.address ?? args.request ?? args.threadId ?? args.sessionId;
   if (address === void 0) return "default";
   try {
