@@ -203,6 +203,117 @@ describe('HostServerConnection', () => {
     await server.stop()
   })
 
+  // Measured symptom: a Host was shown offline by the Server and never came back until the process
+  // restarted. Two things in the control loop made that possible: every frame (including the
+  // heartbeat ping) was serialized behind the previous frame handler, and the close path then
+  // waited for that same queue without a deadline - so a slow handler both starved the heartbeat
+  // and wedged the run that would have reconnected.
+  it('answers a heartbeat while a slow control frame is still being handled', async () => {
+    const keys = generateKeyPair(new Uint8Array(32).fill(21))
+    const clientKeys = generateKeyPair(new Uint8Array(32).fill(22))
+    const socket = new FakeWebSocket()
+    let releaseDevice: (value: unknown) => void = () => undefined
+    const deviceFor = vi.fn(() => new Promise(resolve => { releaseDevice = resolve }))
+    const api = {
+      baseUrl: 'https://dsh.r2049.cn',
+      authenticate: vi.fn(async () => ({ accessToken: 'access-token-value' })),
+      deviceFor,
+    } as unknown as HostServerApi
+    const server = new HostServerConnection(
+      config(),
+      { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...keys },
+      {
+        trustedPeer: vi.fn(() => undefined),
+        trustPeer: vi.fn(async (input: Record<string, unknown>) => ({ ...input, fingerprint: 'CLIENT', trustedAt: 1 })),
+      } as unknown as IdentityStore,
+      api,
+      { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+      logger(),
+      () => socket,
+    )
+    server.start()
+    await flush()
+    socket.open()
+    socket.receive(createControlFrame('hello.ack', helloAck('control-1')))
+    await flush()
+
+    // A device lookup that never resolves keeps the serialized frame queue busy.
+    socket.receive(createControlFrame('connect.incoming', {
+      connectionId: 'connection-1',
+      clientDeviceId: 'client-1',
+      clientIdentityKey: clientKeys.publicKey,
+      authorization: 'account',
+      preferredTransports: ['relay'],
+    }))
+    await flush()
+    expect(deviceFor).toHaveBeenCalledTimes(1)
+
+    socket.receive(createControlFrame('ping', { nonce: 'nonce-1' }))
+    await flush()
+    expect(socket.sent.map(value => JSON.parse(value)))
+      .toContainEqual(expect.objectContaining({ type: 'pong', payload: { nonce: 'nonce-1' } }))
+
+    releaseDevice({
+      deviceId: 'client-1',
+      name: 'Phone',
+      role: 'client',
+      platform: 'android',
+      identityKey: clientKeys.publicKey,
+      membershipId: 'membership-1',
+    })
+    await flush()
+    await server.stop()
+  })
+
+  it('reconnects when a control frame handler never finishes during close', async () => {
+    vi.useFakeTimers()
+    try {
+      const sockets: FakeWebSocket[] = []
+      const api = {
+        baseUrl: 'https://dsh.r2049.cn',
+        authenticate: vi.fn(async () => ({ accessToken: 'access-token-value' })),
+        deviceFor: vi.fn(() => new Promise(() => undefined)),
+      } as unknown as HostServerApi
+      const server = new HostServerConnection(
+        { ...config(), reconnect: { enabled: true, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0, replacedRetryMs: 1 } },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', publicKey: 'host-pk', privateKey: 'host-sk' },
+        { trustedPeer: vi.fn(() => undefined), trustPeer: vi.fn() } as unknown as IdentityStore,
+        api,
+        { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+        logger(),
+        () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
+      )
+      server.start()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sockets).toHaveLength(1)
+      sockets[0]!.open()
+      sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-1')))
+      await vi.advanceTimersByTimeAsync(0)
+      sockets[0]!.receive(createControlFrame('connect.incoming', {
+        connectionId: 'connection-1',
+        clientDeviceId: 'client-1',
+        clientIdentityKey: 'client-pk',
+        authorization: 'account',
+        preferredTransports: ['relay'],
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(api.deviceFor).toHaveBeenCalledTimes(1)
+
+      // The Server drops the socket while that handler is still pending. Before the deadline the
+      // run must still be draining; afterwards it must retry instead of staying wedged.
+      sockets[0]!.close(4006, 'server restart')
+      await vi.advanceTimersByTimeAsync(4_000)
+      expect(sockets).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect(sockets.length).toBeGreaterThanOrEqual(2)
+      expect(api.authenticate).toHaveBeenCalledTimes(2)
+
+      await server.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops reconnecting until account authorization is supplied', async () => {
     const keys = generateKeyPair(new Uint8Array(32).fill(13))
     const api = {

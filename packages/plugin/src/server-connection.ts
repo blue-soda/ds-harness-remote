@@ -71,6 +71,16 @@ interface PendingTunnel {
 
 const DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
 
+/**
+ * How long a closing control socket waits for in-flight frame handlers.
+ *
+ * A handler can wait on an external call (a device lookup, TURN credentials), and the close path
+ * must not inherit that latency: a close that never settles leaves the run task pending forever,
+ * so `stop()` and `resume()` queue behind it and the device stays offline until the process
+ * restarts. After this deadline the socket is treated as closed and the retry loop continues.
+ */
+const CLOSE_DRAIN_TIMEOUT_MS = 5_000
+
 export class HostServerConnection {
   private socket?: WebSocketLike
   private running?: Promise<void>
@@ -115,7 +125,7 @@ export class HostServerConnection {
     }
     if (this.resumeQueued) return
     this.resumeQueued = true
-    void this.running.finally(() => {
+    void this.running.catch(() => undefined).finally(() => {
       this.resumeQueued = false
       if (!this.stopped) this.start()
     })
@@ -149,7 +159,7 @@ export class HostServerConnection {
     this.reconnectRequested = true
     this.retryWake?.()
     this.socket?.close(4000, 'manual reconnect')
-    void this.running.finally(() => {
+    void this.running.catch(() => undefined).finally(() => {
       if (!this.reconnectRequested || this.stopped) return
       this.reconnectRequested = false
       this.start()
@@ -264,9 +274,28 @@ export class HostServerConnection {
         })
       }
       socket.onmessage = event => {
+        let frame: ReturnType<typeof decodeControl>
+        try {
+          frame = decodeControl(event.data, this.controlFrameLimits)
+        } catch (error) {
+          this.controlFrameFailed(socket, error)
+          return
+        }
+        this.lastActiveAt = Date.now()
+        // Heartbeats must not queue behind a slow frame handler. The Server decides "offline" from
+        // missed pongs, so one slow device lookup (or TURN fetch) in front of the queue would mark a
+        // healthy Host offline - and then the close path would wait on that same queue.
+        if (acknowledged && (frame.type === 'ping' || frame.type === 'pong')) {
+          if (frame.type === 'pong') return
+          const nonce = objectValue(frame.payload, 'nonce')
+          if (typeof nonce !== 'string') {
+            this.controlFrameFailed(socket, new ControlConnectionError('INVALID_MESSAGE', 'Control ping has no nonce.'))
+            return
+          }
+          this.sendControl('pong', { nonce })
+          return
+        }
         messageQueue = messageQueue.then(async () => {
-          const frame = decodeControl(event.data, this.controlFrameLimits)
-          this.lastActiveAt = Date.now()
           if (frame.type === 'hello.ack') {
             const payload = requireHelloAck(frame.payload)
             this.authRecoveryAttempted = false
@@ -295,13 +324,7 @@ export class HostServerConnection {
           if (!acknowledged) throw new ControlConnectionError('INVALID_MESSAGE', 'Server sent a frame before hello.ack.')
           await this.handleFrame(frame)
         }).catch(error => {
-          const code = errorCode(error)
-          this.terminalError = code
-          this.logger.error('server control frame failed', {
-            code,
-            reason: diagnosticReason(error),
-          })
-          socket.close(4008, 'invalid control frame')
+          this.controlFrameFailed(socket, error)
         })
       }
       socket.onerror = event => {
@@ -315,7 +338,7 @@ export class HostServerConnection {
       }
       socket.onclose = event => {
         const close = async (): Promise<void> => {
-          await messageQueue.catch(() => undefined)
+          await drainWithin(messageQueue, CLOSE_DRAIN_TIMEOUT_MS)
           if (this.stopped) { finish(); return }
           if (event.code === 4003) {
             finish(new ControlConnectionError('CONNECTION_REPLACED', 'Another instance connected with this Host identity.'))
@@ -340,6 +363,17 @@ export class HostServerConnection {
         void close()
       }
     })
+  }
+
+  /** Record a frame failure and close the socket, so the run retries from a clean state. */
+  private controlFrameFailed(socket: WebSocketLike, error: unknown): void {
+    const code = errorCode(error)
+    this.terminalError = code
+    this.logger.error('server control frame failed', {
+      code,
+      reason: diagnosticReason(error),
+    })
+    socket.close(4008, 'invalid control frame')
   }
 
   private async handleFrame(frame: ReturnType<typeof decodeControlFrame>): Promise<void> {
@@ -868,6 +902,27 @@ export class HostServerConnection {
 
 /** One Server heartbeat window: the 45 s peer timeout plus the 20 s tick that decides it. */
 const REPLACED_FIRST_RETRY_MS = 65_000
+
+/**
+ * Wait for a promise, but never longer than the deadline.
+ *
+ * The close path waits for queued control frames so a close code is not handled out of order.
+ * That wait must be bounded: a handler stuck on an external call would otherwise leave the run
+ * task pending forever, and `stop()`/`resume()` queue behind it until the process restarts.
+ * @param promise - the work to drain.
+ * @param ms - the longest acceptable wait.
+ */
+async function drainWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      promise.catch(() => undefined),
+      new Promise<void>(resolve => { timer = setTimeout(resolve, ms); timer.unref?.() }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 const TERMINAL_AUTH_ERRORS = new Set([
   'SERVER_CREDENTIALS_BUSY',
