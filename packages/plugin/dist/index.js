@@ -13521,7 +13521,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.6";
+var PLUGIN_VERSION = "0.5.7";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -13998,6 +13998,7 @@ function requireRecord(value, name2) {
 
 // src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
+var CLOSE_DRAIN_TIMEOUT_MS = 5e3;
 var HostServerConnection = class {
   constructor(config, identity, identities, api, connections, logger, createWebSocket = (url) => new WebSocket(url), rtcFactoryProvider, hostCapabilities = () => ["harness.api.v1"], harnessVersion) {
     this.config = config;
@@ -14041,7 +14042,7 @@ var HostServerConnection = class {
     }
     if (this.resumeQueued) return;
     this.resumeQueued = true;
-    void this.running.finally(() => {
+    void this.running.catch(() => void 0).finally(() => {
       this.resumeQueued = false;
       if (!this.stopped) this.start();
     });
@@ -14077,7 +14078,7 @@ var HostServerConnection = class {
     this.reconnectRequested = true;
     this.retryWake?.();
     this.socket?.close(4e3, "manual reconnect");
-    void this.running.finally(() => {
+    void this.running.catch(() => void 0).finally(() => {
       if (!this.reconnectRequested || this.stopped) return;
       this.reconnectRequested = false;
       this.start();
@@ -14166,9 +14167,25 @@ var HostServerConnection = class {
         });
       };
       socket.onmessage = (event) => {
+        let frame;
+        try {
+          frame = decodeControl(event.data, this.controlFrameLimits);
+        } catch (error) {
+          this.controlFrameFailed(socket, error);
+          return;
+        }
+        this.lastActiveAt = Date.now();
+        if (acknowledged && (frame.type === "ping" || frame.type === "pong")) {
+          if (frame.type === "pong") return;
+          const nonce = objectValue(frame.payload, "nonce");
+          if (typeof nonce !== "string") {
+            this.controlFrameFailed(socket, new ControlConnectionError("INVALID_MESSAGE", "Control ping has no nonce."));
+            return;
+          }
+          this.sendControl("pong", { nonce });
+          return;
+        }
         messageQueue = messageQueue.then(async () => {
-          const frame = decodeControl(event.data, this.controlFrameLimits);
-          this.lastActiveAt = Date.now();
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
             this.authRecoveryAttempted = false;
@@ -14193,13 +14210,7 @@ var HostServerConnection = class {
           if (!acknowledged) throw new ControlConnectionError("INVALID_MESSAGE", "Server sent a frame before hello.ack.");
           await this.handleFrame(frame);
         }).catch((error) => {
-          const code = errorCode2(error);
-          this.terminalError = code;
-          this.logger.error("server control frame failed", {
-            code,
-            reason: diagnosticReason(error)
-          });
-          socket.close(4008, "invalid control frame");
+          this.controlFrameFailed(socket, error);
         });
       };
       socket.onerror = (event) => {
@@ -14209,7 +14220,7 @@ var HostServerConnection = class {
       };
       socket.onclose = (event) => {
         const close = async () => {
-          await messageQueue.catch(() => void 0);
+          await drainWithin(messageQueue, CLOSE_DRAIN_TIMEOUT_MS);
           if (this.stopped) {
             finish();
             return;
@@ -14243,6 +14254,16 @@ var HostServerConnection = class {
         void close();
       };
     });
+  }
+  /** Record a frame failure and close the socket, so the run retries from a clean state. */
+  controlFrameFailed(socket, error) {
+    const code = errorCode2(error);
+    this.terminalError = code;
+    this.logger.error("server control frame failed", {
+      code,
+      reason: diagnosticReason(error)
+    });
+    socket.close(4008, "invalid control frame");
   }
   async handleFrame(frame) {
     if (frame.type === "ping") {
@@ -14705,6 +14726,20 @@ var HostServerConnection = class {
   }
 };
 var REPLACED_FIRST_RETRY_MS = 65e3;
+async function drainWithin(promise, ms) {
+  let timer;
+  try {
+    await Promise.race([
+      promise.catch(() => void 0),
+      new Promise((resolve4) => {
+        timer = setTimeout(resolve4, ms);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer !== void 0) clearTimeout(timer);
+  }
+}
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
