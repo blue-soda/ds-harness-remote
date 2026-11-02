@@ -20,6 +20,7 @@ async function start(pass = password, options: {
   account?: string
   registrationCode?: string
   heartbeat?: { intervalMs?: number; peerTimeoutMs?: number }
+  log?: { file: string; maxBytes?: number; maxFiles?: number }
 } = {}) {
   app = createRemoteServer({
     account: options.account ?? account,
@@ -28,6 +29,7 @@ async function start(pass = password, options: {
     publicUrl: 'http://localhost:8080',
     ...(options.registrationCode === undefined ? {} : { registrationCode: options.registrationCode }),
     ...(options.heartbeat === undefined ? {} : { heartbeat: options.heartbeat }),
+    ...(options.log === undefined ? {} : { log: options.log }),
   })
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening')
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
@@ -87,7 +89,8 @@ async function handshake(ctx: Awaited<ReturnType<typeof connection>>) {
   return { initiator, responder }
 }
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'dsh-server-')); await start()
+  dir = mkdtempSync(join(tmpdir(), 'dsh-server-'))
+  await start(password, { log: { file: join(dir, 'logs', 'server.log') } })
   accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
 })
 afterEach(async () => { for (const ws of sockets.splice(0)) ws.terminate(); await app.close(); rmSync(dir, { recursive: true, force: true }) })
@@ -193,6 +196,23 @@ describe('control authorization and encrypted relay', () => {
     await asHost.next('hello.ack')
     asClient.send('ping', { nonce: 'still-here' })
     expect(await asClient.next('pong')).toEqual({ nonce: 'still-here' })
+  })
+  it('names the device in a rejected hello', async () => {
+    // Measured need: 249 `hello.rejected AUTH_INVALID` lines for one incident named no device, so
+    // the retrying Host could only be guessed from its source IP and the restart timing.
+    const d = await device()
+    const rejected = await socket(d, { accessToken: accountToken })
+    expect((await rejected.next('error')).code).toBe('AUTH_INVALID')
+    const entry = readFileSync(join(dir, 'logs', 'server.log'), 'utf8')
+      .split('\n').filter(Boolean).map(line => JSON.parse(line))
+      .find(line => line.event === 'hello.rejected' && line.deviceId === d.deviceId)
+    expect(entry).toMatchObject({
+      code: 'AUTH_INVALID',
+      deviceId: d.deviceId,
+      role: 'client',
+      clientVersion: d.clientVersion,
+    })
+    expect(JSON.stringify(entry)).not.toContain(accountToken)
   })
   it('replaces a device socket without removing the new connection', async () => {
     const d = await device(), old = await socket(d); await old.next('hello.ack')

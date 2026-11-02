@@ -181,6 +181,8 @@ Host 的 Control WebSocket 支持带 jitter 的指数退避重连。单条逻辑
 
 Client 可以把当前模式显示为 `LAN`、`P2P`、`TURN`、`Relay` 或 `Disconnected`，并统计连接期间发送/接收的密文字节。WebRTC 诊断可包含 ICE、candidate pair 与 fallback 原因，用于定位网络问题。
 
+Server 的 `hello.rejected` 记录被拒 hello 的 `deviceId`、`role` 与 `clientVersion`（只复制标识符，不记录 token、protocols 或 capabilities）。没有这三项时，一次持续数小时的重试风暴只能靠源 IP 和重启时间猜测是哪台设备。
+
 这些诊断不得包含 token、私钥、Noise secret、Prompt、源码、工具输出或解密后的业务 payload。IP、candidate、连接时间和字节数本身仍属于敏感网络元数据，导出或上传日志前应脱敏。
 
 ## 10. 当前实现状态

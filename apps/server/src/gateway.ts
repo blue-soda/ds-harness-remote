@@ -37,6 +37,28 @@ function modernHost(version: string): boolean {
 }
 
 /**
+ * Identity fields of a refused hello, safe to log.
+ *
+ * `hello.rejected` used to record only its code. When a device spent hours retrying a credential
+ * the Server had invalidated, the log could not name which device it was - the device id is in the
+ * hello payload the Server already read. Only identifiers are copied; the access token, protocols
+ * and capabilities never reach the log.
+ * @param frame - the decoded control frame that was refused, if decoding got that far.
+ * @returns the fields the hello actually carried, with values bounded for a log line.
+ */
+export function rejectedHelloIdentity(frame: ControlFrame | undefined): Record<string, string> {
+  if (frame?.type !== 'hello' || typeof frame.payload !== 'object' || frame.payload === null) return {}
+  const payload = frame.payload as Record<string, unknown>
+  return {
+    ...(typeof payload.deviceId === 'string' && payload.deviceId.length <= 64 ? { deviceId: payload.deviceId } : {}),
+    ...(payload.role === 'host' || payload.role === 'client' ? { role: payload.role } : {}),
+    ...(typeof payload.clientVersion === 'string' && payload.clientVersion.length <= 64
+      ? { clientVersion: payload.clientVersion }
+      : {}),
+  }
+}
+
+/**
  * How often the Server pings every peer, and how long a peer may stay silent before it is dropped.
  *
  * The grace period must span more than one tick or every peer would be dropped on the next check: a
@@ -196,7 +218,7 @@ export class Gateway {
         const connectionId = (frame?.payload as { connectionId?: unknown } | undefined)?.connectionId
         this.log?.info(peer === undefined ? 'hello.rejected' : 'frame.rejected', {
           code,
-          ...(peer === undefined ? {} : { deviceId: peer.id, role: peer.role }),
+          ...(peer === undefined ? rejectedHelloIdentity(frame) : { deviceId: peer.id, role: peer.role }),
           ...(typeof connectionId === 'string' ? { connectionId } : {}),
         })
         if (peer && typeof connectionId === 'string' && code !== 'RATE_LIMITED') {
