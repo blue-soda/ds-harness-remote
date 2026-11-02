@@ -26626,12 +26626,14 @@ var PluginControlRuntime = class {
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
   /** Guards against re-entry through configure(), which reads the settings view back. */
   reconcilingWithDeepSeek = false;
+  /** The authorization exchange in flight; a settings poll must not start a second one. */
+  deepseekAuthorization;
   /**
    * Keep this device's Server credentials in step with DSH's DeepSeek session - that session is the credential, and
    * the Server verifies it before issuing this device its own tokens.
    *
    * Three cases: DSH signed in and this device not authorized -> authorize; DSH signed out and this device authorized
-   * -> sign out; otherwise nothing. At most once per ten seconds, from the settings poll the panel already makes.
+   * -> sign out; otherwise nothing. At most one exchange at a time, from the settings poll the panel already makes.
    */
   async reconcileWithDeepSeek() {
     if (this.deepseekSession === void 0 || this.reconcilingWithDeepSeek) return;
@@ -26640,19 +26642,20 @@ var PluginControlRuntime = class {
       const session = await this.deepseekSession.read();
       if (this.client !== void 0) this.client.hasDeepSeekSession = session !== void 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
-      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== void 0, authorized })}`);
       if (session === void 0 && authorized) {
         await this.logout({ releaseDeepSeek: false });
         return;
       }
       if (session === void 0 || authorized) return;
+      if (this.deepseekAuthorization !== void 0) return;
       if (this.client !== void 0) this.client.authorizingWithDeepSeek = true;
-      void (async () => {
+      this.deepseekAuthorization = (async () => {
         try {
           await this.configure({ provider: "deepseek", serverUrl: this.config.serverUrl });
         } catch (error) {
           console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String(error?.code ?? "") })}`);
         } finally {
+          this.deepseekAuthorization = void 0;
           if (this.client !== void 0) this.client.authorizingWithDeepSeek = false;
         }
       })();

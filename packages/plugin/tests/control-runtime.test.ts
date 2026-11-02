@@ -368,6 +368,53 @@ describe('PluginControlRuntime sign out', () => {
   })
 })
 
+describe('PluginControlRuntime automatic DeepSeek authorization', () => {
+  function authorizationRuntime(client: Record<string, unknown>, settings = settingsBinding({})) {
+    return new PluginControlRuntime(
+      resolveConfig(settings.get()), '/unused', settings, client as unknown as ClientModeRuntime, undefined,
+      { read: async () => ({ token: 'deepseek-grant' }), startSignIn: async () => ({}), signOut: async () => true },
+    )
+  }
+
+  /**
+   * The settings poll runs while the card is open. Starting one exchange per poll re-armed the signing-in flag
+   * before the previous exchange finished, so a card that had already been authorized kept reading "signing in".
+   */
+  it('starts at most one authorization while one is in flight', async () => {
+    const client = { hasServerAuthorization: vi.fn(async () => false), authorizingWithDeepSeek: false }
+    const runtime = authorizationRuntime(client)
+    const internals = runtime as unknown as {
+      configure: (payload: unknown) => Promise<Record<string, unknown>>
+      reconcileWithDeepSeek: () => Promise<void>
+    }
+    const configure = vi.spyOn(internals, 'configure').mockImplementation(() => new Promise(() => undefined))
+
+    await internals.reconcileWithDeepSeek()
+    await internals.reconcileWithDeepSeek()
+
+    expect(configure).toHaveBeenCalledTimes(1)
+    expect(client.authorizingWithDeepSeek).toBe(true)
+  })
+
+  it('clears the signing-in flag when an exchange fails and tries again later', async () => {
+    const client = { hasServerAuthorization: vi.fn(async () => false), authorizingWithDeepSeek: false }
+    const runtime = authorizationRuntime(client)
+    const internals = runtime as unknown as {
+      configure: (payload: unknown) => Promise<Record<string, unknown>>
+      reconcileWithDeepSeek: () => Promise<void>
+    }
+    const configure = vi.spyOn(internals, 'configure')
+      .mockRejectedValueOnce(new Error('platform unavailable'))
+      .mockImplementationOnce(() => new Promise(() => undefined))
+
+    await internals.reconcileWithDeepSeek()
+    await vi.waitFor(() => expect(client.authorizingWithDeepSeek).toBe(false))
+    await internals.reconcileWithDeepSeek()
+
+    expect(configure).toHaveBeenCalledTimes(2)
+  })
+})
+
 function register(runtime: PluginControlRuntime) {
   let handler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>) | undefined
   let channel: string | undefined

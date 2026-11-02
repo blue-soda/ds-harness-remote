@@ -62,8 +62,6 @@ export interface DeepSeekSignInRequest {
  * it is a bearer credential for the user's DeepSeek account, so the plugin
  * forwards it once and forgets it.
  */
-/** How often DSH's session is reconciled with the Server authorization. */
-
 export interface DeepSeekSessionSource {
   /** The signed-in account's platform grant, or undefined when signed out. */
   read(): Promise<{ token: string } | undefined>
@@ -496,6 +494,8 @@ export class PluginControlRuntime {
   /** Consecutive reconciliations without a DSH session: DSH refreshes its grant, so one empty read is not a sign-out. */
   /** Guards against re-entry through configure(), which reads the settings view back. */
   private reconcilingWithDeepSeek = false
+  /** The authorization exchange in flight; a settings poll must not start a second one. */
+  private deepseekAuthorization?: Promise<void>
 
 
   /**
@@ -503,7 +503,7 @@ export class PluginControlRuntime {
    * the Server verifies it before issuing this device its own tokens.
    *
    * Three cases: DSH signed in and this device not authorized -> authorize; DSH signed out and this device authorized
-   * -> sign out; otherwise nothing. At most once per ten seconds, from the settings poll the panel already makes.
+   * -> sign out; otherwise nothing. At most one exchange at a time, from the settings poll the panel already makes.
    */
   private async reconcileWithDeepSeek(): Promise<void> {
     if (this.deepseekSession === undefined || this.reconcilingWithDeepSeek) return
@@ -512,22 +512,27 @@ export class PluginControlRuntime {
       const session = await this.deepseekSession.read()
       if (this.client !== undefined) this.client.hasDeepSeekSession = session !== undefined
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
-      console.error(`[dsh-remote] reconcile ${JSON.stringify({ hasSession: session !== undefined, authorized })}`)
       if (session === undefined && authorized) {
         // Never throttled: this is the local half, and opening the card must already reflect a DSH sign-out.
         await this.logout({ releaseDeepSeek: false })
         return
       }
       if (session === undefined || authorized) return
+      // One exchange at a time. The settings poll runs while the card is open, and each poll used to start another
+      // authorization: the signing-in flag was set again before the previous exchange finished, so a card that had
+      // already been authorized kept reading "signing in" and the device registered (and rotated its tokens)
+      // repeatedly.
+      if (this.deepseekAuthorization !== undefined) return
       if (this.client !== undefined) this.client.authorizingWithDeepSeek = true
       // Not awaited: opening the card waits on the local half only, while the exchange takes as long as the platform
       // check.
-      void (async () => {
+      this.deepseekAuthorization = (async () => {
         try {
           await this.configure({ provider: 'deepseek', serverUrl: this.config.serverUrl })
         } catch (error) {
           console.error(`[dsh-remote] reconcile failed ${JSON.stringify({ code: String((error as { code?: unknown })?.code ?? '') })}`)
         } finally {
+          this.deepseekAuthorization = undefined
           if (this.client !== undefined) this.client.authorizingWithDeepSeek = false
         }
       })()
@@ -545,10 +550,6 @@ export class PluginControlRuntime {
     // Awaited: the local half is fast, and opening the card must already reflect a DSH sign-out (the exchange inside
     // is detached, so this never waits for the platform).
     await this.reconcileWithDeepSeek()
-    // Not awaited: the reconciliation reaches the Server, and this view answers the control route that the
-    // reconciliation itself may call - awaiting it deadlocked that call instead of showing the previous state for
-    // one more poll.
-    // Awaited: the local half is fast, and opening the card must already reflect a DSH sign-out (the exchange inside\n    // is detached, so this never waits for the platform).\n    await this.reconcileWithDeepSeek()
     const config = this.settings === undefined ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()))
     const associations = await this.associations(config)
     // One identity means one association: the panel no longer has a role to pick.
