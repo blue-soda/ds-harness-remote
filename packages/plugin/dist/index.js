@@ -28686,7 +28686,14 @@ var HarnessRemoteBridge = class {
   async dispatchHistoryPage(endpoint, payload, signal) {
     const { key, sizes } = this.historyPageSizesFor(payload);
     for (const size of sizes) {
+      const startedAt = performance.now();
       const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal);
+      this.logger?.debug("history page attempt", {
+        endpoint,
+        size,
+        durationMs: Math.round(performance.now() - startedAt),
+        ok: result.ok
+      });
       if (!result.ok) return result;
       const wire = collectRpcAttachments(result);
       if (responseBytes(wire) <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
@@ -28707,7 +28714,9 @@ var HarnessRemoteBridge = class {
   historyPageSizesFor(payload) {
     const key = historyPageKey(payload);
     const requested = requestedMaxMessages(payload) ?? HISTORY_PAGE_SIZES[0];
-    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, this.historyPageSizes.get(key) ?? requested));
+    const remembered = this.historyPageSizes.get(key);
+    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, remembered ?? requested));
+    this.logger?.debug("history window", { key: key.slice(0, 120), requested, remembered, start });
     return { key, sizes: historyPageSizes(start) };
   }
   rememberHistoryPageSize(key, size) {

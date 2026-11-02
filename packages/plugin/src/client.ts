@@ -262,6 +262,8 @@ interface WorkspacesClientServiceLike {
  */
 interface UiWorkspaceClientServiceLike {
   connectWorkspace(workspaceId: string): Promise<string>
+  /** Select a Session in the Workspace UI; the navigation API that exists in every DSH build. */
+  openSession?(sessionId: string): void
 }
 
 interface SessionsClientServiceLike {
@@ -269,7 +271,8 @@ interface SessionsClientServiceLike {
     getSnapshot(): { ids: ReadonlyArray<string>; phase: string }
     subscribe(listener: () => void): () => void
   }
-  open(sessionId: string): void
+  /** Some DSH builds do not expose Session open through this service; uiWorkspace owns it. */
+  open?(sessionId: string): void
   /** Refresh the Host-authoritative Session list. */
   refresh(): Promise<void>
 }
@@ -3625,7 +3628,11 @@ function CodexConnectionDetails(props: {
             : ctx.uiWorkspace.connectWorkspace(pending.workspaceId)
           void open.then(async sessionId => {
             if (disposed) return
-            ctx.sessions.open(sessionId)
+            // `sessions.open` is not part of every DSH client build (remote sessions expose only
+            // list/refresh there), so the workspace navigation service is the one to select it;
+            // the old call threw and left the page on the local Workspace with a remote badge.
+            if (ctx.uiWorkspace.openSession !== undefined) ctx.uiWorkspace.openSession(sessionId)
+            else ctx.sessions.open?.(sessionId)
             // The stored selection is what lets a reload land back in this Workspace: a recovery that
             // reloads the page (see the reconnect refresh below) has no status selection to consume,
             // because the page it replaced already consumed it. The tab therefore keeps remembering the
