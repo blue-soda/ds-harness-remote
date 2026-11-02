@@ -347,6 +347,48 @@ describe('HarnessRemoteBridge', () => {
       .toEqual([500, 50, 30, 30, 500, 50, 30])
   })
 
+  it('forgets the oldest remembered window beyond its cache bound', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: { maxMessages: number } }) => pageOf(payload.args.maxMessages))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+    const page = (sessionId: string) => ({
+      endpoint: 'session/page',
+      payload: { args: { address: { kind: 'session', sessionId }, throughSeq: 1, maxMessages: 500 } },
+    })
+
+    // 64 windows are remembered; the 65th evicts the oldest.
+    for (let index = 0; index < 65; index += 1) await bridge.call(page(`session-${index}`))
+    expect(dispatch).toHaveBeenCalledTimes(65 * 3)
+
+    await bridge.call(page('session-0'))
+    expect(dispatch).toHaveBeenCalledTimes(65 * 3 + 3)
+    expect(dispatch.mock.calls.slice(-3).map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([500, 50, 30])
+
+    // The newest entry still starts from the window that fit.
+    await bridge.call(page('session-64'))
+    expect(dispatch.mock.calls.slice(-1).map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([30])
+  })
+
+  it('measures a page by the records it carries, not by one oversized blob', async () => {
+    const recordBytes = 9_000
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: { maxMessages: number } }) => ({
+      ok: true as const,
+      // 500 records of 9 KB each is ~4.5 MiB: over the limit without any single oversized field.
+      value: { records: Array.from({ length: payload.args.maxMessages }, (_, seq) => ({ seq, text: 'x'.repeat(recordBytes) })) },
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+
+    const result = await bridge.call({
+      endpoint: 'session/page',
+      payload: { args: { address: { kind: 'session', sessionId: 'session-big' }, throughSeq: 1, maxMessages: 500 } },
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(dispatch.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([500, 50])
+  })
+
   it('steps the opening follow snapshot down and publishes the accepted page once', async () => {
     const opened: number[] = []
     const closed: number[] = []
