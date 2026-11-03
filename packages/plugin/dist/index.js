@@ -28321,7 +28321,7 @@ var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024;
 var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
-var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var HISTORY_PAGE_SIZES = [120, 80, 50, 30, 20, 12, 6, 3, 1];
 var MAX_HISTORY_PAGE_MESSAGES = 500;
 var REMOTE_HISTORY_CALL_ENDPOINTS = /* @__PURE__ */ new Set(["session/page", "session/history"]);
 var REMOTE_HISTORY_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow"]);
@@ -28657,7 +28657,9 @@ var HarnessRemoteBridge = class {
         hasValue: true,
         ...first.value === void 0 ? {} : { value: collectRpcAttachments(first.value) }
       };
-      if (streamFrameBytes(frame) <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+      const bytes = streamFrameBytes(frame);
+      this.logger?.debug("history stream attempt", { endpoint: params.endpoint, size, bytes });
+      if (bytes <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
         this.rememberHistoryPageSize(key, size);
         return { source: remainingIterable(iterator), frame };
       }
@@ -28688,18 +28690,20 @@ var HarnessRemoteBridge = class {
     for (const size of sizes) {
       const startedAt = performance.now();
       const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal);
-      const value = result.ok ? result.value : void 0;
+      if (!result.ok) return result;
+      const value = result.value;
+      const wire = collectRpcAttachments(result);
+      const bytes = responseBytes(wire);
       this.logger?.debug("history page attempt", {
         endpoint,
         size,
         durationMs: Math.round(performance.now() - startedAt),
         ok: result.ok,
         records: Array.isArray(value?.records) ? value.records.length : void 0,
-        hasMore: value?.hasMore
+        hasMore: value?.hasMore,
+        bytes
       });
-      if (!result.ok) return result;
-      const wire = collectRpcAttachments(result);
-      if (responseBytes(wire) <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
+      if (bytes <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
         this.rememberHistoryPageSize(key, size);
         return wire;
       }

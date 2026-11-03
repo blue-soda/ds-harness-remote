@@ -111,7 +111,15 @@ const RESPONSE_ENVELOPE_BYTES = 8 * 1024
  * sessions whose messages are individually huge, and 1 is the last chance before the page is
  * reported as unrepresentable over Remote.
  */
-const HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1] as const
+/**
+ * The one page-size ladder for every history path.
+ *
+ * Both the unary page and the `session/follow` opening snapshot walk it (through
+ * {@link historyPageSizes}), so a size that was never measured is never hard-coded per path.
+ * The intermediate 120/80 steps matter for dense Sessions: a 50-message page can leave half
+ * the 4 MiB budget unused, and without these steps the ladder would never try a larger page.
+ */
+const HISTORY_PAGE_SIZES = [120, 80, 50, 30, 20, 12, 6, 3, 1] as const
 /** Largest window one page may ask for; DSH's own client tops out here. */
 const MAX_HISTORY_PAGE_MESSAGES = 500
 /** Unary endpoints whose single page has to fit in one secure message. */
@@ -484,7 +492,9 @@ export class HarnessRemoteBridge {
         hasValue: true,
         ...(first.value === undefined ? {} : { value: collectRpcAttachments(first.value) }),
       }
-      if (streamFrameBytes(frame) <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
+      const bytes = streamFrameBytes(frame)
+      this.logger?.debug('history stream attempt', { endpoint: params.endpoint, size, bytes })
+      if (bytes <= MAX_SECURE_MESSAGE_BYTES - STREAM_FRAME_ENVELOPE_BYTES) {
         this.rememberHistoryPageSize(key, size)
         return { source: remainingIterable(iterator), frame }
       }
@@ -520,7 +530,10 @@ export class HarnessRemoteBridge {
     for (const size of sizes) {
       const startedAt = performance.now()
       const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal)
-      const value = result.ok ? (result as { value?: { records?: unknown; hasMore?: unknown } }).value : undefined
+      if (!result.ok) return result
+      const value = (result as { value?: { records?: unknown; hasMore?: unknown } }).value
+      const wire = collectRpcAttachments(result)
+      const bytes = responseBytes(wire)
       this.logger?.debug('history page attempt', {
         endpoint,
         size,
@@ -528,10 +541,9 @@ export class HarnessRemoteBridge {
         ok: result.ok,
         records: Array.isArray(value?.records) ? value.records.length : undefined,
         hasMore: value?.hasMore,
+        bytes,
       })
-      if (!result.ok) return result
-      const wire = collectRpcAttachments(result)
-      if (responseBytes(wire) <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
+      if (bytes <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
         this.rememberHistoryPageSize(key, size)
         return wire
       }

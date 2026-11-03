@@ -282,12 +282,12 @@ describe('HarnessRemoteBridge', () => {
     })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
 
     const attempts = dispatch.mock.calls.map(([, payload]) => (payload as { args: Record<string, unknown> }).args)
-    expect(attempts.map(args => args['maxMessages'])).toEqual([500, 50, 30])
+    expect(attempts.map(args => args['maxMessages'])).toEqual([500, 120, 80, 50, 30])
     // Only the window changes: the cursor and address stay exactly as the client sent them.
-    expect(attempts.map(args => args['throughSeq'])).toEqual([42, 42, 42])
+    expect(attempts.map(args => args['throughSeq'])).toEqual([42, 42, 42, 42, 42])
     expect(attempts.every(args => (args['address'] as { sessionId: string }).sessionId === 'session-1')).toBe(true)
     // The turn minimum follows the window down, or DSH rejects the page.
-    expect(attempts[2]!['turnWindow']).toEqual({ minMessages: 30, minTurns: 2 })
+    expect(attempts[4]!['turnWindow']).toEqual({ minMessages: 30, minTurns: 2 })
 
     // Endpoints outside history keep the window the client asked for.
     await bridge.call({ endpoint: 'session/list', payload: { args: { maxMessages: 500 } } })
@@ -312,9 +312,9 @@ describe('HarnessRemoteBridge', () => {
     })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
 
     const requests = dispatch.mock.calls.map(([, payload]) => (payload as { request: Record<string, unknown> }).request)
-    expect(requests.map(request => request.maxMessages)).toEqual([500, 50, 30])
+    expect(requests.map(request => request.maxMessages)).toEqual([500, 120, 80, 50, 30])
     expect(dispatch.mock.calls.every(([, payload]) => !('maxMessages' in (payload as object)))).toBe(true)
-    expect(requests[2]!.turnWindow).toEqual({ minMessages: 30, minTurns: 2 })
+    expect(requests[4]!.turnWindow).toEqual({ minMessages: 30, minTurns: 2 })
 
     // The remembered window is keyed on the session address, not on the whole request.
     await bridge.call({ endpoint: 'session/page', payload: { request: {
@@ -353,7 +353,7 @@ describe('HarnessRemoteBridge', () => {
       } }] },
     })).resolves.toEqual({ opened: true, streamId: 'session-stream-positional' })
 
-    expect(opened).toEqual([500, 50, 30])
+    expect(opened).toEqual([500, 120, 80, 50, 30])
     expect(open.mock.calls.every(([, payload]) => Array.isArray((payload as { args: unknown }).args)
       && Object.keys((payload as { args: [{ request: object }] }).args[0]).length === 1)).toBe(true)
     await vi.waitFor(() => expect(publish).toHaveBeenCalledWith(
@@ -381,7 +381,7 @@ describe('HarnessRemoteBridge', () => {
     })).resolves.toMatchObject({ ok: true, value: { blob: 'small' } })
 
     const requests = dispatch.mock.calls.map(([, payload]) => (payload as { args: [{ request: { maxMessages: number } }] }).args[0].request)
-    expect(requests.map(request => request.maxMessages)).toEqual([500, 50, 30])
+    expect(requests.map(request => request.maxMessages)).toEqual([500, 120, 80, 50, 30])
     expect(dispatch.mock.calls.every(([, payload]) => Object.keys((payload as { args: [{ request: object }] }).args[0]).length === 1)).toBe(true)
   })
 
@@ -411,7 +411,7 @@ describe('HarnessRemoteBridge', () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: 'RESPONSE_TOO_LARGE' } })
     const attempts = dispatch.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages)
-    expect(attempts).toEqual([500, 50, 30, 20, 12, 6, 3, 1])
+    expect(attempts).toEqual([500, 120, 80, 50, 30, 20, 12, 6, 3, 1])
   })
 
   it('starts the next page from the window that last fit', async () => {
@@ -430,12 +430,12 @@ describe('HarnessRemoteBridge', () => {
     await bridge.call({ endpoint: 'session/page', payload: { args: { ...payload.args, beforeSeq: 9 } } })
 
     const attempts = dispatch.mock.calls.map(([, value]) => (value as { args: { maxMessages: number } }).args.maxMessages)
-    expect(attempts).toEqual([500, 50, 30, 30])
+    expect(attempts).toEqual([500, 120, 80, 50, 30, 30])
 
     // The remembered window belongs to that session only.
     await bridge.call({ endpoint: 'session/page', payload: { args: { ...payload.args, address: { kind: 'session', sessionId: 'session-2' } } } })
     expect(dispatch.mock.calls.map(([, value]) => (value as { args: { maxMessages: number } }).args.maxMessages))
-      .toEqual([500, 50, 30, 30, 500, 50, 30])
+      .toEqual([500, 120, 80, 50, 30, 30, 500, 120, 80, 50, 30])
   })
 
   it('forgets the oldest remembered window beyond its cache bound', async () => {
@@ -448,12 +448,12 @@ describe('HarnessRemoteBridge', () => {
 
     // 64 windows are remembered; the 65th evicts the oldest.
     for (let index = 0; index < 65; index += 1) await bridge.call(page(`session-${index}`))
-    expect(dispatch).toHaveBeenCalledTimes(65 * 3)
+    expect(dispatch).toHaveBeenCalledTimes(65 * 5)
 
     await bridge.call(page('session-0'))
-    expect(dispatch).toHaveBeenCalledTimes(65 * 3 + 3)
-    expect(dispatch.mock.calls.slice(-3).map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
-      .toEqual([500, 50, 30])
+    expect(dispatch).toHaveBeenCalledTimes(65 * 5 + 5)
+    expect(dispatch.mock.calls.slice(-5).map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
+      .toEqual([500, 120, 80, 50, 30])
 
     // The newest entry still starts from the window that fit.
     await bridge.call(page('session-64'))
@@ -477,7 +477,7 @@ describe('HarnessRemoteBridge', () => {
 
     expect(result).toMatchObject({ ok: true })
     expect(dispatch.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
-      .toEqual([500, 50])
+      .toEqual([500, 120])
   })
 
   it('steps the opening follow snapshot down and publishes the accepted page once', async () => {
@@ -511,7 +511,7 @@ describe('HarnessRemoteBridge', () => {
       } },
     })).resolves.toEqual({ opened: true, streamId: 'session-stream-1' })
 
-    expect(opened).toEqual([500, 50, 30])
+    expect(opened).toEqual([500, 120, 80, 50, 30])
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(3))
     const frames = publish.mock.calls
       .filter(call => call[0] === 'harness.remote.frame')
@@ -526,7 +526,7 @@ describe('HarnessRemoteBridge', () => {
       { streamId: 'session-stream-1', reason: 'completed' },
     ])
     // Abandoned attempts were closed; the accepted one ended on its own.
-    await vi.waitFor(() => expect(closed).toEqual([500, 50, 30]))
+    await vi.waitFor(() => expect(closed).toEqual([500, 120, 80, 50, 30]))
     await bridge.closeAll()
   })
 
@@ -544,7 +544,7 @@ describe('HarnessRemoteBridge', () => {
     })).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' })
 
     expect(open.mock.calls.map(([, payload]) => (payload as { args: { maxMessages: number } }).args.maxMessages))
-      .toEqual([500, 50, 30, 20, 12, 6, 3, 1])
+      .toEqual([500, 120, 80, 50, 30, 20, 12, 6, 3, 1])
     expect(publish).not.toHaveBeenCalled()
     // A failed open leaves no stream behind.
     expect(bridge.closeStream({ streamId: 'session-stream-2' })).toEqual({ closed: false, streamId: 'session-stream-2' })
