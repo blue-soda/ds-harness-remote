@@ -28688,11 +28688,14 @@ var HarnessRemoteBridge = class {
     for (const size of sizes) {
       const startedAt = performance.now();
       const result = await this.gateway.dispatch(endpoint, withHistoryWindow(payload, size), signal);
+      const value = result.ok ? result.value : void 0;
       this.logger?.debug("history page attempt", {
         endpoint,
         size,
         durationMs: Math.round(performance.now() - startedAt),
-        ok: result.ok
+        ok: result.ok,
+        records: Array.isArray(value?.records) ? value.records.length : void 0,
+        hasMore: value?.hasMore
       });
       if (!result.ok) return result;
       const wire = collectRpcAttachments(result);
