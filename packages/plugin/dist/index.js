@@ -19507,6 +19507,7 @@ async function loadCatalog(client, signal, pendingThreads) {
   for (const { thread, session } of projected) {
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId);
     if (projectWorkspaceForSession !== void 0) {
+      rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path);
       addSessionToWorkspace(projectWorkspaceForSession, session);
       visibleSessionIds.add(session.id);
       visibleThreads.push(thread);
@@ -19998,6 +19999,22 @@ function findProjectWorkspace(thread, session, projects, workspaceByProjectId) {
   })[0];
   return match === void 0 ? void 0 : workspaceByProjectId.get(match.project.id);
 }
+function rebaseSessionCwdOnProjectRoot(session, projectRoot2) {
+  if (process.platform !== "win32") return;
+  const cwd = session.cwd;
+  if (cwd === void 0) return;
+  const root = projectRoot2.replace(/[\\/]+$/u, "");
+  if (root.length === 0) return;
+  const normalizedRoot = root.toLowerCase();
+  const normalizedCwd = cwd.toLowerCase();
+  if (normalizedCwd === normalizedRoot) {
+    session.cwd = root;
+    return;
+  }
+  if (normalizedCwd.startsWith(`${normalizedRoot}\\`) || normalizedCwd.startsWith(`${normalizedRoot}/`)) {
+    session.cwd = `${root}${cwd.slice(root.length)}`;
+  }
+}
 function addSessionToWorkspace(workspace, session) {
   if (!workspace.sessionIds.includes(session.id)) {
     workspace.sessionIds.push(session.id);
@@ -20014,7 +20031,8 @@ function containsPath(root, candidate) {
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
 }
 function normalizePathForCompare(path) {
-  return path.replace(/[\\/]+$/u, "") || path;
+  const trimmed = path.replace(/[\\/]+$/u, "") || path;
+  return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
 }
 function modelSelection() {
   return { provider: CODEX_PROVIDER, model: CODEX_MODEL };

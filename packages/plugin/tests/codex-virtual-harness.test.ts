@@ -204,6 +204,27 @@ describe('CodexVirtualHarness', () => {
     await emptyTarget.close()
   })
 
+  it.runIf(process.platform === 'win32')('reports a Project Session under the root spelling when Codex changed the case', async () => {
+    const client = fakeCodex([
+      codexThread('thr_low', 'C:\\Workspace\\opencood', 'lower'),
+      codexThread('thr_cap', 'C:\\Workspace\\OpenCOOD\\research', 'capital'),
+    ], {
+      projects: [codexProject('opencood', 'opencood', ['C:\\Workspace\\opencood'], 0)],
+    })
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+
+    const result = await target.dispatch('session/list', { args: {} }, new AbortController().signal) as {
+      ok: true
+      value: { items: Array<{ sessionId: string; cwd?: string }> }
+    }
+    const items = result.value.items.filter(item => item.sessionId === 'codex:thr_low' || item.sessionId === 'codex:thr_cap')
+    expect(items).toEqual([
+      expect.objectContaining({ sessionId: 'codex:thr_low', cwd: 'C:\\Workspace\\opencood' }),
+      expect.objectContaining({ sessionId: 'codex:thr_cap', cwd: 'C:\\Workspace\\opencood\\research' }),
+    ])
+    await target.close()
+  })
+
   it('hydrates read-only permission snapshots in both carriers and clears unsupported live policies', async () => {
     for (const carrier of ['api', 'typert']) {
       const client = fakeCodex()

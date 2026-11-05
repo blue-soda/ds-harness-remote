@@ -1932,6 +1932,7 @@ async function loadCatalog(
   for (const { thread, session } of projected) {
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId)
     if (projectWorkspaceForSession !== undefined) {
+      rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path)
       addSessionToWorkspace(projectWorkspaceForSession, session)
       visibleSessionIds.add(session.id)
       visibleThreads.push(thread)
@@ -2535,8 +2536,33 @@ function findProjectWorkspace(
   return match === undefined ? undefined : workspaceByProjectId.get(match.project.id)
 }
 
-function addSessionToWorkspace(workspace: CodexVirtualWorkspaceView, session: DisplaySession): void {
-  if (!workspace.sessionIds.includes(session.id)) {
+/**
+ * Report a Session's cwd under the Project root's own spelling.
+ *
+ * Codex records the same directory in either case (`C:\Workspace\OpenCOOD` vs
+ * the Project's `C:\Workspace\opencood`). Windows treats them as one directory,
+ * but a client that groups Sessions by a literal path prefix shows only one
+ * spelling, which made a Project's Sessions look missing. Re-root the prefix
+ * (keeping any subdirectory) on Windows only; POSIX case is significant.
+ */
+function rebaseSessionCwdOnProjectRoot(session: DisplaySession, projectRoot: string): void {
+  if (process.platform !== 'win32') return
+  const cwd = session.cwd
+  if (cwd === undefined) return
+  const root = projectRoot.replace(/[\\/]+$/u, '')
+  if (root.length === 0) return
+  const normalizedRoot = root.toLowerCase()
+  const normalizedCwd = cwd.toLowerCase()
+  if (normalizedCwd === normalizedRoot) {
+    session.cwd = root
+    return
+  }
+  if (normalizedCwd.startsWith(`${normalizedRoot}\\`) || normalizedCwd.startsWith(`${normalizedRoot}/`)) {
+    session.cwd = `${root}${cwd.slice(root.length)}`
+  }
+}
+
+function addSessionToWorkspace(workspace: CodexVirtualWorkspaceView, session: DisplaySession): void {  if (!workspace.sessionIds.includes(session.id)) {
     workspace.sessionIds.push(session.id)
     workspace.sessionCount = workspace.sessionIds.length
   }
@@ -2555,7 +2581,12 @@ function containsPath(root: string, candidate: string): boolean {
 }
 
 function normalizePathForCompare(path: string): string {
-  return path.replace(/[\\/]+$/u, '') || path
+  const trimmed = path.replace(/[\\/]+$/u, '') || path
+  // Windows resolves paths case-insensitively, and Codex reports the same
+  // directory in whichever spelling it holds: a Project root is `opencood`
+  // while a Session's cwd is `OpenCOOD`, and a literal comparison dropped the
+  // Session from the Project's workspace.
+  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
 }
 
 function modelSelection(): CodexModelSelection {
