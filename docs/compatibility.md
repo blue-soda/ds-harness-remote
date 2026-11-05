@@ -51,5 +51,5 @@ after either upstream is upgraded are recorded in
 
 `0.5.6` changes no wire format either, and restores the shape 0.5.5 got wrong: a Codex Session is again `codex:<threadId>`, and `thread/list` reports each thread once (the freshest rollout) instead of publishing `<id>~<createdAt>~<n>` row keys. A client key from 0.5.5 still resolves to its thread id on the Host, so a cached Session keeps loading. Everything above still applies.
 
-`0.5.7` changes no wire format: a Remote history page is chosen by its encoded size (rather than one fixed 50-message window) and may be up to the 500 messages the client asks for, and a Host answers Server heartbeats outside its control-frame queue so a slow handler cannot make it look offline or block its own reconnect. Everything above still applies.
+`0.5.7` changes no wire format: a Remote history page is clamped to the 50/30/20/12/6/3/1 ladder for both the opening snapshot and older pages (so a first paint always stays small), a Session whose working directory changed mid-run has its `workspaceFiles` path re-rooted onto the live `workingDirectory` before dispatch, and a Host answers Server heartbeats outside its control-frame queue so a slow handler cannot make it look offline or block its own reconnect. Everything above still applies.
 

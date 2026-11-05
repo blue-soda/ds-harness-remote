@@ -47,5 +47,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 
 `0.5.6` 同样不改线协议，并恢复了 0.5.5 弄错的形状：Codex Session 重新是 `codex:<threadId>`，`thread/list` 每个 thread 只报一行（最新的 rollout），不再发布 `<id>~<createdAt>~<n>` 行键。0.5.5 产生的客户端键仍会在 Host 上解析回真实 thread id，所以缓存中的 Session 继续可用。上面的内容仍然适用。
 
-`0.5.7` 不改线协议：Remote 历史页改按编码后的字节数选择（不再固定 50 条），最大可到客户端请求的 500 条；Host 在控制帧队列之外立即应答 Server 心跳，慢处理器不会再让设备看起来离线或卡住自己的重连。上面的内容仍然适用。
+`0.5.7` 不改线协议：Remote 历史页（首屏与旧页一致）统一钳到 50/30/20/12/6/3/1 阶梯，保证第一屏始终小；会话中途切换工作目录后，Host 会在派发前把 `workspaceFiles` 路径重定位到实时的 `workingDirectory`；Host 在控制帧队列之外立即应答 Server 心跳，慢处理器不会再让设备看起来离线或卡住自己的重连。上面的内容仍然适用。
 

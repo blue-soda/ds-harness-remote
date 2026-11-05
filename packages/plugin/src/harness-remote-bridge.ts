@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import type {
   HarnessApiTransferChunkParams,
   HarnessApiTransferCommitResult,
@@ -116,12 +117,15 @@ const RESPONSE_ENVELOPE_BYTES = 8 * 1024
  *
  * Both the unary page and the `session/follow` opening snapshot walk it (through
  * {@link historyPageSizes}), so a size that was never measured is never hard-coded per path.
- * The intermediate 120/80 steps matter for dense Sessions: a 50-message page can leave half
- * the 4 MiB budget unused, and without these steps the ladder would never try a larger page.
+ * The ladder is the clamp: no page asks for more than its first step, so a first paint stays
+ * cheap on every Session (a 500-message page can be several MiB and stall the client), and a
+ * dense Session steps down only when the measured frame does not fit.
  */
-const HISTORY_PAGE_SIZES = [120, 80, 50, 30, 20, 12, 6, 3, 1] as const
-/** Largest window one page may ask for; DSH's own client tops out here. */
-const MAX_HISTORY_PAGE_MESSAGES = 500
+const HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1] as const
+/** Workspace-file endpoints whose locator the Host resolves against the Session header cwd. */
+const WORKSPACE_FILE_ENDPOINTS = new Set(['workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/list'])
+/** Largest window one page may ask for; the ladder's first step is the cap. */
+const MAX_HISTORY_PAGE_MESSAGES = HISTORY_PAGE_SIZES[0]
 /** Unary endpoints whose single page has to fit in one secure message. */
 const REMOTE_HISTORY_CALL_ENDPOINTS = new Set(['session/page', 'session/history'])
 /** Stream endpoints whose opening page has to fit in one secure message frame. */
@@ -215,6 +219,8 @@ export class HarnessRemoteBridge {
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
   /** Last page size that fit one secure message, per session, so probing is paid once. */
   private readonly historyPageSizes = new Map<string, number>()
+  /** Last working directory read per Session, so a file open does not re-project on every chunk. */
+  private readonly sessionWorkingDirectories = new Map<string, { cwd?: string; at: number }>()
 
   constructor(
     private readonly gateway: LocalTypertGateway,
@@ -223,6 +229,8 @@ export class HarnessRemoteBridge {
     private readonly harnessVersion?: string,
     private readonly terminal = new TerminalPolicy(() => false, "", new Map()),
     private readonly codexWorkspace?: CodexWorkspaceBridge,
+    /** Reads a Session's header cwd from the Host session service, when that service is present. */
+    private readonly sessionHeaderCwd?: (sessionId: string) => string | undefined,
   ) {}
 
   /**
@@ -271,7 +279,7 @@ export class HarnessRemoteBridge {
         ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal)
         : params.endpoint === 'commands/execute'
           ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-          : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
+          : await this.dispatchWorkspaceFile(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -563,7 +571,9 @@ export class HarnessRemoteBridge {
     const key = historyPageKey(payload)
     const requested = requestedMaxMessages(payload) ?? HISTORY_PAGE_SIZES[0]
     const remembered = this.historyPageSizes.get(key)
-    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, remembered ?? requested))
+    // The ladder is the clamp: a client asking for 500 gets the same first paint as one asking
+    // for 50, and only a measured overflow moves to a smaller window.
+    const start = Math.max(1, Math.min(requested, HISTORY_PAGE_SIZES[0], remembered ?? requested))
     this.logger?.debug('history window', { key: key.slice(0, 120), requested, remembered, start })
     return { key, sizes: historyPageSizes(start) }
   }
@@ -574,6 +584,70 @@ export class HarnessRemoteBridge {
       if (oldest !== undefined) this.historyPageSizes.delete(oldest)
     }
     this.historyPageSizes.set(key, size)
+  }
+
+  /**
+   * Dispatch a workspace-file call, re-rooting a path written against the Session's current
+   * directory onto the header root the Host resolves against.
+   *
+   * DSH names the workspace root from the Session header, so a Session that changed its working
+   * directory mid-run resolves relative links (and deliverables built from the root) against the
+   * stale header. The live `workingDirectory` projection is the correction; when the re-rooted
+   * path misses, the original path is tried so a file created before the change still opens.
+   */
+  private async dispatchWorkspaceFile(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult> {
+    if (!WORKSPACE_FILE_ENDPOINTS.has(endpoint) || this.sessionHeaderCwd === undefined) {
+      return this.gateway.dispatch(endpoint, payload, signal)
+    }
+    const location = workspaceFileLocation(payload)
+    if (location === undefined) return this.gateway.dispatch(endpoint, payload, signal)
+    const headerCwd = this.sessionHeaderCwd(location.sessionId)
+    if (headerCwd === undefined) return this.gateway.dispatch(endpoint, payload, signal)
+    const liveCwd = await this.sessionWorkingDirectory(location.sessionId, signal)
+    if (liveCwd === undefined) return this.gateway.dispatch(endpoint, payload, signal)
+    const nextPath = rerootWorkspacePath(headerCwd, liveCwd, location.path)
+    if (nextPath === undefined || nextPath === location.path) return this.gateway.dispatch(endpoint, payload, signal)
+    const rewritten = replaceWorkspaceFilePath(payload, nextPath)
+    if (rewritten === payload) return this.gateway.dispatch(endpoint, payload, signal)
+    const rerooted = await this.gateway.dispatch(endpoint, rewritten, signal)
+    if (!workspaceFileMiss(endpoint, rerooted)) {
+      this.logger?.debug('workspace file path re-rooted', {
+        endpoint,
+        headerCwd,
+        liveCwd,
+        path: location.path,
+        nextPath,
+      })
+      return rerooted
+    }
+    this.logger?.debug('workspace file path re-root missed; using the original path', {
+      endpoint,
+      path: location.path,
+      nextPath,
+    })
+    return this.gateway.dispatch(endpoint, payload, signal)
+  }
+
+  /** Read the Session's live working directory from its projections, cached briefly. */
+  private async sessionWorkingDirectory(sessionId: string, signal: AbortSignal): Promise<string | undefined> {
+    const cached = this.sessionWorkingDirectories.get(sessionId)
+    if (cached !== undefined && Date.now() - cached.at < 5_000) return cached.cwd
+    let cwd: string | undefined
+    try {
+      const result = await this.gateway.dispatch('session/projections', { args: { request: { sessionId } } }, signal)
+      const value = result.ok ? (result as { value?: unknown }).value : undefined
+      const values = isRecord(value) && isRecord(value.values) ? value.values : undefined
+      const raw = values?.workingDirectory
+      if (typeof raw === 'string' && raw.length > 0) cwd = raw
+    } catch {
+      cwd = undefined
+    }
+    if (this.sessionWorkingDirectories.size >= MAX_CACHED_HISTORY_PAGES && !this.sessionWorkingDirectories.has(sessionId)) {
+      const oldest = this.sessionWorkingDirectories.keys().next().value
+      if (oldest !== undefined) this.sessionWorkingDirectories.delete(oldest)
+    }
+    this.sessionWorkingDirectories.set(sessionId, { cwd, at: Date.now() })
+    return cwd
   }
 
   closeStream(input: unknown): { closed: boolean; streamId: string } {
@@ -727,6 +801,80 @@ function historyRequestOf(payload: unknown): Record<string, unknown> | undefined
 function requestedMaxMessages(payload: unknown): number | undefined {
   const value = historyRequestOf(payload)?.maxMessages
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
+
+/** Session id and path carried by a workspace-file call, in any of the wire shapes DSH has used. */
+function workspaceFileLocation(payload: unknown): { sessionId: string; path: string } | undefined {
+  if (!isRecord(payload)) return undefined
+  if (Array.isArray(payload.args)) {
+    if (payload.args.length >= 2 && typeof payload.args[0] === 'string' && typeof payload.args[1] === 'string') {
+      return { sessionId: payload.args[0], path: payload.args[1] }
+    }
+    const first = payload.args[0]
+    if (isRecord(first)) return workspaceFileLocation(first)
+    return undefined
+  }
+  const candidate = isRecord(payload.args) ? payload.args : isRecord(payload.request) ? payload.request : payload
+  const sessionId = [candidate.workspaceFileScopeId, candidate.workspaceFileScope, candidate.sessionId]
+    .find(value => typeof value === 'string' && value.length > 0)
+  const path = candidate.path
+  if (typeof sessionId !== 'string' || typeof path !== 'string' || path.length === 0) return undefined
+  return { sessionId, path }
+}
+
+/** Rewrite the path in the same wire shape {@link workspaceFileLocation} read it from. */
+function replaceWorkspaceFilePath(payload: unknown, nextPath: string): unknown {
+  if (!isRecord(payload)) return payload
+  if (Array.isArray(payload.args)) {
+    if (payload.args.length >= 2 && typeof payload.args[0] === 'string' && typeof payload.args[1] === 'string') {
+      const args = [...payload.args]
+      args[1] = nextPath
+      return { ...payload, args }
+    }
+    const first = payload.args[0]
+    if (!isRecord(first)) return payload
+    return { ...payload, args: [{ ...first, path: nextPath }, ...payload.args.slice(1)] }
+  }
+  if (isRecord(payload.args)) return { ...payload, args: { ...payload.args, path: nextPath } }
+  if (isRecord(payload.request)) return { ...payload, request: { ...payload.request, path: nextPath } }
+  return { ...payload, path: nextPath }
+}
+
+/** A stat/read result that means the path itself was wrong, not the request. */
+function workspaceFileMiss(endpoint: string, result: TypertRpcResult): boolean {
+  if (!result.ok) return true
+  if (endpoint !== 'workspaceFiles/stat') return false
+  const value = (result as { value?: unknown }).value
+  return isRecord(value) && value.exists === false
+}
+
+/**
+ * Re-root a path written against the Session's live working directory onto the header root.
+ *
+ * A relative path becomes relative to the header root (`kotlin/<path>`), which makes the Host's
+ * header-based resolver land on the live directory. An absolute path under the header loses that
+ * prefix and gains the live one. Unrelated paths (a different drive, a sibling) stay untouched.
+ */
+function rerootWorkspacePath(headerCwd: string, liveCwd: string, target: string): string | undefined {
+  if (samePath(headerCwd, liveCwd)) return undefined
+  if (isAbsolute(target)) {
+    const suffix = relative(headerCwd, target)
+    if (suffix === '' || suffix === '.' || isAbsolute(suffix) || suffix.startsWith(`..${sep}`) || suffix === '..') return undefined
+    return join(liveCwd, suffix)
+  }
+  const prefix = relative(headerCwd, liveCwd)
+  if (prefix !== '' && prefix !== '.' && !isAbsolute(prefix) && !prefix.startsWith(`..${sep}`) && prefix !== '..') {
+    return join(prefix, target)
+  }
+  return join(liveCwd, target)
+}
+
+function samePath(left: string, right: string): boolean {
+  const normalize = (value: string): string => {
+    const trimmed = value.replace(/[\\/]+$/u, '')
+    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
+  }
+  return normalize(left) === normalize(right)
 }
 
 /**

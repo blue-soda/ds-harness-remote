@@ -102,6 +102,10 @@ export class HostPluginRuntime {
     private readonly fileViewerHost?: () => FileViewerHostServiceLike | undefined,
     /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
     private readonly terminalSpawner?: RemoteTerminalSpawner,
+    /** Resolves the Host `sessions` service lazily; its registration may follow this plugin. */
+    private readonly sessionSource?: () => {
+      get?(sessionId: string): { header?: { cwd?: string } } | undefined
+    } | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -133,6 +137,9 @@ export class HostPluginRuntime {
               this.codexWorkspaceState,
               this.terminalSpawner,
             ),
+            this.sessionSource === undefined
+              ? undefined
+              : (sessionId: string) => this.sessionSource?.()?.get?.(sessionId)?.header?.cwd,
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(

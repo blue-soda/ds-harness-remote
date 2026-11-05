@@ -28272,6 +28272,7 @@ function concatChunks2(chunks, totalBytes) {
 
 // src/harness-remote-bridge.ts
 import { Buffer as Buffer4 } from "node:buffer";
+import { isAbsolute as isAbsolute4, join as join8, relative as relative2, sep } from "node:path";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema3 = external_exports.object({
@@ -28321,8 +28322,9 @@ var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024;
 var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
-var HISTORY_PAGE_SIZES = [120, 80, 50, 30, 20, 12, 6, 3, 1];
-var MAX_HISTORY_PAGE_MESSAGES = 500;
+var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var WORKSPACE_FILE_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/stat", "workspaceFiles/read", "workspaceFiles/readBytes", "workspaceFiles/list"]);
+var MAX_HISTORY_PAGE_MESSAGES = HISTORY_PAGE_SIZES[0];
 var REMOTE_HISTORY_CALL_ENDPOINTS = /* @__PURE__ */ new Set(["session/page", "session/history"]);
 var REMOTE_HISTORY_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow"]);
 var MAX_CACHED_HISTORY_PAGES = 64;
@@ -28403,19 +28405,22 @@ var HARNESS_REMOTE_ALLOWLIST = [
 ];
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace) {
+  constructor(gateway, publish, logger, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, sessionHeaderCwd) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger;
     this.harnessVersion = harnessVersion;
     this.terminal = terminal;
     this.codexWorkspace = codexWorkspace;
+    this.sessionHeaderCwd = sessionHeaderCwd;
   }
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   /** Last page size that fit one secure message, per session, so probing is paid once. */
   historyPageSizes = /* @__PURE__ */ new Map();
+  /** Last working directory read per Session, so a file open does not re-project on every chunk. */
+  sessionWorkingDirectories = /* @__PURE__ */ new Map();
   /**
    * Answer one remote Gateway call.
    *
@@ -28456,7 +28461,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      const nativeResult = REMOTE_HISTORY_CALL_ENDPOINTS.has(params.endpoint) ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal) : params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativeResult = REMOTE_HISTORY_CALL_ENDPOINTS.has(params.endpoint) ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal) : params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.dispatchWorkspaceFile(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -28722,7 +28727,7 @@ var HarnessRemoteBridge = class {
     const key = historyPageKey(payload);
     const requested = requestedMaxMessages(payload) ?? HISTORY_PAGE_SIZES[0];
     const remembered = this.historyPageSizes.get(key);
-    const start = Math.max(1, Math.min(requested, MAX_HISTORY_PAGE_MESSAGES, remembered ?? requested));
+    const start = Math.max(1, Math.min(requested, HISTORY_PAGE_SIZES[0], remembered ?? requested));
     this.logger?.debug("history window", { key: key.slice(0, 120), requested, remembered, start });
     return { key, sizes: historyPageSizes(start) };
   }
@@ -28732,6 +28737,68 @@ var HarnessRemoteBridge = class {
       if (oldest !== void 0) this.historyPageSizes.delete(oldest);
     }
     this.historyPageSizes.set(key, size);
+  }
+  /**
+   * Dispatch a workspace-file call, re-rooting a path written against the Session's current
+   * directory onto the header root the Host resolves against.
+   *
+   * DSH names the workspace root from the Session header, so a Session that changed its working
+   * directory mid-run resolves relative links (and deliverables built from the root) against the
+   * stale header. The live `workingDirectory` projection is the correction; when the re-rooted
+   * path misses, the original path is tried so a file created before the change still opens.
+   */
+  async dispatchWorkspaceFile(endpoint, payload, signal) {
+    if (!WORKSPACE_FILE_ENDPOINTS.has(endpoint) || this.sessionHeaderCwd === void 0) {
+      return this.gateway.dispatch(endpoint, payload, signal);
+    }
+    const location = workspaceFileLocation(payload);
+    if (location === void 0) return this.gateway.dispatch(endpoint, payload, signal);
+    const headerCwd = this.sessionHeaderCwd(location.sessionId);
+    if (headerCwd === void 0) return this.gateway.dispatch(endpoint, payload, signal);
+    const liveCwd = await this.sessionWorkingDirectory(location.sessionId, signal);
+    if (liveCwd === void 0) return this.gateway.dispatch(endpoint, payload, signal);
+    const nextPath = rerootWorkspacePath(headerCwd, liveCwd, location.path);
+    if (nextPath === void 0 || nextPath === location.path) return this.gateway.dispatch(endpoint, payload, signal);
+    const rewritten = replaceWorkspaceFilePath(payload, nextPath);
+    if (rewritten === payload) return this.gateway.dispatch(endpoint, payload, signal);
+    const rerooted = await this.gateway.dispatch(endpoint, rewritten, signal);
+    if (!workspaceFileMiss(endpoint, rerooted)) {
+      this.logger?.debug("workspace file path re-rooted", {
+        endpoint,
+        headerCwd,
+        liveCwd,
+        path: location.path,
+        nextPath
+      });
+      return rerooted;
+    }
+    this.logger?.debug("workspace file path re-root missed; using the original path", {
+      endpoint,
+      path: location.path,
+      nextPath
+    });
+    return this.gateway.dispatch(endpoint, payload, signal);
+  }
+  /** Read the Session's live working directory from its projections, cached briefly. */
+  async sessionWorkingDirectory(sessionId, signal) {
+    const cached = this.sessionWorkingDirectories.get(sessionId);
+    if (cached !== void 0 && Date.now() - cached.at < 5e3) return cached.cwd;
+    let cwd;
+    try {
+      const result = await this.gateway.dispatch("session/projections", { args: { request: { sessionId } } }, signal);
+      const value = result.ok ? result.value : void 0;
+      const values = isRecord14(value) && isRecord14(value.values) ? value.values : void 0;
+      const raw = values?.workingDirectory;
+      if (typeof raw === "string" && raw.length > 0) cwd = raw;
+    } catch {
+      cwd = void 0;
+    }
+    if (this.sessionWorkingDirectories.size >= MAX_CACHED_HISTORY_PAGES && !this.sessionWorkingDirectories.has(sessionId)) {
+      const oldest = this.sessionWorkingDirectories.keys().next().value;
+      if (oldest !== void 0) this.sessionWorkingDirectories.delete(oldest);
+    }
+    this.sessionWorkingDirectories.set(sessionId, { cwd, at: Date.now() });
+    return cwd;
   }
   closeStream(input2) {
     const params = streamCloseSchema3.parse(input2);
@@ -28849,6 +28916,64 @@ function historyRequestOf(payload) {
 function requestedMaxMessages(payload) {
   const value = historyRequestOf(payload)?.maxMessages;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
+}
+function workspaceFileLocation(payload) {
+  if (!isRecord14(payload)) return void 0;
+  if (Array.isArray(payload.args)) {
+    if (payload.args.length >= 2 && typeof payload.args[0] === "string" && typeof payload.args[1] === "string") {
+      return { sessionId: payload.args[0], path: payload.args[1] };
+    }
+    const first = payload.args[0];
+    if (isRecord14(first)) return workspaceFileLocation(first);
+    return void 0;
+  }
+  const candidate = isRecord14(payload.args) ? payload.args : isRecord14(payload.request) ? payload.request : payload;
+  const sessionId = [candidate.workspaceFileScopeId, candidate.workspaceFileScope, candidate.sessionId].find((value) => typeof value === "string" && value.length > 0);
+  const path = candidate.path;
+  if (typeof sessionId !== "string" || typeof path !== "string" || path.length === 0) return void 0;
+  return { sessionId, path };
+}
+function replaceWorkspaceFilePath(payload, nextPath) {
+  if (!isRecord14(payload)) return payload;
+  if (Array.isArray(payload.args)) {
+    if (payload.args.length >= 2 && typeof payload.args[0] === "string" && typeof payload.args[1] === "string") {
+      const args = [...payload.args];
+      args[1] = nextPath;
+      return { ...payload, args };
+    }
+    const first = payload.args[0];
+    if (!isRecord14(first)) return payload;
+    return { ...payload, args: [{ ...first, path: nextPath }, ...payload.args.slice(1)] };
+  }
+  if (isRecord14(payload.args)) return { ...payload, args: { ...payload.args, path: nextPath } };
+  if (isRecord14(payload.request)) return { ...payload, request: { ...payload.request, path: nextPath } };
+  return { ...payload, path: nextPath };
+}
+function workspaceFileMiss(endpoint, result) {
+  if (!result.ok) return true;
+  if (endpoint !== "workspaceFiles/stat") return false;
+  const value = result.value;
+  return isRecord14(value) && value.exists === false;
+}
+function rerootWorkspacePath(headerCwd, liveCwd, target2) {
+  if (samePath(headerCwd, liveCwd)) return void 0;
+  if (isAbsolute4(target2)) {
+    const suffix = relative2(headerCwd, target2);
+    if (suffix === "" || suffix === "." || isAbsolute4(suffix) || suffix.startsWith(`..${sep}`) || suffix === "..") return void 0;
+    return join8(liveCwd, suffix);
+  }
+  const prefix = relative2(headerCwd, liveCwd);
+  if (prefix !== "" && prefix !== "." && !isAbsolute4(prefix) && !prefix.startsWith(`..${sep}`) && prefix !== "..") {
+    return join8(prefix, target2);
+  }
+  return join8(liveCwd, target2);
+}
+function samePath(left, right) {
+  const normalize = (value) => {
+    const trimmed = value.replace(/[\\/]+$/u, "");
+    return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
+  };
+  return normalize(left) === normalize(right);
 }
 function historyPageKey(payload) {
   const request = historyRequestOf(payload);
@@ -29073,7 +29198,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 // src/codex-workspace-bridge.ts
 import { spawn as spawn4 } from "node:child_process";
 import { realpath as realpath2, lstat, readdir as readdir4, readFile as readFile5, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute4, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join9, relative as relative3, resolve as resolve3 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -29160,7 +29285,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join8(target2, entry.name);
+          const item = join9(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -29382,15 +29507,15 @@ var CodexWorkspaceBridge = class {
     }
   }
   async safePath(root, path, directory) {
-    const candidate = isAbsolute4(path) ? resolve3(path) : resolve3(root, path);
-    const rel = relative2(root, candidate);
-    if (rel.startsWith("..") || isAbsolute4(rel)) throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
+    const candidate = isAbsolute5(path) ? resolve3(path) : resolve3(root, path);
+    const rel = relative3(root, candidate);
+    if (rel.startsWith("..") || isAbsolute5(rel)) throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
       const info = await lstat(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
-      const canonicalRel = relative2(root, canonical);
-      if (canonicalRel.startsWith("..") || isAbsolute4(canonicalRel)) throw new Error();
+      const canonicalRel = relative3(root, canonical);
+      if (canonicalRel.startsWith("..") || isAbsolute5(canonicalRel)) throw new Error();
       if (directory && !info.isDirectory()) throw new Error();
       return canonical;
     } catch {
@@ -29531,7 +29656,7 @@ function readLimit(args) {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config, identities, apiProxy, logger, localGateway, fileViewerHost, terminalSpawner) {
+  constructor(config, identities, apiProxy, logger, localGateway, fileViewerHost, terminalSpawner, sessionSource) {
     this.config = config;
     this.identities = identities;
     this.apiProxy = apiProxy;
@@ -29539,6 +29664,7 @@ var HostPluginRuntime = class {
     this.localGateway = localGateway;
     this.fileViewerHost = fileViewerHost;
     this.terminalSpawner = terminalSpawner;
+    this.sessionSource = sessionSource;
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
     this.paused = config.hostControl?.paused === true;
@@ -29563,7 +29689,8 @@ var HostPluginRuntime = class {
           () => this.terminalEnabled,
           this.codexWorkspaceState,
           this.terminalSpawner
-        )
+        ),
+        this.sessionSource === void 0 ? void 0 : (sessionId) => this.sessionSource?.()?.get?.(sessionId)?.header?.cwd
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -29985,7 +30112,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -30073,7 +30200,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join9(directory, "device.json"))) {
+  if (!await exists3(join10(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -30117,7 +30244,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join9(directory, "device.json"))) {
+  if (!await exists3(join10(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
@@ -30782,6 +30909,7 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   const nativeTypertGateway = ctx.get("typertGateway");
   const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway, { peer: peerFor }).local();
   const subprocess = ctx.get("subprocess", false);
+  const sessionSource = () => ctx.get("sessions", false);
   const deepseekAccount = ctx.get("deepseekAccount", false);
   const deepseekSession = deepseekAccount === void 0 ? void 0 : {
     read: async () => {
@@ -30813,7 +30941,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     logger,
     localTypertGateway,
     () => ctx.get("fileViewerHost"),
-    subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess)
+    subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
+    sessionSource
   );
   let clientRuntime;
   const hostControl = runtime;

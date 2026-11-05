@@ -149,7 +149,7 @@ node apps/server/dist/main.js          # 或 systemd 服务 / Docker Compose
 ## 7. 当前验证基线（2026-10-30）
 
 - `pnpm -r check`、`node scripts/verify-dsh-plugin.mjs` 通过；`git diff --check` 干净
-- 插件单测 **436 通过 / 47 文件**；Protocol 234/7、Server 50/5、Android 307、WebRTC 62、Client Core 41、VS Code 13、Browser 1、Crypto 7
+- 插件单测 **439 通过 / 47 文件**；Protocol 234/7、Server 50/5、Android 307、WebRTC 62、Client Core 41、VS Code 13、Browser 1、Crypto 7
 - 端到端矩阵 **22 场景 / 141 断言全绿**（`scripts/remote-e2e.mts`，1071 秒，含 `slow` 场景）
 - 已知环境相关抖动：`tests/werift-rtc.test.ts`（网卡/防火墙），以连跑两次一致为准
 - 历史记录（当时的构建与实机结论）见[验证历史](validation-history.md)

@@ -258,6 +258,11 @@ async function activate(
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
+  // The Host session service owns each Session's header. It is optional and may
+  // register after this plugin, so it is resolved lazily at file-open time.
+  const sessionSource = () => ctx.get('sessions', false) as {
+    get?(sessionId: string): { header?: { cwd?: string } } | undefined
+  } | undefined
   // The official DeepSeek account service owns the browser-issued account grant.
   // It is optional: profiles without it simply offer no DeepSeek sign-in, and the
   // grant is read per call rather than held.
@@ -302,6 +307,7 @@ async function activate(
     localTypertGateway,
     () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
     subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
+    sessionSource,
   )
 
   let clientRuntime: ClientModeRuntime | undefined
