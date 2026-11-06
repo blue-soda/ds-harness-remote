@@ -24,6 +24,7 @@ import {
   type AllowedCodexAppMethod,
 } from './method-policy.js'
 import { CodexPeerBridge, type PublishCodexFrame } from './peer-bridge.js'
+import { CodexHistoryWindows, type CodexHistoryWindow } from './history-window.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import { resolveCodexThreadKey } from './session-id.js'
 import { paginateCodexNativeHistory, projectCodexNativeHistory, type CodexNativeHistory } from './virtual-harness.js'
@@ -68,8 +69,6 @@ const ACCOUNT_PROBE_TIMEOUT_MS = 60_000
 const CODEX_START_BUDGET_MS = 90_000
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
-const CODEX_HISTORY_PAGE_LIMIT = 25
-const MAX_CODEX_HISTORY_PAGES = 64
 const CODEX_DIRECTORY_ENTRY_LIMIT = 500
 
 interface PendingApproval {
@@ -121,17 +120,8 @@ export class CodexRemoteDomain {
   private readonly turnOwners = new Map<string, ActiveTurnOwner>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly permissionPresets = new Map<string, CodexPermissionPreset>()
-  /**
-   * Full projected histories, one per Thread, so a second open does not walk every
-   * turn again. Keyed by Thread id; refreshed when the Thread metadata changes.
-   */
-  private readonly historyWindows = new Map<string, {
-    history: CodexNativeHistory
-    updatedAt?: number
-    newestTurnId?: string
-    acceptedPageSize?: number
-    at: number
-  }>()
+  /** Per-Thread turn index plus the tail-first full-item window. */
+  private readonly historyWindows: CodexHistoryWindows
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
   private restartAttempt = 0
@@ -165,6 +155,7 @@ export class CodexRemoteDomain {
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
   ) {
     this.config = config
+    this.historyWindows = new CodexHistoryWindows((method, params) => this.callUpstream(method, params), logger)
   }
 
   /** The live configuration; replaced in place by {@link restart}. */
@@ -297,9 +288,10 @@ export class CodexRemoteDomain {
 
     if (call.method === 'dsh/sessionHistory') {
       const { thread: metadata } = await this.readKnownThread(threadId!)
-      const window = await this.historyWindow(connectionId, threadId!, metadata)
+      const beforeSeq = optionalInteger(call.params.beforeSeq)
+      const window = await this.historyWindows.window(threadId!, metadata, beforeSeq)
       return this.historyPage(window, threadId!, {
-        beforeSeq: optionalInteger(call.params.beforeSeq),
+        beforeSeq,
         throughSeq: optionalInteger(call.params.throughSeq),
         maxMessages: optionalInteger(call.params.maxMessages),
       })
@@ -901,127 +893,8 @@ export class CodexRemoteDomain {
     return { thread, ...(typeof thread.cwd === 'string' && thread.cwd.length > 0 ? { cwd: thread.cwd } : {}) }
   }
 
-  private async historyWindow(
-    connectionId: string,
-    threadId: string,
-    metadata: Record<string, unknown>,
-  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number }> {
-    const updatedAt = typeof metadata.updatedAt === 'number' ? metadata.updatedAt : undefined
-    const cached = this.historyWindows.get(threadId)
-    const fresh = cached !== undefined
-      && (updatedAt === undefined || cached.updatedAt === undefined || cached.updatedAt === updatedAt)
-      && Date.now() - cached.at < 5 * 60_000
-    if (fresh && cached !== undefined) {
-      cached.at = Date.now()
-      this.logger.debug('codex history cache hit', {
-        threadId,
-        turns: cached.history.nextTurn,
-        events: cached.history.entries.length,
-      })
-      return cached
-    }
-    if (cached !== undefined) {
-      const appended = await this.appendNewTurns(threadId, cached, updatedAt)
-      if (appended !== undefined) {
-        this.rememberHistoryWindow(threadId, appended)
-        this.logger.debug('codex history cache appended', {
-          threadId,
-          turns: appended.history.nextTurn,
-          events: appended.history.entries.length,
-        })
-        return appended
-      }
-    }
-
-    const startedAt = performance.now()
-    let turns: Record<string, unknown>[]
-    try {
-      turns = await this.readThreadTurns(connectionId, threadId, 'full')
-    } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError
-      this.logHistoryFallback(connectionId, 'turns-full', fullError)
-      turns = await this.readThreadTurns(connectionId, threadId, 'summary')
-    }
-    const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`)
-    const newestTurnId = typeof turns.at(-1)?.id === 'string' ? turns.at(-1)!.id as string : undefined
-    const entry = {
-      history,
-      ...(updatedAt === undefined ? {} : { updatedAt }),
-      ...(newestTurnId === undefined ? {} : { newestTurnId }),
-      ...(cached?.acceptedPageSize === undefined ? {} : { acceptedPageSize: cached.acceptedPageSize }),
-      at: Date.now(),
-    }
-    this.rememberHistoryWindow(threadId, entry)
-    this.logger.debug('codex history cache filled', {
-      threadId,
-      turns: history.nextTurn,
-      events: history.entries.length,
-      updatedAt: updatedAt ?? null,
-      durationMs: Math.round(performance.now() - startedAt),
-    })
-    return entry
-  }
-
-  private async appendNewTurns(
-    threadId: string,
-    cached: { history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number },
-    updatedAt?: number,
-  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number } | undefined> {
-    if (cached.newestTurnId === undefined) return undefined
-    const newTurns: Record<string, unknown>[] = []
-    let cursor: string | undefined
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream('thread/turns/list', {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: 'desc',
-        itemsView: 'full',
-        ...(cursor === undefined ? {} : { cursor }),
-      })
-      const pageResult = isRecord(result) ? result : {}
-      for (const rawTurn of array(pageResult.data)) {
-        if (!isRecord(rawTurn)) continue
-        if (typeof rawTurn.id === 'string' && rawTurn.id === cached.newestTurnId) {
-          if (newTurns.length === 0) {
-            cached.updatedAt = updatedAt
-            cached.at = Date.now()
-            return cached
-          }
-          newTurns.reverse()
-          const partial = projectCodexNativeHistory(
-            { turns: newTurns },
-            `codex:${threadId}`,
-            'legacy',
-            { seq: cached.history.lastSeq + 1, turn: cached.history.nextTurn },
-          )
-          const newestTurnId = newTurns.at(-1)?.id
-          return {
-            history: {
-              header: cached.history.header,
-              entries: [...cached.history.entries, ...partial.entries],
-              lastSeq: partial.lastSeq,
-              nextTurn: partial.nextTurn,
-              ...(partial.activeTurnId === undefined ? {} : { activeTurnId: partial.activeTurnId }),
-            },
-            ...(updatedAt === undefined ? {} : { updatedAt }),
-            ...(typeof newestTurnId === 'string' ? { newestTurnId } : {}),
-            ...(cached.acceptedPageSize === undefined ? {} : { acceptedPageSize: cached.acceptedPageSize }),
-            at: Date.now(),
-          }
-        }
-        newTurns.push(rawTurn)
-      }
-      cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
-        ? pageResult.nextCursor
-        : undefined
-      if (cursor === undefined) return undefined
-    }
-    return undefined
-  }
-
-
   private historyPage(
-    window: { history: CodexNativeHistory; acceptedPageSize?: number },
+    window: CodexHistoryWindow,
     threadId: string,
     request: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
   ): unknown {
@@ -1037,6 +910,9 @@ export class CodexRemoteDomain {
       const resolvedActiveTurnId = page.activeTurnId ?? activeTurnId
       const response = {
         ...page,
+        cursor: window.history.lastSeq,
+        nextTurn: window.totalTurns + 1,
+        hasMore: page.hasMore || window.olderCursor !== undefined,
         ...(resolvedActiveTurnId === undefined ? {} : { activeTurnId: resolvedActiveTurnId }),
         permissionPreset: this.permissionPresets.get(threadId) ?? null,
       }
@@ -1047,7 +923,8 @@ export class CodexRemoteDomain {
         size,
         bytes,
         budget: HISTORY_BUDGET_BYTES,
-        fromCache: true,
+        loadedTurns: window.loaded.size,
+        totalTurns: window.totalTurns,
       })
       if (bytes <= HISTORY_BUDGET_BYTES) {
         window.acceptedPageSize = size
@@ -1056,92 +933,6 @@ export class CodexRemoteDomain {
     }
     throw new RpcError('RESPONSE_TOO_LARGE', 'The Codex history page is too large for the secure Remote channel.')
   }
-
-  private rememberHistoryWindow(
-    threadId: string,
-    entry: { history: CodexNativeHistory; updatedAt?: number; acceptedPageSize?: number; at: number },
-  ): void {
-    if (this.historyWindows.size >= 16 && !this.historyWindows.has(threadId)) {
-      const oldest = this.historyWindows.keys().next().value
-      if (oldest !== undefined) this.historyWindows.delete(oldest)
-    }
-    this.historyWindows.set(threadId, entry)
-  }
-
-  private async readThreadTurns(
-    connectionId: string,
-    threadId: string,
-    itemsView: 'full' | 'summary',
-  ): Promise<Record<string, unknown>[]> {
-    const turns: Record<string, unknown>[] = []
-    let cursor: string | undefined
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream('thread/turns/list', {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: 'asc',
-        itemsView,
-        ...(cursor === undefined ? {} : { cursor }),
-      })
-      const pageResult = isRecord(result) ? result : {}
-      for (const rawTurn of array(pageResult.data)) {
-        if (!isRecord(rawTurn)) continue
-        const turnId = typeof rawTurn.id === 'string' ? rawTurn.id : undefined
-        const items = rawTurn.itemsView === 'full' || turnId === undefined
-          ? array(rawTurn.items)
-          : await this.readThreadItems(connectionId, threadId, turnId, array(rawTurn.items))
-        turns.push({ ...rawTurn, items })
-      }
-      cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
-        ? pageResult.nextCursor
-        : undefined
-      if (cursor === undefined) break
-    }
-    return turns
-  }
-
-  private async readThreadItems(
-    connectionId: string,
-    threadId: string,
-    turnId: string,
-    fallbackItems: unknown[],
-  ): Promise<unknown[]> {
-    const items: unknown[] = []
-    let cursor: string | undefined
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream('thread/items/list', {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: 'asc',
-          ...(cursor === undefined ? {} : { cursor }),
-        })
-        const pageResult = isRecord(result) ? result : {}
-        for (const entry of array(pageResult.data)) {
-          if (isRecord(entry) && entry.item !== undefined) items.push(entry.item)
-        }
-        cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
-          ? pageResult.nextCursor
-          : undefined
-        if (cursor === undefined) break
-      }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error
-      this.logHistoryFallback(connectionId, 'items', error)
-      return fallbackItems
-    }
-    return items
-  }
-
-  private logHistoryFallback(connectionId: string, stage: string, error: unknown): void {
-    this.logger.warn('Codex history read fallback', {
-      connectionId: maskId(connectionId),
-      stage,
-      code: errorCode(error),
-    })
-  }
-
   private async assertResultThreadAllowed(result: unknown): Promise<void> {
     const thread = extractThread(result)
     if (thread === undefined || typeof thread.id !== 'string') {

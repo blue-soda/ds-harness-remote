@@ -2401,7 +2401,7 @@ function toolResultText(item: JsonRecord, type: string, text?: string): string {
   return text ?? itemText(record(item.result)) ?? itemText(record(item.output)) ?? string(item.status) ?? type
 }
 
-function isSurfaceEvent(type: string): boolean {
+export function isSurfaceEvent(type: string): boolean {
   return type === 'user/message' || type === 'assistant/message' || type === 'tool/result'
 }
 

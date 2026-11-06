@@ -177,8 +177,8 @@ var util;
     return void 0;
   };
   util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
-  function joinValues(array3, separator = " | ") {
-    return array3.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
+  function joinValues(array2, separator = " | ") {
+    return array2.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
   util2.joinValues = joinValues;
   util2.jsonStringifyReplacer = (_, value) => {
@@ -6242,7 +6242,7 @@ function hexToBytes(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new Error("hex string expected, got unpadded hex of length " + hl);
-  const array3 = new Uint8Array(al);
+  const array2 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase16(hex.charCodeAt(hi));
     const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
@@ -6250,9 +6250,9 @@ function hexToBytes(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array3[ai] = n1 * 16 + n2;
+    array2[ai] = n1 * 16 + n2;
   }
-  return array3;
+  return array2;
 }
 function utf8ToBytes(str) {
   if (typeof str !== "string")
@@ -8959,7 +8959,7 @@ function hexToBytes2(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new RangeError("hex string expected, got unpadded hex of length " + hl);
-  const array3 = new Uint8Array(al);
+  const array2 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase162(hex.charCodeAt(hi));
     const n2 = asciiToBase162(hex.charCodeAt(hi + 1));
@@ -8967,9 +8967,9 @@ function hexToBytes2(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new RangeError('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array3[ai] = n1 * 16 + n2;
+    array2[ai] = n1 * 16 + n2;
   }
-  return array3;
+  return array2;
 }
 function concatBytes2(...arrays) {
   let sum = 0;
@@ -25046,6 +25046,206 @@ function concatChunks(chunks, totalBytes) {
   return output;
 }
 
+// src/codex/history-window.ts
+var PAGE_LIMIT = 25;
+var MAX_PAGES = 64;
+var CACHE_TTL_MS = 5 * 6e4;
+var CACHE_LIMIT = 16;
+var CodexHistoryWindows = class {
+  constructor(call, logger) {
+    this.call = call;
+    this.logger = logger;
+  }
+  windows = /* @__PURE__ */ new Map();
+  async window(threadId, metadata, beforeSeq) {
+    const updatedAt = typeof metadata.updatedAt === "number" ? metadata.updatedAt : void 0;
+    const cached = this.windows.get(threadId);
+    const fresh = cached !== void 0 && (updatedAt === void 0 || cached.updatedAt === void 0 || cached.updatedAt === updatedAt) && Date.now() - cached.at < CACHE_TTL_MS;
+    if (fresh && cached !== void 0) {
+      cached.at = Date.now();
+      await this.ensureOlder(threadId, cached, beforeSeq);
+      this.logger?.debug("codex history cache hit", {
+        threadId,
+        turns: cached.loaded.size,
+        records: cached.history.entries.length
+      });
+      return cached;
+    }
+    if (cached !== void 0) {
+      const appended = await this.appendNewTurns(threadId, cached, updatedAt);
+      if (appended !== void 0) {
+        await this.ensureOlder(threadId, appended, beforeSeq);
+        this.remember(threadId, appended);
+        this.logger?.debug("codex history cache appended", {
+          threadId,
+          turns: appended.loaded.size,
+          records: appended.history.entries.length
+        });
+        return appended;
+      }
+    }
+    const built = await this.rebuild(threadId, metadata, cached?.acceptedPageSize);
+    await this.ensureOlder(threadId, built, beforeSeq);
+    this.remember(threadId, built);
+    return built;
+  }
+  async rebuild(threadId, metadata, acceptedPageSize) {
+    const startedAt = performance.now();
+    const index = await this.readTurnIndex(threadId);
+    const window = {
+      metadata,
+      turnNumbers: index.numbers,
+      totalTurns: index.total,
+      loaded: /* @__PURE__ */ new Map(),
+      history: projectCodexNativeHistory({ ...metadata, turns: [] }, `codex:${threadId}`, "legacy", {
+        stable: true,
+        turnNumbers: index.numbers
+      }),
+      ...typeof metadata.updatedAt === "number" ? { updatedAt: metadata.updatedAt } : {},
+      ...acceptedPageSize === void 0 ? {} : { acceptedPageSize },
+      at: Date.now()
+    };
+    this.logger?.debug("codex history index", {
+      threadId,
+      turns: index.total,
+      pages: index.pages,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    await this.loadTail(threadId, window);
+    return window;
+  }
+  async readTurnIndex(threadId) {
+    const numbers = /* @__PURE__ */ new Map();
+    let total = 0;
+    let pages = 0;
+    let cursor2;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const result = await this.turnPage(threadId, cursor2, "asc", "summary");
+      pages += 1;
+      for (const rawTurn of result.turns) {
+        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
+        if (turnId === void 0 || numbers.has(turnId)) continue;
+        total += 1;
+        numbers.set(turnId, total);
+      }
+      cursor2 = result.nextCursor;
+      if (cursor2 === void 0) break;
+    }
+    return { numbers, total, pages };
+  }
+  async loadTail(threadId, window) {
+    let cursor2;
+    let fetched = 0;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const result = await this.turnPage(threadId, cursor2, "desc", "full");
+      fetched += result.turns.length;
+      this.addTurns(window, result.turns);
+      cursor2 = result.nextCursor;
+      this.project(threadId, window);
+      if (surfaceRecords(window.history) >= HISTORY_PAGE_SIZES[0] || cursor2 === void 0) break;
+    }
+    window.olderCursor = cursor2;
+    this.logger?.debug("codex history tail", {
+      threadId,
+      turnsFetched: fetched,
+      loadedTurns: window.loaded.size,
+      records: window.history.entries.length,
+      older: window.olderCursor !== void 0
+    });
+  }
+  async ensureOlder(threadId, window, beforeSeq) {
+    if (beforeSeq === void 0) return;
+    let fetched = 0;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const firstSeq = window.history.entries[0]?.event.seq;
+      if (firstSeq !== void 0 && firstSeq < beforeSeq) return;
+      if (window.olderCursor === void 0) return;
+      const result = await this.turnPage(threadId, window.olderCursor, "desc", "full");
+      fetched += result.turns.length;
+      this.addTurns(window, result.turns);
+      window.olderCursor = result.nextCursor;
+      this.project(threadId, window);
+    }
+    this.logger?.debug("codex history older", {
+      threadId,
+      beforeSeq,
+      turnsFetched: fetched,
+      loadedTurns: window.loaded.size
+    });
+  }
+  async appendNewTurns(threadId, cached, updatedAt) {
+    if (cached.newestTurnId === void 0) return void 0;
+    const newer = [];
+    let cursor2;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const result = await this.turnPage(threadId, cursor2, "desc", "full");
+      for (const rawTurn of result.turns) {
+        if (typeof rawTurn.id === "string" && rawTurn.id === cached.newestTurnId) {
+          if (newer.length === 0) {
+            cached.updatedAt = updatedAt;
+            cached.at = Date.now();
+            return cached;
+          }
+          this.addTurns(cached, [...newer].reverse());
+          this.project(threadId, cached);
+          cached.updatedAt = updatedAt;
+          cached.at = Date.now();
+          return cached;
+        }
+        newer.push(rawTurn);
+      }
+      cursor2 = result.nextCursor;
+      if (cursor2 === void 0) return void 0;
+    }
+    return void 0;
+  }
+  addTurns(window, turns) {
+    for (const turn of turns) {
+      const turnId = typeof turn.id === "string" ? turn.id : void 0;
+      if (turnId === void 0) continue;
+      if (!window.turnNumbers.has(turnId)) {
+        window.totalTurns += 1;
+        window.turnNumbers.set(turnId, window.totalTurns);
+      }
+      window.loaded.set(turnId, turn);
+    }
+  }
+  project(threadId, window) {
+    const turns = [...window.loaded.entries()].sort((left, right) => (window.turnNumbers.get(left[0]) ?? 0) - (window.turnNumbers.get(right[0]) ?? 0)).map(([, turn]) => turn);
+    const history = projectCodexNativeHistory({ ...window.metadata, turns }, `codex:${threadId}`, "legacy", {
+      stable: true,
+      turnNumbers: window.turnNumbers
+    });
+    history.nextTurn = window.totalTurns + 1;
+    window.history = history;
+    const newest = [...window.turnNumbers.entries()].sort((left, right) => right[1] - left[1])[0]?.[0];
+    if (newest !== void 0) window.newestTurnId = newest;
+  }
+  async turnPage(threadId, cursor2, direction, itemsView) {
+    const result = await this.call("thread/turns/list", {
+      threadId,
+      limit: PAGE_LIMIT,
+      sortDirection: direction,
+      itemsView,
+      ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+    });
+    const page = typeof result === "object" && result !== null ? result : {};
+    const turns = Array.isArray(page.data) ? page.data.filter((turn) => typeof turn === "object" && turn !== null && !Array.isArray(turn)) : [];
+    const nextCursor = typeof page.nextCursor === "string" && page.nextCursor.length > 0 ? page.nextCursor : void 0;
+    return { turns, nextCursor };
+  }
+  remember(threadId, window) {
+    if (this.windows.size >= CACHE_LIMIT && !this.windows.has(threadId)) {
+      const oldest = this.windows.keys().next().value;
+      if (oldest !== void 0) this.windows.delete(oldest);
+    }
+    this.windows.set(threadId, window);
+  }
+};
+function surfaceRecords(history) {
+  return history.entries.filter((entry) => isSurfaceEvent(entry.event.type) && entry.event.surfaceOp === "append").length;
+}
+
 // src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
@@ -25054,8 +25254,6 @@ var ACCOUNT_PROBE_TIMEOUT_MS = 6e4;
 var CODEX_START_BUDGET_MS = 9e4;
 var CODEX_PAGE_LIMIT2 = 100;
 var MAX_CODEX_PAGES2 = 32;
-var CODEX_HISTORY_PAGE_LIMIT = 25;
-var MAX_CODEX_HISTORY_PAGES = 64;
 var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
 var CodexRemoteDomain = class {
   constructor(config, logger, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
@@ -25063,6 +25261,7 @@ var CodexRemoteDomain = class {
     this.createAppServer = createAppServer;
     this.restartDelaysMs = restartDelaysMs;
     this.config = config;
+    this.historyWindows = new CodexHistoryWindows((method, params) => this.callUpstream(method, params), logger);
   }
   appServer;
   unsubscribeInbound;
@@ -25072,11 +25271,8 @@ var CodexRemoteDomain = class {
   turnOwners = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
-  /**
-   * Full projected histories, one per Thread, so a second open does not walk every
-   * turn again. Keyed by Thread id; refreshed when the Thread metadata changes.
-   */
-  historyWindows = /* @__PURE__ */ new Map();
+  /** Per-Thread turn index plus the tail-first full-item window. */
+  historyWindows;
   approvalExpiryTimer;
   restartTimer;
   restartAttempt = 0;
@@ -25207,9 +25403,10 @@ var CodexRemoteDomain = class {
     const threadId = threadIdFromParams(call.params);
     if (call.method === "dsh/sessionHistory") {
       const { thread: metadata } = await this.readKnownThread(threadId);
-      const window = await this.historyWindow(connectionId, threadId, metadata);
+      const beforeSeq = optionalInteger2(call.params.beforeSeq);
+      const window = await this.historyWindows.window(threadId, metadata, beforeSeq);
       return this.historyPage(window, threadId, {
-        beforeSeq: optionalInteger2(call.params.beforeSeq),
+        beforeSeq,
         throughSeq: optionalInteger2(call.params.throughSeq),
         maxMessages: optionalInteger2(call.params.maxMessages)
       });
@@ -25720,109 +25917,6 @@ var CodexRemoteDomain = class {
     }
     return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
   }
-  async historyWindow(connectionId, threadId, metadata) {
-    const updatedAt = typeof metadata.updatedAt === "number" ? metadata.updatedAt : void 0;
-    const cached = this.historyWindows.get(threadId);
-    const fresh = cached !== void 0 && (updatedAt === void 0 || cached.updatedAt === void 0 || cached.updatedAt === updatedAt) && Date.now() - cached.at < 5 * 6e4;
-    if (fresh && cached !== void 0) {
-      cached.at = Date.now();
-      this.logger.debug("codex history cache hit", {
-        threadId,
-        turns: cached.history.nextTurn,
-        events: cached.history.entries.length
-      });
-      return cached;
-    }
-    if (cached !== void 0) {
-      const appended = await this.appendNewTurns(threadId, cached, updatedAt);
-      if (appended !== void 0) {
-        this.rememberHistoryWindow(threadId, appended);
-        this.logger.debug("codex history cache appended", {
-          threadId,
-          turns: appended.history.nextTurn,
-          events: appended.history.entries.length
-        });
-        return appended;
-      }
-    }
-    const startedAt = performance.now();
-    let turns;
-    try {
-      turns = await this.readThreadTurns(connectionId, threadId, "full");
-    } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError;
-      this.logHistoryFallback(connectionId, "turns-full", fullError);
-      turns = await this.readThreadTurns(connectionId, threadId, "summary");
-    }
-    const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`);
-    const newestTurnId = typeof turns.at(-1)?.id === "string" ? turns.at(-1).id : void 0;
-    const entry = {
-      history,
-      ...updatedAt === void 0 ? {} : { updatedAt },
-      ...newestTurnId === void 0 ? {} : { newestTurnId },
-      ...cached?.acceptedPageSize === void 0 ? {} : { acceptedPageSize: cached.acceptedPageSize },
-      at: Date.now()
-    };
-    this.rememberHistoryWindow(threadId, entry);
-    this.logger.debug("codex history cache filled", {
-      threadId,
-      turns: history.nextTurn,
-      events: history.entries.length,
-      updatedAt: updatedAt ?? null,
-      durationMs: Math.round(performance.now() - startedAt)
-    });
-    return entry;
-  }
-  async appendNewTurns(threadId, cached, updatedAt) {
-    if (cached.newestTurnId === void 0) return void 0;
-    const newTurns = [];
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream("thread/turns/list", {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: "desc",
-        itemsView: "full",
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      });
-      const pageResult = isRecord12(result) ? result : {};
-      for (const rawTurn of array2(pageResult.data)) {
-        if (!isRecord12(rawTurn)) continue;
-        if (typeof rawTurn.id === "string" && rawTurn.id === cached.newestTurnId) {
-          if (newTurns.length === 0) {
-            cached.updatedAt = updatedAt;
-            cached.at = Date.now();
-            return cached;
-          }
-          newTurns.reverse();
-          const partial = projectCodexNativeHistory(
-            { turns: newTurns },
-            `codex:${threadId}`,
-            "legacy",
-            { seq: cached.history.lastSeq + 1, turn: cached.history.nextTurn }
-          );
-          const newestTurnId = newTurns.at(-1)?.id;
-          return {
-            history: {
-              header: cached.history.header,
-              entries: [...cached.history.entries, ...partial.entries],
-              lastSeq: partial.lastSeq,
-              nextTurn: partial.nextTurn,
-              ...partial.activeTurnId === void 0 ? {} : { activeTurnId: partial.activeTurnId }
-            },
-            ...updatedAt === void 0 ? {} : { updatedAt },
-            ...typeof newestTurnId === "string" ? { newestTurnId } : {},
-            ...cached.acceptedPageSize === void 0 ? {} : { acceptedPageSize: cached.acceptedPageSize },
-            at: Date.now()
-          };
-        }
-        newTurns.push(rawTurn);
-      }
-      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-      if (cursor2 === void 0) return void 0;
-    }
-    return void 0;
-  }
   historyPage(window, threadId, request) {
     const requested = request.maxMessages ?? HISTORY_PAGE_SIZES[0];
     const start = Math.max(1, Math.min(requested, HISTORY_PAGE_SIZES[0], window.acceptedPageSize ?? requested));
@@ -25836,6 +25930,9 @@ var CodexRemoteDomain = class {
       const resolvedActiveTurnId = page.activeTurnId ?? activeTurnId2;
       const response = {
         ...page,
+        cursor: window.history.lastSeq,
+        nextTurn: window.totalTurns + 1,
+        hasMore: page.hasMore || window.olderCursor !== void 0,
         ...resolvedActiveTurnId === void 0 ? {} : { activeTurnId: resolvedActiveTurnId },
         permissionPreset: this.permissionPresets.get(threadId) ?? null
       };
@@ -25846,7 +25943,8 @@ var CodexRemoteDomain = class {
         size,
         bytes,
         budget: HISTORY_BUDGET_BYTES,
-        fromCache: true
+        loadedTurns: window.loaded.size,
+        totalTurns: window.totalTurns
       });
       if (bytes <= HISTORY_BUDGET_BYTES) {
         window.acceptedPageSize = size;
@@ -25854,69 +25952,6 @@ var CodexRemoteDomain = class {
       }
     }
     throw new RpcError("RESPONSE_TOO_LARGE", "The Codex history page is too large for the secure Remote channel.");
-  }
-  rememberHistoryWindow(threadId, entry) {
-    if (this.historyWindows.size >= 16 && !this.historyWindows.has(threadId)) {
-      const oldest = this.historyWindows.keys().next().value;
-      if (oldest !== void 0) this.historyWindows.delete(oldest);
-    }
-    this.historyWindows.set(threadId, entry);
-  }
-  async readThreadTurns(connectionId, threadId, itemsView) {
-    const turns = [];
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream("thread/turns/list", {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: "asc",
-        itemsView,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      });
-      const pageResult = isRecord12(result) ? result : {};
-      for (const rawTurn of array2(pageResult.data)) {
-        if (!isRecord12(rawTurn)) continue;
-        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
-        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array2(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array2(rawTurn.items));
-        turns.push({ ...rawTurn, items });
-      }
-      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-    return turns;
-  }
-  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
-    const items = [];
-    let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream("thread/items/list", {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: "asc",
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        });
-        const pageResult = isRecord12(result) ? result : {};
-        for (const entry of array2(pageResult.data)) {
-          if (isRecord12(entry) && entry.item !== void 0) items.push(entry.item);
-        }
-        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      this.logHistoryFallback(connectionId, "items", error);
-      return fallbackItems;
-    }
-    return items;
-  }
-  logHistoryFallback(connectionId, stage, error) {
-    this.logger.warn("Codex history read fallback", {
-      connectionId: maskId(connectionId),
-      stage,
-      code: errorCode4(error)
-    });
   }
   async assertResultThreadAllowed(result) {
     const thread = extractThread(result);
@@ -26483,12 +26518,6 @@ function canTryNextBinary(error) {
 }
 function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array2(value) {
-  return Array.isArray(value) ? value : [];
-}
-function maskId(value) {
-  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
 function isActiveWriterMessage(message) {
   return message.toLowerCase().includes("active writer");
