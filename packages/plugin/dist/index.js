@@ -19492,9 +19492,13 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
   const entries = [];
   let seq = start.seq ?? 0;
   let turnNumber = start.turn ?? 0;
+  let turnSeqBase = 0;
+  let turnEventIndex = 0;
+  let lastSeq = start.stable === true ? -1 : (start.seq ?? 0) - 1;
   const active = activeTurnId(thread.turns);
   const append = (type, data2, time = Date.now(), view, sourceEventSeqs) => {
-    const eventSeq = seq++;
+    const eventSeq = start.stable === true ? turnSeqBase + turnEventIndex++ : seq++;
+    lastSeq = eventSeq;
     entries.push({
       type: "event",
       event: {
@@ -19511,13 +19515,16 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
   };
   for (const rawTurn of array(thread.turns)) {
     const turn = record3(rawTurn);
+    const turnId = string2(turn.id);
     const turnItems = array(turn.items).map(record3);
     const toolImages = turnItems.flatMap(toolOutputImageBlocks);
     let imageOwner = -1;
     for (let index = 0; index < turnItems.length; index += 1) {
       if (turnItems[index].type === "agentMessage") imageOwner = index;
     }
-    turnNumber += 1;
+    turnNumber = (turnId === void 0 ? void 0 : start.turnNumbers?.get(turnId)) ?? turnNumber + 1;
+    turnSeqBase = turnNumber * 4096;
+    turnEventIndex = 0;
     const turnActive = isActiveCodexTurn(turn);
     const time = normalizeTime(turn.createdAt) || normalizeTime(turn.startedAt) || normalizeTime(thread.createdAt) || Date.now();
     append("turn/start", { turn: turnNumber }, time);
@@ -19561,7 +19568,7 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
       ...sessionGeneration === "v3" ? { isSeeded: false } : {}
     },
     entries,
-    lastSeq: seq - 1,
+    lastSeq,
     nextTurn: turnNumber,
     ...active === void 0 ? {} : { activeTurnId: active }
   };

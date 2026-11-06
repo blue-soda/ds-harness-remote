@@ -1247,6 +1247,25 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  it('projects a history window with absolute turn numbers and stable seqs', () => {
+    const thread = {
+      turns: [
+        { id: 'turn-1', status: 'completed', items: [{ id: 'user-1', type: 'userMessage', text: 'a' }] },
+        { id: 'turn-2', status: 'completed', items: [{ id: 'user-2', type: 'userMessage', text: 'b' }] },
+      ],
+    }
+    const history = projectCodexNativeHistory(thread, 'codex:thr_1', 'legacy', {
+      stable: true,
+      turnNumbers: new Map([['turn-1', 3], ['turn-2', 7]]),
+    })
+    expect(history.entries[0]!.event.seq).toBe(3 * 4096)
+    const secondStart = history.entries.find(entry => entry.event.type === 'turn/start'
+      && (entry.event.data as { turn: number }).turn === 7)
+    expect(secondStart?.event.seq).toBe(7 * 4096)
+    expect(history.nextTurn).toBe(7)
+    expect(history.lastSeq).toBe(history.entries.at(-1)!.event.seq)
+  })
+
   it('serves rc.2 and alpha History as message-aligned backwards pages', async () => {
     const client = fakeCodex()
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
