@@ -13418,7 +13418,8 @@ var entryConfigSchema = s.object({
   ]),
   codex: s.object({
     enabled: s.boolean(),
-    binary: s.string()
+    binary: s.string(),
+    showUnprojectedSessions: s.boolean()
   }),
   acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id: s.string(), enabled: s.boolean(), command: s.string(), args: s.array(s.string()), cwd: s.string() })) })
 });
@@ -13451,7 +13452,8 @@ var configSchema = external_exports.object({
   reconnect: reconnectSchema.optional(),
   codex: external_exports.object({
     enabled: external_exports.boolean().optional(),
-    binary: external_exports.string().trim().min(1).max(4096).optional()
+    binary: external_exports.string().trim().min(1).max(4096).optional(),
+    showUnprojectedSessions: external_exports.boolean().optional()
   }).strict().optional(),
   acp: external_exports.object({ enabled: external_exports.boolean().optional(), backends: external_exports.array(external_exports.object({ id: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled: external_exports.boolean().optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict()).max(12).optional(), backend: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict().optional()
 }).strict();
@@ -13493,7 +13495,8 @@ function resolveConfig(input2 = {}, env = process.env) {
       // an account and, while unavailable, retries every minute. The bundled profile patch says the same thing, so
       // an install that never touches the switch has it off.
       enabled: parsed.codex?.enabled ?? false,
-      binary: parsed.codex?.binary ?? "codex"
+      binary: parsed.codex?.binary ?? "codex",
+      showUnprojectedSessions: parsed.codex?.showUnprojectedSessions ?? true
     },
     acp: { enabled: parsed.acp?.enabled ?? true, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id4) => {
       const d = parsed.acp?.backends?.find((x) => x.id === id4);
@@ -19508,12 +19511,24 @@ async function loadCatalog(client, signal, pendingThreads) {
   const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]]));
   const visibleSessionIds = /* @__PURE__ */ new Set();
   const visibleThreads = [];
+  const unmatched = [];
   for (const { thread, session } of projected) {
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId);
     if (projectWorkspaceForSession !== void 0) {
       rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path);
       rebaseThreadCwdOnProjectRoot(thread, projectWorkspaceForSession.path);
       addSessionToWorkspace(projectWorkspaceForSession, session);
+      visibleSessionIds.add(session.id);
+      visibleThreads.push(thread);
+    } else {
+      unmatched.push({ thread, session });
+    }
+  }
+  if (unmatched.length > 0) {
+    const workspace = defaultCodexWorkspace(unmatched.map((value) => value.session));
+    projectWorkspaces.push(workspace);
+    for (const { thread, session } of unmatched) {
+      addSessionToWorkspace(workspace, session);
       visibleSessionIds.add(session.id);
       visibleThreads.push(thread);
     }
@@ -19962,6 +19977,20 @@ function nativeWorkspace(view) {
 }
 function nativeVisibleWorkspaces(catalog, selectedWorkspaceId) {
   return catalog.workspaces.filter((workspace) => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId);
+}
+var DEFAULT_CODEX_WORKSPACE_ID = "codex-workspace:default";
+var DEFAULT_CODEX_WORKSPACE_TITLE = "\u9ED8\u8BA4\u5DE5\u4F5C\u533A";
+function defaultCodexWorkspace(sessions) {
+  const first = sessions[0];
+  return {
+    workspaceId: DEFAULT_CODEX_WORKSPACE_ID,
+    path: sessions.find((session) => session.cwd !== void 0)?.cwd ?? "/",
+    title: DEFAULT_CODEX_WORKSPACE_TITLE,
+    sessionIds: [],
+    sessionCount: 0,
+    createdAt: isoTime(first.createdAt),
+    updatedAt: isoTime(first.updatedAt || first.createdAt)
+  };
 }
 function projectWorkspace(project) {
   const root = project.roots[0];
@@ -25145,7 +25174,11 @@ var CodexRemoteDomain = class {
     if (call.method === "thread/list") {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
       const authority = await this.readWorkspaceAuthority(result.data);
-      const authorized = filterThreadListByWorkspaceAuthority(result, authority);
+      const authorized = filterThreadListByWorkspaceAuthority(
+        result,
+        authority,
+        this.config.showUnprojectedSessions !== false
+      );
       return rebaseThreadListCwds({
         ...authorized,
         data: uniqueCodexThreadRows(authorized.data)
@@ -25685,7 +25718,7 @@ var CodexRemoteDomain = class {
       return { thread: listed, ...typeof listed.cwd === "string" && listed.cwd.length > 0 ? { cwd: listed.cwd } : {} };
     }
     const thread = extractThread(result);
-    if (thread === void 0 || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
+    if (thread === void 0 || thread.id !== threadId || !this.threadAllowed(thread, authority)) {
       throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
     }
     return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
@@ -25778,9 +25811,13 @@ var CodexRemoteDomain = class {
     if (thread === void 0 || typeof thread.id !== "string") {
       throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
     }
-    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
+    if (!this.threadAllowed(thread, await this.readWorkspaceAuthority())) {
       throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
     }
+  }
+  /** The authority check, widened when unprojected Sessions are exposed. */
+  threadAllowed(thread, authority) {
+    return this.config.showUnprojectedSessions !== false || isThreadAllowedByWorkspaceAuthority(thread, authority);
   }
   claimTurn(threadId, connectionId, method, turnId) {
     const owner = this.turnOwners.get(threadId);
@@ -25922,7 +25959,7 @@ var CodexRemoteDomain = class {
       }));
       const thread = result.data.find((item) => item.id === threadId);
       if (thread !== void 0) {
-        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : void 0;
+        return this.threadAllowed(thread, authority) ? thread : void 0;
       }
       cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
       if (cursor2 === void 0) break;
@@ -25931,6 +25968,14 @@ var CodexRemoteDomain = class {
   }
   async requireCodexWorkspacePath(path) {
     if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    if (this.config.showUnprojectedSessions !== false) {
+      try {
+        const candidate2 = await realpath(path);
+        if ((await stat4(candidate2)).isDirectory()) return candidate2;
+      } catch {
+      }
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
     const paths = await this.listCodexWorkspacePaths();
@@ -26147,13 +26192,13 @@ function sanitizeThreadList(result) {
     ...typeof result.backwardsCursor === "string" && result.backwardsCursor.length > 0 ? { backwardsCursor: result.backwardsCursor } : {}
   };
 }
-function filterThreadListByWorkspaceAuthority(result, authority) {
+function filterThreadListByWorkspaceAuthority(result, authority, includeUnprojected = false) {
   if (!isRecord12(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record7) => isRecord12(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record7) => isRecord12(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && (includeUnprojected || isThreadAllowedByWorkspaceAuthority(thread, authority)))
   };
 }
 function rebaseThreadListCwds(result, roots) {

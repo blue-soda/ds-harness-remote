@@ -80,7 +80,7 @@ describe('CodexRemoteDomain', () => {
   it('sanitizes CodeX listings using CodeX as the workspace source of truth', async () => {
     const { root, outside } = await directories()
     const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
@@ -121,11 +121,27 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('lists and reads threads outside every project when showUnprojectedSessions is on', async () => {
+    const { root, outside } = await directories()
+    const app = new FakeAppServer(root, outside)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: true }, logger(), () => app)
+    await domain.start()
+
+    const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
+    const ids = (result as { data: Array<{ id: string }> }).data.map(row => row.id)
+    expect(ids).toEqual(expect.arrayContaining(['outside-thread', 'unprojected-thread', 'missing-cwd']))
+    await expect(domain.call('connection-1', {
+      method: 'thread/read',
+      params: { threadId: 'unprojected-thread' },
+    })).resolves.toMatchObject({ thread: { id: 'unprojected-thread' } })
+    await domain.close()
+  })
+
   it.runIf(process.platform === 'win32')('reports a thread cwd under the project root spelling when Codex changed the case', async () => {
     const { root, outside } = await directories()
     const app = new FakeAppServer(root, outside)
     app.capitalCwd = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const result = await domain.call('connection-1', { method: 'thread/list', params: {} }) as {
@@ -141,7 +157,7 @@ describe('CodexRemoteDomain', () => {
       const { base, root, outside } = await directories()
       const app = new FakeAppServer(root, outside)
       app.projectListMode = projectListMode
-      const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+      const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
       await domain.start()
 
       const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
@@ -185,7 +201,7 @@ describe('CodexRemoteDomain', () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
     app.duplicateThreadRows = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
@@ -205,7 +221,7 @@ describe('CodexRemoteDomain', () => {
     const link = join(root, 'outside-link')
     const linked = await linkDirectory(outside, link)
     const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     await expect(domain.call('connection-1', {
@@ -242,7 +258,7 @@ describe('CodexRemoteDomain', () => {
     const link = join(base, 'selected-project-link')
     const linked = await linkDirectory(root, link)
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     if (linked) {
@@ -292,7 +308,7 @@ describe('CodexRemoteDomain', () => {
     await mkdir(hidden)
     const linked = await linkDirectory(outside, outsideLink)
     const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const result = await domain.call('connection-1', {
@@ -329,7 +345,7 @@ describe('CodexRemoteDomain', () => {
   it('maps the explicit Full access preset to fixed App Server policies', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     await domain.call('connection-1', {
@@ -360,7 +376,7 @@ describe('CodexRemoteDomain', () => {
   it('inherits App Server permission defaults when no preset is provided', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     await domain.call('connection-1', {
@@ -387,7 +403,7 @@ describe('CodexRemoteDomain', () => {
   it('confirms loaded-thread permission changes and exposes them in read-only history', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
     const history = () => domain.call('observer', { method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
     await expect(history()).resolves.toMatchObject({ permissionPreset: null })
@@ -413,7 +429,7 @@ describe('CodexRemoteDomain', () => {
   it('does not confirm a rejected setting or let an observer change an active writer policy', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
     app.rejectSettings = true
     const change = () => domain.call('observer', {
@@ -443,7 +459,7 @@ describe('CodexRemoteDomain', () => {
         ? { ...(isRecord(result) ? result : {}), approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } }
         : result
     })
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
     await expect(domain.call('writer', {
       method: 'thread/resume', params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
@@ -455,7 +471,7 @@ describe('CodexRemoteDomain', () => {
   it('maps bounded remote image input to an App Server data URL', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     await domain.call('connection-1', {
@@ -488,7 +504,7 @@ describe('CodexRemoteDomain', () => {
   it('projects and paginates CodeX History on the Host before returning it to the Client', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const tail = await domain.call('connection-1', {
@@ -516,7 +532,7 @@ describe('CodexRemoteDomain', () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
     app.rejectTurnPagination = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     const history = await domain.call('connection-1', {
@@ -566,7 +582,7 @@ describe('CodexRemoteDomain', () => {
   it('isolates streams and approval handles to the active turn owner', async () => {
     const { root, outside } = await directories()
     const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
     const peerOneFrames: Array<{ event: string; data: unknown }> = []
     const peerTwoFrames: Array<{ event: string; data: unknown }> = []
@@ -658,7 +674,7 @@ describe('CodexRemoteDomain', () => {
   it('lets a replacement connection from the same peer stop its recovered active turn', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
     const peerOne = domain.createPeer(
       { connectionId: 'connection-1', peerDeviceId: 'phone-1' },
@@ -691,7 +707,7 @@ describe('CodexRemoteDomain', () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
     app.rejectTurnStartBusy = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
     await domain.start()
 
     await expect(domain.call('connection-1', {
@@ -711,7 +727,7 @@ describe('CodexRemoteDomain', () => {
     const create = vi.fn()
       .mockReturnValueOnce(first)
       .mockReturnValueOnce(second)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), create, [0])
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), create, [0])
     await domain.start()
     const frames: Array<{ event: string; data: unknown }> = []
     const peer = domain.createPeer(

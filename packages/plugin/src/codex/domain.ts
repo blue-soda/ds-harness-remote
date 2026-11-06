@@ -249,7 +249,11 @@ export class CodexRemoteDomain {
         data: Record<string, unknown>[]
       }
       const authority = await this.readWorkspaceAuthority(result.data)
-      const authorized = filterThreadListByWorkspaceAuthority(result, authority) as { data: Record<string, unknown>[] }
+      const authorized = filterThreadListByWorkspaceAuthority(
+        result,
+        authority,
+        this.config.showUnprojectedSessions !== false,
+      ) as { data: Record<string, unknown>[] }
       // One Session per thread. Codex lists a thread once per rollout file it finds
       // (a re-send or a fork writes another), but the App Server can only open the
       // thread's current rollout, so the extra rows are Sessions that all lead to the
@@ -888,7 +892,7 @@ export class CodexRemoteDomain {
       return { thread: listed, ...(typeof listed.cwd === 'string' && listed.cwd.length > 0 ? { cwd: listed.cwd } : {}) }
     }
     const thread = extractThread(result)
-    if (thread === undefined || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
+    if (thread === undefined || thread.id !== threadId || !this.threadAllowed(thread, authority)) {
       throw new RpcError('CODEX_THREAD_NOT_ALLOWED', 'The Codex thread is not available through this Remote Host.')
     }
     return { thread, ...(typeof thread.cwd === 'string' && thread.cwd.length > 0 ? { cwd: thread.cwd } : {}) }
@@ -1001,9 +1005,15 @@ export class CodexRemoteDomain {
     if (thread === undefined || typeof thread.id !== 'string') {
       throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid thread.')
     }
-    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
+    if (!this.threadAllowed(thread, await this.readWorkspaceAuthority())) {
       throw new RpcError('CODEX_THREAD_NOT_ALLOWED', 'The Codex thread is not available through this Remote Host.')
     }
+  }
+
+  /** The authority check, widened when unprojected Sessions are exposed. */
+  private threadAllowed(thread: Record<string, unknown>, authority: CodexWorkspaceAuthority): boolean {
+    return this.config.showUnprojectedSessions !== false
+      || isThreadAllowedByWorkspaceAuthority(thread, authority)
   }
 
   private claimTurn(
@@ -1171,7 +1181,7 @@ export class CodexRemoteDomain {
       })) as { data: Record<string, unknown>[]; nextCursor?: string | null }
       const thread = result.data.find(item => item.id === threadId)
       if (thread !== undefined) {
-        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : undefined
+        return this.threadAllowed(thread, authority) ? thread : undefined
       }
       cursor = typeof result.nextCursor === 'string' && result.nextCursor.length > 0 ? result.nextCursor : undefined
       if (cursor === undefined) break
@@ -1181,6 +1191,17 @@ export class CodexRemoteDomain {
 
   private async requireCodexWorkspacePath(path: string): Promise<string> {
     if (!isAbsolute(path)) {
+      throw new RpcError('CODEX_PATH_NOT_ALLOWED', 'The CodeX working directory is not available as a Workspace.')
+    }
+    if (this.config.showUnprojectedSessions !== false) {
+      // The default Workspace groups Threads from any directory, so a new Session
+      // there may start in any existing absolute directory.
+      try {
+        const candidate = await realpath(path)
+        if ((await stat(candidate)).isDirectory()) return candidate
+      } catch {
+        // fall through to the project-root check for the error shape
+      }
       throw new RpcError('CODEX_PATH_NOT_ALLOWED', 'The CodeX working directory is not available as a Workspace.')
     }
     const paths = await this.listCodexWorkspacePaths()
@@ -1468,7 +1489,11 @@ function sanitizeThreadList(result: unknown): unknown {
   }
 }
 
-function filterThreadListByWorkspaceAuthority(result: unknown, authority: CodexWorkspaceAuthority): unknown {
+function filterThreadListByWorkspaceAuthority(
+  result: unknown,
+  authority: CodexWorkspaceAuthority,
+  includeUnprojected = false,
+): unknown {
   if (!isRecord(result) || !Array.isArray(result.data)) {
     throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid thread list.')
   }
@@ -1477,7 +1502,7 @@ function filterThreadListByWorkspaceAuthority(result: unknown, authority: CodexW
     data: result.data
       .map(record => isRecord(record) ? record : undefined)
       .filter((thread): thread is Record<string, unknown> => (
-        thread !== undefined && isThreadAllowedByWorkspaceAuthority(thread, authority)
+        thread !== undefined && (includeUnprojected || isThreadAllowedByWorkspaceAuthority(thread, authority))
       )),
   }
 }

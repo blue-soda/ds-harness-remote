@@ -1935,6 +1935,7 @@ async function loadCatalog(
   const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]!]))
   const visibleSessionIds = new Set<string>()
   const visibleThreads: JsonRecord[] = []
+  const unmatched: Array<{ thread: JsonRecord; session: DisplaySession }> = []
 
   for (const { thread, session } of projected) {
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId)
@@ -1942,6 +1943,21 @@ async function loadCatalog(
       rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path)
       rebaseThreadCwdOnProjectRoot(thread, projectWorkspaceForSession.path)
       addSessionToWorkspace(projectWorkspaceForSession, session)
+      visibleSessionIds.add(session.id)
+      visibleThreads.push(thread)
+    } else {
+      unmatched.push({ thread, session })
+    }
+  }
+  // Threads outside every Codex project get their own grouping instead of being
+  // dropped: the Codex app shows them, and the Host exposes them when its
+  // `showUnprojectedSessions` switch is on. The group path is the first Session's
+  // own directory so opening/starting a Session still has a real Host path.
+  if (unmatched.length > 0) {
+    const workspace = defaultCodexWorkspace(unmatched.map(value => value.session))
+    projectWorkspaces.push(workspace)
+    for (const { thread, session } of unmatched) {
+      addSessionToWorkspace(workspace, session)
       visibleSessionIds.add(session.id)
       visibleThreads.push(thread)
     }
@@ -2487,6 +2503,23 @@ function nativeWorkspace(view: CodexVirtualWorkspaceView): Omit<CodexVirtualWork
 
 function nativeVisibleWorkspaces(catalog: CatalogState, selectedWorkspaceId?: string): CodexVirtualWorkspaceView[] {
   return catalog.workspaces.filter(workspace => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId)
+}
+
+/** Stable identity and display title for the grouped out-of-project Threads. */
+const DEFAULT_CODEX_WORKSPACE_ID = 'codex-workspace:default'
+const DEFAULT_CODEX_WORKSPACE_TITLE = '默认工作区'
+
+function defaultCodexWorkspace(sessions: DisplaySession[]): CodexVirtualWorkspaceView {
+  const first = sessions[0]!
+  return {
+    workspaceId: DEFAULT_CODEX_WORKSPACE_ID,
+    path: sessions.find(session => session.cwd !== undefined)?.cwd ?? '/',
+    title: DEFAULT_CODEX_WORKSPACE_TITLE,
+    sessionIds: [],
+    sessionCount: 0,
+    createdAt: isoTime(first.createdAt),
+    updatedAt: isoTime(first.updatedAt || first.createdAt),
+  }
 }
 
 function projectWorkspace(project: CodexProject): CodexVirtualWorkspaceView {

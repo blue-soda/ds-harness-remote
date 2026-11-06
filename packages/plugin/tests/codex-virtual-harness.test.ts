@@ -238,11 +238,9 @@ describe('CodexVirtualHarness', () => {
       ok: true
       value: { data: Array<{ id: string; cwd?: string }> }
     }
-    expect(result.value.data.map(row => row.id)).toEqual(['thr_low', 'thr_cap'])
-    expect(result.value.data.map(row => row.cwd)).toEqual([
-      'C:\\Workspace\\opencood',
-      'C:\\Workspace\\opencood\\research',
-    ])
+    const byId = new Map(result.value.data.map(row => [row.id, row.cwd]))
+    expect(byId.get('thr_low')).toBe('C:\\Workspace\\opencood')
+    expect(byId.get('thr_cap')).toBe('C:\\Workspace\\opencood\\research')
     await target.close()
   })
 
@@ -371,27 +369,35 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('filters CodeX threads that do not belong to an advertised project', async () => {
+  it('groups CodeX threads outside every project into the default workspace', async () => {
     const client = fakeCodex([
       codexThread('thr_2', '/workspace/other', 'Other workspace'),
       codexThread('thr_3', undefined, 'Project metadata only', 'repo-project'),
     ])
 
     const workspaces = await discoverCodexVirtualWorkspaces(client)
-    expect(workspaces).toHaveLength(1)
-    expect(workspaces[0]).toMatchObject({
-      workspaceId: 'codex-workspace:project:repo-project',
+    expect(workspaces).toHaveLength(2)
+    expect(workspaces.find(item => item.workspaceId === 'codex-workspace:project:repo-project')).toMatchObject({
       sessionIds: ['codex:thr_1', 'codex:thr_3'],
       sessionCount: 2,
     })
+    expect(workspaces.find(item => item.workspaceId === 'codex-workspace:default')).toMatchObject({
+      title: '默认工作区',
+      path: '/workspace/other',
+      sessionIds: ['codex:thr_2'],
+      sessionCount: 1,
+    })
 
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-    expect(sessions).toMatchObject({ ok: true, value: { items: [
-      { sessionId: 'codex:thr_1' },
-      { sessionId: 'codex:thr_3' },
-    ] } })
-    expect(JSON.stringify(sessions)).not.toContain('codex:thr_2')
+    const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal) as {
+      ok: true
+      value: { items: Array<{ sessionId: string }> }
+    }
+    expect(sessions.value.items.map(item => item.sessionId)).toEqual(expect.arrayContaining([
+      'codex:thr_1',
+      'codex:thr_2',
+      'codex:thr_3',
+    ]))
     await target.close()
   })
 
@@ -1450,13 +1456,14 @@ describe('CodexVirtualHarness', () => {
     expect(workspaces).toMatchObject({ ok: true, value: { items: [
       { workspaceId: workspace!.workspaceId, sessionIds: ['codex:thr_1'] },
       { sessionIds: ['codex:thr_2'] },
+      { workspaceId: 'codex-workspace:default', sessionIds: ['codex:thr_3'] },
     ] } })
     const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
     expect(sessions).toMatchObject({ ok: true, value: { items: [
       { sessionId: 'codex:thr_1' },
       { sessionId: 'codex:thr_2' },
+      { sessionId: 'codex:thr_3' },
     ] } })
-    expect(JSON.stringify(sessions)).not.toContain('codex:thr_3')
 
     const events = await target.open('$events', { args: {} }, new AbortController().signal)
     const iterator = events[Symbol.asyncIterator]()
