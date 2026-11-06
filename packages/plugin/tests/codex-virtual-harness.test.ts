@@ -425,10 +425,20 @@ describe('CodexVirtualHarness', () => {
   // history that cannot load: the key resolves to its thread, and the projected history is the
   // thread's, so the id the native UI holds keeps working until the next catalog read replaces it.
   it('exposes history cache metadata without message content', async () => {
-    const scope = globalThis as unknown as { window?: Record<string, unknown> }
+    const attributes = new Map<string, string>()
+    const documentElement = {
+      setAttribute: (name: string, value: string) => { attributes.set(name, value) },
+      removeAttribute: (name: string) => { attributes.delete(name) },
+    }
+    const scope = globalThis as unknown as {
+      window?: Record<string, unknown>
+      document?: { documentElement?: typeof documentElement }
+    }
     const win: Record<string, unknown> = {}
     const previous = scope.window
+    const previousDocument = scope.document
     scope.window = win
+    scope.document = { documentElement }
     try {
       const client = fakeCodex()
       const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
@@ -449,11 +459,20 @@ describe('CodexVirtualHarness', () => {
       expect(JSON.stringify(stats)).not.toContain('Use native UI')
       expect(JSON.stringify(stats)).not.toContain('Done.')
 
+      const attribute = attributes.get('data-dsh-codex-history-cache-stats')
+      expect(attribute).toBeDefined()
+      expect(attribute).toContain('codex:thr_1')
+      expect(attribute).not.toContain('Use native UI')
+      expect(attribute).not.toContain('Done.')
+
       await target.close()
       expect(win.__dshCodexHistoryCacheStats).toBeUndefined()
+      expect(attributes.has('data-dsh-codex-history-cache-stats')).toBe(false)
     } finally {
       if (previous === undefined) delete scope.window
       else scope.window = previous
+      if (previousDocument === undefined) delete scope.document
+      else scope.document = previousDocument
     }
   })
 

@@ -18179,10 +18179,15 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.selectedPermissions.clear();
     this.imageAttachments.clear();
     this.historyPageCache.clear();
+    const globalScope = globalThis;
+    if (this.historyCacheInspector !== void 0 && globalScope.__dshCodexHistoryCacheStats === this.historyCacheInspector) {
+      delete globalScope.__dshCodexHistoryCacheStats;
+    }
     const scope = globalThis;
     if (scope.window !== void 0 && this.historyCacheInspector !== void 0 && scope.window.__dshCodexHistoryCacheStats === this.historyCacheInspector) {
       delete scope.window.__dshCodexHistoryCacheStats;
     }
+    scope.document?.documentElement?.removeAttribute?.("data-dsh-codex-history-cache-stats");
     this.historyCacheInspector = void 0;
   }
   async refreshCatalog(signal) {
@@ -19117,8 +19122,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const cacheKey = `${this.host.deviceId}|${threadId}|${page.beforeSeq ?? ""}|${page.throughSeq ?? ""}|${maxMessages}`;
     const cached = this.historyPageCache.get(cacheKey);
     if (cached !== void 0 && Date.now() - cached.at < HISTORY_PAGE_CACHE_TTL_MS) {
+      const ageMs = Date.now() - cached.at;
       this.historyPageHits += 1;
       this.cacheHistoryImages(cached.page);
+      this.publishHistoryCacheStats();
+      this.logHistoryCache("hit", threadId, { ...page, maxMessages }, cached.page.records.length, ageMs);
       return cached.page;
     }
     this.historyPageMisses += 1;
@@ -19142,26 +19150,59 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       const oldest = this.historyPageCache.keys().next().value;
       if (oldest !== void 0) this.historyPageCache.delete(oldest);
     }
+    this.publishHistoryCacheStats();
+    this.logHistoryCache("miss", threadId, { ...page, maxMessages }, value.records.length);
     return value;
   }
   /** A live change or a new turn makes the cached page stale. */
   invalidateHistoryPages(threadId) {
     const marker = `|${threadId}|`;
+    let removed = false;
     for (const key of [...this.historyPageCache.keys()]) {
-      if (key.includes(marker)) this.historyPageCache.delete(key);
+      if (key.includes(marker)) {
+        this.historyPageCache.delete(key);
+        removed = true;
+      }
     }
+    if (removed) this.publishHistoryCacheStats();
   }
   /**
    * Expose cache metadata to the current page's DevTools as
    * `__dshCodexHistoryCacheStats()`. The function is metadata only: it never
    * returns message text or event data, so the Session content stays private.
+   * It is installed on both the realm global and `window`, and mirrored into a
+   * DOM data attribute so a console in another realm can read it too.
    */
   installHistoryCacheInspector() {
+    const globalScope = globalThis;
     const scope = globalThis;
-    if (scope.window === void 0) return;
     const inspector = () => this.historyCacheStats();
-    scope.window.__dshCodexHistoryCacheStats = inspector;
+    globalScope.__dshCodexHistoryCacheStats = inspector;
+    if (scope.window !== void 0) scope.window.__dshCodexHistoryCacheStats = inspector;
     this.historyCacheInspector = inspector;
+    this.publishHistoryCacheStats();
+    scope.console?.info?.("[dsh-remote] codex history cache inspector ready; call __dshCodexHistoryCacheStats()");
+  }
+  publishHistoryCacheStats() {
+    const scope = globalThis;
+    const root = scope.document?.documentElement;
+    if (root?.setAttribute === void 0) return;
+    try {
+      root.setAttribute("data-dsh-codex-history-cache-stats", JSON.stringify(this.historyCacheStats()));
+    } catch {
+    }
+  }
+  logHistoryCache(event, threadId, page, records, ageMs) {
+    const scope = globalThis;
+    scope.console?.info?.("[dsh-remote] codex history page cache " + event, {
+      threadId,
+      beforeSeq: page.beforeSeq ?? null,
+      ...page.maxMessages === void 0 ? {} : { maxMessages: page.maxMessages },
+      ...records === void 0 ? {} : { records },
+      ...ageMs === void 0 ? {} : { ageMs },
+      hits: this.historyPageHits,
+      misses: this.historyPageMisses
+    });
   }
   historyCacheStats() {
     const now = Date.now();
