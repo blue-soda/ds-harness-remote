@@ -55,7 +55,7 @@ node scripts/break-hard-links.mjs packages/plugin
 
 **包内 `packages/plugin/README.md` 是 npm 页面的正文，必须随版本一起改**：它是一份独立精简版
 （不是根 README 的副本），因此根 README 改版本钉版时它**不会**跟着变 —— 0.5.0 发布时就出现过
-npm 页面仍写着 `@blue-soda/dsh-remote@0.4.29` 的情况。发版前检查它两处安装钉版
+npm 页面仍写着 `@blue-soda/dsh-remote@0.4.21` 的情况。发版前检查它两处安装钉版
 （`--profile web` / `--profile dsh-tui`）与本次默认行为变更说明是否同步。
 
 **发版清单**（**5 处**版本号必须一致，由两个脚本分别校验：`packages/plugin/scripts/verify-version-sync.mjs`

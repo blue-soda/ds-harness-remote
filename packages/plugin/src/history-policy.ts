@@ -21,3 +21,15 @@ export function historyPageSizes(start: number = HISTORY_PAGE_SIZES[0]): number[
   for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size)
   return sizes
 }
+
+/**
+ * Whether the optional Codex history-cache diagnostics file may be written.
+ *
+ * Off by default. The file is written with a synchronous fs call by the client
+ * Node process; set `DSH_CODEX_HISTORY_STATS=1` to enable it. Only explicit
+ * truthy values opt in, so a typo leaves it off.
+ */
+export function codexHistoryStatsFileEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.DSH_CODEX_HISTORY_STATS?.trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'on' || value === 'yes'
+}

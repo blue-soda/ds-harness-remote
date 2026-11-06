@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { codexHistoryStatsFileEnabled } from './history-policy.js'
 import { connectionFailureDetail } from './server-connection.js'
 import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
@@ -2073,7 +2074,7 @@ export class ClientModeRuntime {
   }
 
   private writeCodexHistoryCacheStats(stats: CodexHistoryCacheStats): void {
-    if (process.env.VITEST !== undefined) return
+    if (!codexHistoryStatsFileEnabled() || process.env.VITEST !== undefined) return
     try {
       const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
       mkdirSync(home, { recursive: true })

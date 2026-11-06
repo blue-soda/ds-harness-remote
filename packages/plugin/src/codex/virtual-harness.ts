@@ -17,7 +17,7 @@ import type {
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import { parseCodexSessionId } from './session-id.js'
 import { decodeByteValue } from '../rpc-binary-attachments.js'
-import { HISTORY_PAGE_SIZES } from '../history-policy.js'
+import { HISTORY_PAGE_SIZES, codexHistoryStatsFileEnabled } from '../history-policy.js'
 import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
 import type { HarnessSessionGeneration } from '../harness-version.js'
 import {
@@ -1747,7 +1747,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
    * the client home for inspection without any message content.
    */
   private writeHistoryCacheStatsFile(stats: CodexHistoryCacheStats): void {
-    if (process.env.VITEST !== undefined) return
+    if (!codexHistoryStatsFileEnabled() || process.env.VITEST !== undefined) return
     try {
       const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
       mkdirSync(home, { recursive: true })

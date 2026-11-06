@@ -53,3 +53,5 @@ after either upstream is upgraded are recorded in
 
 `0.5.7` changes no wire format: a Remote history page is clamped to the 50/30/20/12/6/3/1 ladder for both the opening snapshot and older pages (so a first paint always stays small), a Session whose working directory changed mid-run has its `workspaceFiles` path re-rooted onto the live `workingDirectory` before dispatch, and a Host answers Server heartbeats outside its control-frame queue so a slow handler cannot make it look offline or block its own reconnect. Everything above still applies.
 
+`0.5.8` changes no wire format: Codex history indexes turn ids and event counts without full items, loads full items tail-first on the shared 50-message ladder, keeps seqs contiguous, and reuses the last page in the client for 60 seconds. The optional `codex-history-cache-stats.json` diagnostics file is off by default and is enabled with `DSH_CODEX_HISTORY_STATS=1` in the client environment. Everything above still applies.
+

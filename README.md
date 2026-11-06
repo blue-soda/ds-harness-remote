@@ -43,7 +43,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
 plugin version through DSH's plugin manager:
 
-`@blue-soda/dsh-remote@0.5.7`
+`@blue-soda/dsh-remote@0.5.8`
 
 ## Features
 
@@ -64,7 +64,7 @@ plugin version through DSH's plugin manager:
 Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
 command-line installation below:
 
-`@blue-soda/dsh-remote@0.5.7`
+`@blue-soda/dsh-remote@0.5.8`
 
 ### dsh-TUI Host
 
@@ -76,7 +76,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.7
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.8
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -218,6 +218,12 @@ has the ChatGPT desktop app installed, the Plugin finds the `codex.exe` it bundl
 `codex app-server` directly, so **the desktop app does not need to be running** to browse Codex
 projects, load their history and chat. Advanced configuration and implementation notes live in
 [Codex Remote technical notes](docs/codex-remote.md).
+
+Long Codex histories load tail-first: the Host indexes turn ids without full items, loads the
+newest turns first, and the client reuses its last page for 60 seconds. The optional
+`codex-history-cache-stats.json` diagnostics file is **off by default**; set
+`DSH_CODEX_HISTORY_STATS=1` in the client environment before starting the client to enable it.
+It contains cache metadata only, never message text.
 
 Turning Codex off on the Host is a capability change, not a link drop: it is announced once as
 `codex.app.capability`, and it never disturbs a Harness session, terminal, or preview on the same

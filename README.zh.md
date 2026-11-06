@@ -42,7 +42,7 @@
 
 Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.5.7`
+`@blue-soda/dsh-remote@0.5.8`
 
 ## 主要特性
 
@@ -62,7 +62,7 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-`@blue-soda/dsh-remote@0.5.7`
+`@blue-soda/dsh-remote@0.5.8`
 
 ### dsh-TUI Host
 
@@ -74,7 +74,7 @@ Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方�
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.7
+dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.8
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -195,6 +195,10 @@ Codex 默认关闭，需要在 DeepSeek Remote 设置卡片中手动开启（切
 自动发现它内置的 `codex.exe` 并直接以 `codex app-server` 通信，**因此不需要运行桌面应用**就能浏览
 Codex 项目、加载历史并对话。高级配置和实现细节见
 [Codex Remote 技术说明](docs/codex-remote.md)。
+
+较长的 Codex 历史会先取尾部：Host 只建 turn 编号索引（不取 full items），先加载最新 turn，客户端复用最近 60 秒的历史页。可选的
+`codex-history-cache-stats.json` 诊断文件**默认关闭**；需要在启动客户端前设置
+`DSH_CODEX_HISTORY_STATS=1` 才会产生。文件只含缓存元数据，不含消息正文。
 
 ## 端到端加密
 

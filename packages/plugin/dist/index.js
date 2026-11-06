@@ -9,18 +9,6 @@ import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:f
 import { homedir as homedir2 } from "node:os";
 import { join as join6 } from "node:path";
 
-// ../webrtc/dist/websocket-backpressure.js
-async function waitForRelayCapacity(socket) {
-  const started = Date.now();
-  while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
-    if (socket.readyState !== 1 || Date.now() - started > 1e4)
-      throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve4) => setTimeout(resolve4, 10));
-  }
-  if (socket.readyState !== 1)
-    throw new Error("Relay transport closed");
-}
-
 // ../../node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -4597,6 +4585,32 @@ function cryptoRandomId() {
   if (g?.randomUUID)
     return g.randomUUID();
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+// src/history-policy.ts
+var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
+var HISTORY_BUDGET_BYTES = MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES;
+function historyPageSizes(start = HISTORY_PAGE_SIZES[0]) {
+  const sizes = [start];
+  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
+  return sizes;
+}
+function codexHistoryStatsFileEnabled(env = process.env) {
+  const value = env.DSH_CODEX_HISTORY_STATS?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "on" || value === "yes";
+}
+
+// ../webrtc/dist/websocket-backpressure.js
+async function waitForRelayCapacity(socket) {
+  const started = Date.now();
+  while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
+    if (socket.readyState !== 1 || Date.now() - started > 1e4)
+      throw new Error("Relay consumer is too slow or disconnected");
+    await new Promise((resolve4) => setTimeout(resolve4, 10));
+  }
+  if (socket.readyState !== 1)
+    throw new Error("Relay transport closed");
 }
 
 // ../webrtc/dist/transport.js
@@ -13529,7 +13543,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.7";
+var PLUGIN_VERSION = "0.5.8";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -17638,16 +17652,6 @@ function resolveCodexThreadKey(key) {
   return codexThreadIdFromKey(key) ?? key;
 }
 
-// src/history-policy.ts
-var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
-var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
-var HISTORY_BUDGET_BYTES = MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES;
-function historyPageSizes(start = HISTORY_PAGE_SIZES[0]) {
-  const sizes = [start];
-  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
-  return sizes;
-}
-
 // src/codex/codex-image-codec.ts
 var CODEX_IMAGE_MEDIA_TYPES2 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var CODEX_IMAGE_ATTACHMENT_PREFIX = "codex-image:";
@@ -19210,7 +19214,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
    * the client home for inspection without any message content.
    */
   writeHistoryCacheStatsFile(stats) {
-    if (process.env.VITEST !== void 0) return;
+    if (!codexHistoryStatsFileEnabled() || process.env.VITEST !== void 0) return;
     try {
       const home = process.env.DSH_HOME ?? join4(homedir(), ".dsh");
       mkdirSync(home, { recursive: true });
@@ -23415,7 +23419,7 @@ var ClientModeRuntime = class {
     scope.console?.info?.("[dsh-remote] codex history cache inspector ready (client runtime)");
   }
   writeCodexHistoryCacheStats(stats) {
-    if (process.env.VITEST !== void 0) return;
+    if (!codexHistoryStatsFileEnabled() || process.env.VITEST !== void 0) return;
     try {
       const home = process.env.DSH_HOME ?? join6(homedir2(), ".dsh");
       mkdirSync2(home, { recursive: true });

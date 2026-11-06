@@ -49,3 +49,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 
 `0.5.7` 不改线协议：Remote 历史页（首屏与旧页一致）统一钳到 50/30/20/12/6/3/1 阶梯，保证第一屏始终小；会话中途切换工作目录后，Host 会在派发前把 `workspaceFiles` 路径重定位到实时的 `workingDirectory`；Host 在控制帧队列之外立即应答 Server 心跳，慢处理器不会再让设备看起来离线或卡住自己的重连。上面的内容仍然适用。
 
+`0.5.8` 不改线协议：Codex 历史只建 turn 编号和事件数索引（不取 full items），full items 按尾部窗口加载并沿用 50 条首屏阶梯，seq 连续，客户端复用最近 60 秒的历史页。可选的 `codex-history-cache-stats.json` 诊断文件默认关闭，只有客户端环境设置 `DSH_CODEX_HISTORY_STATS=1` 时才写。上面的内容仍然适用。
+
