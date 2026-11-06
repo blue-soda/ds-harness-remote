@@ -33,6 +33,9 @@ const MAX_CODEX_PAGES = 32
 const MAX_LIVE_TOOL_OUTPUT = 128 * 1024
 const SESSION_SEARCH_RESULT_LIMIT = 20
 const SESSION_SEARCH_SNIPPET_CODE_POINTS = 240
+/** A reopened Codex Session reuses its last page for this long; live frames clear it sooner. */
+const HISTORY_PAGE_CACHE_TTL_MS = 60_000
+const HISTORY_PAGE_CACHE_LIMIT = 24
 const CODEX_DEFAULT_PERMISSION = 'workspace-write'
 const MAX_CODEX_PROMPT_PARTS = 16
 const MAX_CODEX_PROMPT_TEXT = 256 * 1024
@@ -291,6 +294,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly selectedModels = new Map<string, CodexModelSelection>()
   private readonly selectedPermissions = new Map<string, CodexPermissionPreset>()
   private readonly imageAttachments = new Map<string, CodexImageAttachmentEntry>()
+  private readonly historyPageCache = new Map<string, { page: CodexNativeHistoryPage; at: number }>()
   private modelDirectory?: CodexModelDirectory
   private modelDirectoryPromise?: Promise<CodexModelDirectory>
   private lastProjectionSeq = 0
@@ -858,6 +862,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private acceptCodexFrame(follow: FollowState, frame: { method: string; params: unknown }): void {
+    this.invalidateHistoryPages(follow.threadId)
     const params = record(frame.params)
     if (frame.method === 'thread/name/updated') {
       const name = string(params.threadName)
@@ -1608,6 +1613,12 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       HISTORY_PAGE_SIZES[0],
       Math.max(1, page.maxMessages ?? HISTORY_PAGE_SIZES[0]),
     )
+    const cacheKey = `${this.host.deviceId}|${threadId}|${page.beforeSeq ?? ''}|${page.throughSeq ?? ''}|${maxMessages}`
+    const cached = this.historyPageCache.get(cacheKey)
+    if (cached !== undefined && Date.now() - cached.at < HISTORY_PAGE_CACHE_TTL_MS) {
+      this.cacheHistoryImages(cached.page)
+      return cached.page
+    }
     let value: unknown = record(await this.client.request('dsh/sessionHistory', {
       threadId,
       ...(page.beforeSeq === undefined ? {} : { beforeSeq: page.beforeSeq }),
@@ -1623,7 +1634,20 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       this.setPermissionSelection(`codex:${threadId}`, preset === 'workspace-write' || preset === 'danger-full-access' ? preset : undefined)
     }
     this.cacheHistoryImages(value)
+    this.historyPageCache.set(cacheKey, { page: value, at: Date.now() })
+    if (this.historyPageCache.size > HISTORY_PAGE_CACHE_LIMIT) {
+      const oldest = this.historyPageCache.keys().next().value
+      if (oldest !== undefined) this.historyPageCache.delete(oldest)
+    }
     return value
+  }
+
+  /** A live change or a new turn makes the cached page stale. */
+  private invalidateHistoryPages(threadId: string): void {
+    const marker = `|${threadId}|`
+    for (const key of [...this.historyPageCache.keys()]) {
+      if (key.includes(marker)) this.historyPageCache.delete(key)
+    }
   }
 
   private cacheHistoryImages(history: CodexNativeHistoryPage | CodexNativeHistory): void {

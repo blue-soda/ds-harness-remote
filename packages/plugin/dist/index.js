@@ -17874,6 +17874,8 @@ var MAX_CODEX_PAGES = 32;
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
 var SESSION_SEARCH_RESULT_LIMIT = 20;
 var SESSION_SEARCH_SNIPPET_CODE_POINTS = 240;
+var HISTORY_PAGE_CACHE_TTL_MS = 6e4;
+var HISTORY_PAGE_CACHE_LIMIT = 24;
 var CODEX_DEFAULT_PERMISSION = "workspace-write";
 var MAX_CODEX_PROMPT_PARTS = 16;
 var MAX_CODEX_PROMPT_TEXT = 256 * 1024;
@@ -17939,6 +17941,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   selectedModels = /* @__PURE__ */ new Map();
   selectedPermissions = /* @__PURE__ */ new Map();
   imageAttachments = /* @__PURE__ */ new Map();
+  historyPageCache = /* @__PURE__ */ new Map();
   modelDirectory;
   modelDirectoryPromise;
   lastProjectionSeq = 0;
@@ -18444,6 +18447,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     });
   }
   acceptCodexFrame(follow, frame) {
+    this.invalidateHistoryPages(follow.threadId);
     const params = record3(frame.params);
     if (frame.method === "thread/name/updated") {
       const name2 = string2(params.threadName);
@@ -19100,6 +19104,12 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       HISTORY_PAGE_SIZES[0],
       Math.max(1, page.maxMessages ?? HISTORY_PAGE_SIZES[0])
     );
+    const cacheKey = `${this.host.deviceId}|${threadId}|${page.beforeSeq ?? ""}|${page.throughSeq ?? ""}|${maxMessages}`;
+    const cached = this.historyPageCache.get(cacheKey);
+    if (cached !== void 0 && Date.now() - cached.at < HISTORY_PAGE_CACHE_TTL_MS) {
+      this.cacheHistoryImages(cached.page);
+      return cached.page;
+    }
     let value = record3(await this.client.request("dsh/sessionHistory", {
       threadId,
       ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
@@ -19115,7 +19125,19 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       this.setPermissionSelection(`codex:${threadId}`, preset === "workspace-write" || preset === "danger-full-access" ? preset : void 0);
     }
     this.cacheHistoryImages(value);
+    this.historyPageCache.set(cacheKey, { page: value, at: Date.now() });
+    if (this.historyPageCache.size > HISTORY_PAGE_CACHE_LIMIT) {
+      const oldest = this.historyPageCache.keys().next().value;
+      if (oldest !== void 0) this.historyPageCache.delete(oldest);
+    }
     return value;
+  }
+  /** A live change or a new turn makes the cached page stale. */
+  invalidateHistoryPages(threadId) {
+    const marker = `|${threadId}|`;
+    for (const key of [...this.historyPageCache.keys()]) {
+      if (key.includes(marker)) this.historyPageCache.delete(key);
+    }
   }
   cacheHistoryImages(history) {
     const sessionId = history.header.id;

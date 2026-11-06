@@ -423,6 +423,22 @@ describe('CodexVirtualHarness', () => {
   // A Client that cached a Session id from the composite-row-key release must not be left with a
   // history that cannot load: the key resolves to its thread, and the projected history is the
   // thread's, so the id the native UI holds keeps working until the next catalog read replaces it.
+  it('reuses the last history page when a Session is reopened', async () => {
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    const signal = new AbortController().signal
+    const request = { sessionId: 'codex:thr_1' }
+
+    const first = await target.dispatch('session/history', { args: { request } }, signal)
+    const calls = client.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory').length
+    const second = await target.dispatch('session/history', { args: { request } }, signal)
+
+    expect(calls).toBeGreaterThan(0)
+    expect(client.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory')).toHaveLength(calls)
+    expect(second).toEqual(first)
+    await target.close()
+  })
+
   it('loads history for a Session id cached from the composite-row-key release', async () => {
     const client = fakeCodex()
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
