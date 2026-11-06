@@ -46,7 +46,12 @@ export class CodexHistoryWindows {
     private readonly logger?: SafeLogger,
   ) {}
 
-  async window(threadId: string, metadata: Record<string, unknown>, beforeSeq?: number): Promise<CodexHistoryWindow> {
+  async window(
+    threadId: string,
+    metadata: Record<string, unknown>,
+    beforeSeq?: number,
+    maxMessages?: number,
+  ): Promise<CodexHistoryWindow> {
     const updatedAt = typeof metadata.updatedAt === 'number' ? metadata.updatedAt : undefined
     const cached = this.windows.get(threadId)
     const fresh = cached !== undefined
@@ -54,7 +59,7 @@ export class CodexHistoryWindows {
       && Date.now() - cached.at < CACHE_TTL_MS
     if (fresh && cached !== undefined) {
       cached.at = Date.now()
-      await this.ensureOlder(threadId, cached, beforeSeq)
+      await this.ensureOlder(threadId, cached, beforeSeq, maxMessages)
       this.logger?.debug('codex history cache hit', {
         threadId,
         turns: cached.loaded.size,
@@ -65,7 +70,7 @@ export class CodexHistoryWindows {
     if (cached !== undefined) {
       const appended = await this.appendNewTurns(threadId, cached, updatedAt)
       if (appended !== undefined) {
-        await this.ensureOlder(threadId, appended, beforeSeq)
+        await this.ensureOlder(threadId, appended, beforeSeq, maxMessages)
         this.remember(threadId, appended)
         this.logger?.debug('codex history cache appended', {
           threadId,
@@ -76,7 +81,7 @@ export class CodexHistoryWindows {
       }
     }
     const built = await this.rebuild(threadId, metadata, cached?.acceptedPageSize)
-    await this.ensureOlder(threadId, built, beforeSeq)
+    await this.ensureOlder(threadId, built, beforeSeq, maxMessages)
     this.remember(threadId, built)
     return built
   }
@@ -163,25 +168,36 @@ export class CodexHistoryWindows {
     })
   }
 
-  private async ensureOlder(threadId: string, window: CodexHistoryWindow, beforeSeq?: number): Promise<void> {
+  private async ensureOlder(
+    threadId: string,
+    window: CodexHistoryWindow,
+    beforeSeq?: number,
+    maxMessages?: number,
+  ): Promise<void> {
     if (beforeSeq === undefined) return
+    const needed = Math.min(maxMessages ?? HISTORY_PAGE_SIZES[0], HISTORY_PAGE_SIZES[0])
+    const available = (): number => window.history.entries.filter(entry => entry.event.seq < beforeSeq
+      && isSurfaceEvent(entry.event.type)
+      && entry.event.surfaceOp === 'append').length
     let fetched = 0
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const firstSeq = window.history.entries[0]?.event.seq
-      if (firstSeq !== undefined && firstSeq < beforeSeq) return
-      if (window.olderCursor === undefined) return
+      if (available() >= needed) break
+      if (window.olderCursor === undefined) break
       const result = await this.turnPage(threadId, window.olderCursor, 'desc', 'full')
       fetched += result.turns.length
       this.addTurns(window, result.turns)
       window.olderCursor = result.nextCursor
       this.project(threadId, window)
     }
-    this.logger?.debug('codex history older', {
-      threadId,
-      beforeSeq,
-      turnsFetched: fetched,
-      loadedTurns: window.loaded.size,
-    })
+    if (fetched > 0) {
+      this.logger?.debug('codex history older', {
+        threadId,
+        beforeSeq,
+        needed,
+        turnsFetched: fetched,
+        loadedTurns: window.loaded.size,
+      })
+    }
   }
 
   private async appendNewTurns(

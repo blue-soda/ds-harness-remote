@@ -289,11 +289,12 @@ export class CodexRemoteDomain {
     if (call.method === 'dsh/sessionHistory') {
       const { thread: metadata } = await this.readKnownThread(threadId!)
       const beforeSeq = optionalInteger(call.params.beforeSeq)
-      const window = await this.historyWindows.window(threadId!, metadata, beforeSeq)
+      const maxMessages = optionalInteger(call.params.maxMessages)
+      const window = await this.historyWindows.window(threadId!, metadata, beforeSeq, maxMessages)
       return this.historyPage(window, threadId!, {
         beforeSeq,
         throughSeq: optionalInteger(call.params.throughSeq),
-        maxMessages: optionalInteger(call.params.maxMessages),
+        maxMessages,
       })
     }
     if (call.method === 'dsh/directoryList') {
