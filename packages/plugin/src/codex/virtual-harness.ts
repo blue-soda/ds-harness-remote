@@ -446,6 +446,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'workspace/insertSessionBefore': return business(await this.workspaceForSession(requestArg(args), signal))
         case 'workspace/archiveSession': return business(await this.archiveSession(requestArg(args), signal))
         case 'session/list': return business(success({ items: await this.sessionSummaries(signal) }))
+        case 'thread/list': {
+          // The browser's Codex Workspace list reads the native row list, not only
+          // the Session summaries. Serve the same catalog so both spellings and the
+          // same visibility rules reach it; the list is small and already refreshed.
+          const catalog = await this.refreshCatalog(signal)
+          return business(success({ data: catalog.threads, nextCursor: null }))
+        }
         case 'session/search': return business(await this.searchSessions(requestArg(args), signal))
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(await this.forkSession(requestArg(args), signal))
@@ -1933,6 +1940,7 @@ async function loadCatalog(
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId)
     if (projectWorkspaceForSession !== undefined) {
       rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path)
+      rebaseThreadCwdOnProjectRoot(thread, projectWorkspaceForSession.path)
       addSessionToWorkspace(projectWorkspaceForSession, session)
       visibleSessionIds.add(session.id)
       visibleThreads.push(thread)
@@ -2545,21 +2553,29 @@ function findProjectWorkspace(
  * spelling, which made a Project's Sessions look missing. Re-root the prefix
  * (keeping any subdirectory) on Windows only; POSIX case is significant.
  */
-function rebaseSessionCwdOnProjectRoot(session: DisplaySession, projectRoot: string): void {
-  if (process.platform !== 'win32') return
-  const cwd = session.cwd
-  if (cwd === undefined) return
+function rebasedCwdOnProjectRoot(cwd: string, projectRoot: string): string | undefined {
+  if (process.platform !== 'win32') return undefined
   const root = projectRoot.replace(/[\\/]+$/u, '')
-  if (root.length === 0) return
+  if (root.length === 0) return undefined
   const normalizedRoot = root.toLowerCase()
   const normalizedCwd = cwd.toLowerCase()
-  if (normalizedCwd === normalizedRoot) {
-    session.cwd = root
-    return
-  }
+  if (normalizedCwd === normalizedRoot) return root
   if (normalizedCwd.startsWith(`${normalizedRoot}\\`) || normalizedCwd.startsWith(`${normalizedRoot}/`)) {
-    session.cwd = `${root}${cwd.slice(root.length)}`
+    return `${root}${cwd.slice(root.length)}`
   }
+  return undefined
+}
+
+function rebaseSessionCwdOnProjectRoot(session: DisplaySession, projectRoot: string): void {
+  if (session.cwd === undefined) return
+  const next = rebasedCwdOnProjectRoot(session.cwd, projectRoot)
+  if (next !== undefined) session.cwd = next
+}
+
+function rebaseThreadCwdOnProjectRoot(thread: Record<string, unknown>, projectRoot: string): void {
+  if (typeof thread.cwd !== 'string') return
+  const next = rebasedCwdOnProjectRoot(thread.cwd, projectRoot)
+  if (next !== undefined) thread.cwd = next
 }
 
 function addSessionToWorkspace(workspace: CodexVirtualWorkspaceView, session: DisplaySession): void {  if (!workspace.sessionIds.includes(session.id)) {

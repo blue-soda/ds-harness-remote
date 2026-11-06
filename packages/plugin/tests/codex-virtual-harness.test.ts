@@ -225,6 +225,27 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  it.runIf(process.platform === 'win32')('serves thread/list with the project root spelling and every matched thread', async () => {
+    const client = fakeCodex([
+      codexThread('thr_low', 'C:\\Workspace\\opencood', 'lower'),
+      codexThread('thr_cap', 'C:\\Workspace\\OpenCOOD\\research', 'capital'),
+    ], {
+      projects: [codexProject('opencood', 'opencood', ['C:\\Workspace\\opencood'], 0)],
+    })
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+
+    const result = await target.dispatch('thread/list', { args: {} }, new AbortController().signal) as {
+      ok: true
+      value: { data: Array<{ id: string; cwd?: string }> }
+    }
+    expect(result.value.data.map(row => row.id)).toEqual(['thr_low', 'thr_cap'])
+    expect(result.value.data.map(row => row.cwd)).toEqual([
+      'C:\\Workspace\\opencood',
+      'C:\\Workspace\\opencood\\research',
+    ])
+    await target.close()
+  })
+
   it('hydrates read-only permission snapshots in both carriers and clears unsupported live policies', async () => {
     for (const carrier of ['api', 'typert']) {
       const client = fakeCodex()

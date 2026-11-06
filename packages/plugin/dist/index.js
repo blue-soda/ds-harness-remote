@@ -18171,6 +18171,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           return business(await this.archiveSession(requestArg(args), signal));
         case "session/list":
           return business(success({ items: await this.sessionSummaries(signal) }));
+        case "thread/list": {
+          const catalog = await this.refreshCatalog(signal);
+          return business(success({ data: catalog.threads, nextCursor: null }));
+        }
         case "session/search":
           return business(await this.searchSessions(requestArg(args), signal));
         case "session/create":
@@ -19508,6 +19512,7 @@ async function loadCatalog(client, signal, pendingThreads) {
     const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId);
     if (projectWorkspaceForSession !== void 0) {
       rebaseSessionCwdOnProjectRoot(session, projectWorkspaceForSession.path);
+      rebaseThreadCwdOnProjectRoot(thread, projectWorkspaceForSession.path);
       addSessionToWorkspace(projectWorkspaceForSession, session);
       visibleSessionIds.add(session.id);
       visibleThreads.push(thread);
@@ -19999,21 +20004,27 @@ function findProjectWorkspace(thread, session, projects, workspaceByProjectId) {
   })[0];
   return match === void 0 ? void 0 : workspaceByProjectId.get(match.project.id);
 }
-function rebaseSessionCwdOnProjectRoot(session, projectRoot2) {
-  if (process.platform !== "win32") return;
-  const cwd = session.cwd;
-  if (cwd === void 0) return;
+function rebasedCwdOnProjectRoot(cwd, projectRoot2) {
+  if (process.platform !== "win32") return void 0;
   const root = projectRoot2.replace(/[\\/]+$/u, "");
-  if (root.length === 0) return;
+  if (root.length === 0) return void 0;
   const normalizedRoot = root.toLowerCase();
   const normalizedCwd = cwd.toLowerCase();
-  if (normalizedCwd === normalizedRoot) {
-    session.cwd = root;
-    return;
-  }
+  if (normalizedCwd === normalizedRoot) return root;
   if (normalizedCwd.startsWith(`${normalizedRoot}\\`) || normalizedCwd.startsWith(`${normalizedRoot}/`)) {
-    session.cwd = `${root}${cwd.slice(root.length)}`;
+    return `${root}${cwd.slice(root.length)}`;
   }
+  return void 0;
+}
+function rebaseSessionCwdOnProjectRoot(session, projectRoot2) {
+  if (session.cwd === void 0) return;
+  const next = rebasedCwdOnProjectRoot(session.cwd, projectRoot2);
+  if (next !== void 0) session.cwd = next;
+}
+function rebaseThreadCwdOnProjectRoot(thread, projectRoot2) {
+  if (typeof thread.cwd !== "string") return;
+  const next = rebasedCwdOnProjectRoot(thread.cwd, projectRoot2);
+  if (next !== void 0) thread.cwd = next;
 }
 function addSessionToWorkspace(workspace, session) {
   if (!workspace.sessionIds.includes(session.id)) {
