@@ -295,6 +295,8 @@ export interface CodexHistoryCacheStats {
   ttlMs: number
   hits: number
   misses: number
+  /** false when no Codex workspace is currently open. */
+  active: boolean
   entries: CodexHistoryCacheEntryStat[]
 }
 
@@ -1747,12 +1749,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     })
   }
 
-  private historyCacheStats(): CodexHistoryCacheStats {
+  historyCacheStats(): CodexHistoryCacheStats {
     const now = Date.now()
     return {
       ttlMs: HISTORY_PAGE_CACHE_TTL_MS,
       hits: this.historyPageHits,
       misses: this.historyPageMisses,
+      active: true,
       entries: [...this.historyPageCache.entries()].map(([key, { page, at }]) => {
         const records = page.records
         const firstSeq = records[0]?.event.seq

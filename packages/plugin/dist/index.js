@@ -19210,6 +19210,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       ttlMs: HISTORY_PAGE_CACHE_TTL_MS,
       hits: this.historyPageHits,
       misses: this.historyPageMisses,
+      active: true,
       entries: [...this.historyPageCache.entries()].map(([key, { page, at }]) => {
         const records = page.records;
         const firstSeq = records[0]?.event.seq;
@@ -21902,6 +21903,7 @@ var ClientModeRuntime = class {
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway, { peer: this.peer });
     this.gatewaySwitch.setRemoteAvailability(() => this.connected !== void 0);
+    this.installCodexHistoryCacheInspector();
   }
   preview;
   identity;
@@ -23356,6 +23358,26 @@ var ClientModeRuntime = class {
     const virtual = this.codexVirtual;
     this.codexVirtual = void 0;
     await virtual?.close();
+    this.installCodexHistoryCacheInspector();
+  }
+  /**
+   * Keep `__dshCodexHistoryCacheStats()` defined for the whole client lifetime.
+   * The Codex virtual harness has its own inspector while a workspace is open;
+   * this runtime-level one fills the gap before the first open and after close.
+   */
+  installCodexHistoryCacheInspector() {
+    const globalScope = globalThis;
+    const scope = globalThis;
+    const inspect = () => this.codexVirtual?.historyCacheStats() ?? {
+      ttlMs: 6e4,
+      hits: 0,
+      misses: 0,
+      active: false,
+      entries: []
+    };
+    globalScope.__dshCodexHistoryCacheStats = inspect;
+    if (scope.window !== void 0) scope.window.__dshCodexHistoryCacheStats = inspect;
+    scope.console?.info?.("[dsh-remote] codex history cache inspector ready (client runtime)");
   }
   assertRemoteCompatible(remote) {
     this.selectHarnessRemoteTransport(remote);

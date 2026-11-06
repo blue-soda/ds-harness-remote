@@ -25,6 +25,7 @@ import { RemoteTypertGateway } from './remote-typert-gateway.js'
 import {
   codexProjectWorkspaceId,
   CodexVirtualHarness,
+  type CodexHistoryCacheStats,
   discoverCodexVirtualWorkspaces,
   sameWorkspaceRoot,
   type CodexSessionLossTrigger,
@@ -397,6 +398,7 @@ export class ClientModeRuntime {
     // boot routes its own local services at a peer that may not be there, and the
     // shell never finishes activating.
     this.gatewaySwitch.setRemoteAvailability(() => this.connected !== undefined)
+    this.installCodexHistoryCacheInspector()
   }
 
   async start(): Promise<void> {
@@ -2040,6 +2042,30 @@ export class ClientModeRuntime {
     const virtual = this.codexVirtual
     this.codexVirtual = undefined
     await virtual?.close()
+    this.installCodexHistoryCacheInspector()
+  }
+
+  /**
+   * Keep `__dshCodexHistoryCacheStats()` defined for the whole client lifetime.
+   * The Codex virtual harness has its own inspector while a workspace is open;
+   * this runtime-level one fills the gap before the first open and after close.
+   */
+  private installCodexHistoryCacheInspector(): void {
+    const globalScope = globalThis as unknown as Record<string, unknown>
+    const scope = globalThis as unknown as {
+      window?: Record<string, unknown>
+      console?: Console
+    }
+    const inspect = (): CodexHistoryCacheStats => this.codexVirtual?.historyCacheStats() ?? {
+      ttlMs: 60_000,
+      hits: 0,
+      misses: 0,
+      active: false,
+      entries: [],
+    }
+    globalScope.__dshCodexHistoryCacheStats = inspect
+    if (scope.window !== undefined) scope.window.__dshCodexHistoryCacheStats = inspect
+    scope.console?.info?.('[dsh-remote] codex history cache inspector ready (client runtime)')
   }
 
   private assertRemoteCompatible(remote: ConnectedRemote): void {
