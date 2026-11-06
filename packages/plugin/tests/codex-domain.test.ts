@@ -143,6 +143,34 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('appends only new turns when the Thread metadata changes', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
+    await domain.start()
+
+    await domain.call('connection-1', { method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
+    app.extraTurn = {
+      id: 'turn-2',
+      status: 'completed',
+      startedAt: 3,
+      completedAt: 4,
+      itemsView: 'full',
+      items: [{ id: 'user-2', type: 'userMessage', text: 'Third' }],
+    }
+    app.updatedAt = 3
+
+    const page = await domain.call('connection-1', {
+      method: 'dsh/sessionHistory',
+      params: { threadId: 'allowed-thread' },
+    }) as { records: Array<{ event: { type: string; data?: { text?: string } } }> }
+    expect(JSON.stringify(page.records)).toContain('Third')
+    const desc = app.calls.filter(call => call.method === 'thread/turns/list'
+      && (call.params as { sortDirection?: string }).sortDirection === 'desc')
+    expect(desc.length).toBeGreaterThan(0)
+    await domain.close()
+  })
+
   it('steps the Codex history page down until it fits the secure budget', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
@@ -792,6 +820,10 @@ class FakeAppServer implements CodexAppServerLike {
   capitalCwd = false
   /** Emit a turn whose messages are large enough to exercise the history page budget. */
   largeHistory = false
+  /** Metadata revision served by thread/read; change it to force a cache refresh. */
+  updatedAt = 2
+  /** A turn newer than turn-1, used to exercise the append-only cache refresh. */
+  extraTurn: Record<string, unknown> | undefined
 
   constructor(private readonly root: string, private readonly outside = root) {}
 
@@ -873,6 +905,7 @@ class FakeAppServer implements CodexAppServerLike {
           : this.root
       return { thread: {
         id: threadId,
+        updatedAt: this.updatedAt,
         ...(threadId === 'project-only-thread' ? { projectId: 'allowed-project' } : { cwd }),
         turns: includeTurns ? [{
           id: 'turn-1',
@@ -888,24 +921,27 @@ class FakeAppServer implements CodexAppServerLike {
       if (this.rejectTurnPagination) {
         throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex App Server rejected the request.')
       }
+      const firstTurn = {
+        id: 'turn-1',
+        status: 'completed',
+        startedAt: 1,
+        completedAt: 2,
+        itemsView: 'full',
+        items: this.largeHistory
+          ? Array.from({ length: 60 }, (_, index) => ({
+              id: `user-${index}`,
+              type: 'userMessage',
+              text: `message-${index}-` + 'x'.repeat(100_000),
+            }))
+          : [
+              { id: 'user-1', type: 'userMessage', text: 'First' },
+              { id: 'assistant-1', type: 'agentMessage', text: 'Second' },
+            ],
+      }
+      const turns = this.extraTurn === undefined ? [firstTurn] : [this.extraTurn, firstTurn]
+      const descending = isRecord(params) && params.sortDirection === 'desc'
       return {
-        data: [{
-          id: 'turn-1',
-          status: 'completed',
-          startedAt: 1,
-          completedAt: 2,
-          itemsView: 'full',
-          items: this.largeHistory
-            ? Array.from({ length: 60 }, (_, index) => ({
-                id: `user-${index}`,
-                type: 'userMessage',
-                text: `message-${index}-` + 'x'.repeat(100_000),
-              }))
-            : [
-                { id: 'user-1', type: 'userMessage', text: 'First' },
-                { id: 'assistant-1', type: 'agentMessage', text: 'Second' },
-              ],
-        }],
+        data: descending ? turns : [...turns].reverse(),
         nextCursor: null,
         backwardsCursor: null,
       }

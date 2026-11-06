@@ -19096,7 +19096,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     return thread;
   }
   async readHistoryPage(threadId, page, signal) {
-    const maxMessages = HISTORY_PAGE_SIZES[0];
+    const maxMessages = Math.min(
+      HISTORY_PAGE_SIZES[0],
+      Math.max(1, page.maxMessages ?? HISTORY_PAGE_SIZES[0])
+    );
     let value = record3(await this.client.request("dsh/sessionHistory", {
       threadId,
       ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
@@ -19485,10 +19488,10 @@ async function loadModelDirectory(client, signal) {
     models
   };
 }
-function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
+function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy", start = {}) {
   const entries = [];
-  let seq = 0;
-  let turnNumber = 0;
+  let seq = start.seq ?? 0;
+  let turnNumber = start.turn ?? 0;
   const active = activeTurnId(thread.turns);
   const append = (type, data2, time = Date.now(), view, sourceEventSeqs) => {
     const eventSeq = seq++;
@@ -25723,6 +25726,18 @@ var CodexRemoteDomain = class {
       });
       return cached;
     }
+    if (cached !== void 0) {
+      const appended = await this.appendNewTurns(threadId, cached, updatedAt);
+      if (appended !== void 0) {
+        this.rememberHistoryWindow(threadId, appended);
+        this.logger.debug("codex history cache appended", {
+          threadId,
+          turns: appended.history.nextTurn,
+          events: appended.history.entries.length
+        });
+        return appended;
+      }
+    }
     const startedAt = performance.now();
     let turns;
     try {
@@ -25733,9 +25748,11 @@ var CodexRemoteDomain = class {
       turns = await this.readThreadTurns(connectionId, threadId, "summary");
     }
     const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`);
+    const newestTurnId = typeof turns.at(-1)?.id === "string" ? turns.at(-1).id : void 0;
     const entry = {
       history,
       ...updatedAt === void 0 ? {} : { updatedAt },
+      ...newestTurnId === void 0 ? {} : { newestTurnId },
       ...cached?.acceptedPageSize === void 0 ? {} : { acceptedPageSize: cached.acceptedPageSize },
       at: Date.now()
     };
@@ -25748,6 +25765,56 @@ var CodexRemoteDomain = class {
       durationMs: Math.round(performance.now() - startedAt)
     });
     return entry;
+  }
+  async appendNewTurns(threadId, cached, updatedAt) {
+    if (cached.newestTurnId === void 0) return void 0;
+    const newTurns = [];
+    let cursor2;
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream("thread/turns/list", {
+        threadId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: "desc",
+        itemsView: "full",
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      });
+      const pageResult = isRecord12(result) ? result : {};
+      for (const rawTurn of array2(pageResult.data)) {
+        if (!isRecord12(rawTurn)) continue;
+        if (typeof rawTurn.id === "string" && rawTurn.id === cached.newestTurnId) {
+          if (newTurns.length === 0) {
+            cached.updatedAt = updatedAt;
+            cached.at = Date.now();
+            return cached;
+          }
+          newTurns.reverse();
+          const partial = projectCodexNativeHistory(
+            { turns: newTurns },
+            `codex:${threadId}`,
+            "legacy",
+            { seq: cached.history.lastSeq + 1, turn: cached.history.nextTurn }
+          );
+          const newestTurnId = newTurns.at(-1)?.id;
+          return {
+            history: {
+              header: cached.history.header,
+              entries: [...cached.history.entries, ...partial.entries],
+              lastSeq: partial.lastSeq,
+              nextTurn: partial.nextTurn,
+              ...partial.activeTurnId === void 0 ? {} : { activeTurnId: partial.activeTurnId }
+            },
+            ...updatedAt === void 0 ? {} : { updatedAt },
+            ...typeof newestTurnId === "string" ? { newestTurnId } : {},
+            ...cached.acceptedPageSize === void 0 ? {} : { acceptedPageSize: cached.acceptedPageSize },
+            at: Date.now()
+          };
+        }
+        newTurns.push(rawTurn);
+      }
+      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
+      if (cursor2 === void 0) return void 0;
+    }
+    return void 0;
   }
   historyPage(window, threadId, request) {
     const requested = request.maxMessages ?? HISTORY_PAGE_SIZES[0];

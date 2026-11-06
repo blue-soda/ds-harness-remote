@@ -128,6 +128,7 @@ export class CodexRemoteDomain {
   private readonly historyWindows = new Map<string, {
     history: CodexNativeHistory
     updatedAt?: number
+    newestTurnId?: string
     acceptedPageSize?: number
     at: number
   }>()
@@ -904,7 +905,7 @@ export class CodexRemoteDomain {
     connectionId: string,
     threadId: string,
     metadata: Record<string, unknown>,
-  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; acceptedPageSize?: number; at: number }> {
+  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number }> {
     const updatedAt = typeof metadata.updatedAt === 'number' ? metadata.updatedAt : undefined
     const cached = this.historyWindows.get(threadId)
     const fresh = cached !== undefined
@@ -919,6 +920,18 @@ export class CodexRemoteDomain {
       })
       return cached
     }
+    if (cached !== undefined) {
+      const appended = await this.appendNewTurns(threadId, cached, updatedAt)
+      if (appended !== undefined) {
+        this.rememberHistoryWindow(threadId, appended)
+        this.logger.debug('codex history cache appended', {
+          threadId,
+          turns: appended.history.nextTurn,
+          events: appended.history.entries.length,
+        })
+        return appended
+      }
+    }
 
     const startedAt = performance.now()
     let turns: Record<string, unknown>[]
@@ -930,9 +943,11 @@ export class CodexRemoteDomain {
       turns = await this.readThreadTurns(connectionId, threadId, 'summary')
     }
     const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`)
+    const newestTurnId = typeof turns.at(-1)?.id === 'string' ? turns.at(-1)!.id as string : undefined
     const entry = {
       history,
       ...(updatedAt === undefined ? {} : { updatedAt }),
+      ...(newestTurnId === undefined ? {} : { newestTurnId }),
       ...(cached?.acceptedPageSize === undefined ? {} : { acceptedPageSize: cached.acceptedPageSize }),
       at: Date.now(),
     }
@@ -946,6 +961,64 @@ export class CodexRemoteDomain {
     })
     return entry
   }
+
+  private async appendNewTurns(
+    threadId: string,
+    cached: { history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number },
+    updatedAt?: number,
+  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; newestTurnId?: string; acceptedPageSize?: number; at: number } | undefined> {
+    if (cached.newestTurnId === undefined) return undefined
+    const newTurns: Record<string, unknown>[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream('thread/turns/list', {
+        threadId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: 'desc',
+        itemsView: 'full',
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+      const pageResult = isRecord(result) ? result : {}
+      for (const rawTurn of array(pageResult.data)) {
+        if (!isRecord(rawTurn)) continue
+        if (typeof rawTurn.id === 'string' && rawTurn.id === cached.newestTurnId) {
+          if (newTurns.length === 0) {
+            cached.updatedAt = updatedAt
+            cached.at = Date.now()
+            return cached
+          }
+          newTurns.reverse()
+          const partial = projectCodexNativeHistory(
+            { turns: newTurns },
+            `codex:${threadId}`,
+            'legacy',
+            { seq: cached.history.lastSeq + 1, turn: cached.history.nextTurn },
+          )
+          const newestTurnId = newTurns.at(-1)?.id
+          return {
+            history: {
+              header: cached.history.header,
+              entries: [...cached.history.entries, ...partial.entries],
+              lastSeq: partial.lastSeq,
+              nextTurn: partial.nextTurn,
+              ...(partial.activeTurnId === undefined ? {} : { activeTurnId: partial.activeTurnId }),
+            },
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            ...(typeof newestTurnId === 'string' ? { newestTurnId } : {}),
+            ...(cached.acceptedPageSize === undefined ? {} : { acceptedPageSize: cached.acceptedPageSize }),
+            at: Date.now(),
+          }
+        }
+        newTurns.push(rawTurn)
+      }
+      cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
+        ? pageResult.nextCursor
+        : undefined
+      if (cursor === undefined) return undefined
+    }
+    return undefined
+  }
+
 
   private historyPage(
     window: { history: CodexNativeHistory; acceptedPageSize?: number },

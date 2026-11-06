@@ -2044,10 +2044,11 @@ export function projectCodexNativeHistory(
   thread: JsonRecord,
   sessionId: string,
   sessionGeneration: HarnessSessionGeneration = 'legacy',
+  start: { seq?: number; turn?: number } = {},
 ): CodexNativeHistory {
   const entries: CodexNativeHistory['entries'] = []
-  let seq = 0
-  let turnNumber = 0
+  let seq = start.seq ?? 0
+  let turnNumber = start.turn ?? 0
   const active = activeTurnId(thread.turns)
   const append = (
     type: string,
