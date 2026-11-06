@@ -121,6 +121,20 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it.runIf(process.platform === 'win32')('reports a thread cwd under the project root spelling when Codex changed the case', async () => {
+    const { root, outside } = await directories()
+    const app = new FakeAppServer(root, outside)
+    app.capitalCwd = true
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+
+    const result = await domain.call('connection-1', { method: 'thread/list', params: {} }) as {
+      data: Array<{ id: string; cwd?: string }>
+    }
+    expect(result.data.find(row => row.id === 'capital-thread')?.cwd).toBe(root)
+    await domain.close()
+  })
+
   it.each(['empty', 'unsupported'] as const)(
     'uses exact thread cwd authority when project/list is %s',
     async projectListMode => {
@@ -741,6 +755,8 @@ class FakeAppServer implements CodexAppServerLike {
   projectListMode: 'normal' | 'empty' | 'unsupported' = 'normal'
   /** Emit a second, superseded rollout row for `allowed-thread`, as a rewritten Codex history does. */
   duplicateThreadRows = false
+  /** Emit one thread whose cwd spells the project root with a different case. */
+  capitalCwd = false
 
   constructor(private readonly root: string, private readonly outside = root) {}
 
@@ -763,6 +779,9 @@ class FakeAppServer implements CodexAppServerLike {
         { id: 'outside-thread', projectId: 'outside-project', cwd: this.outside, createdAt: 1, updatedAt: 2, path: 'private rollout path' },
         { id: 'project-only-thread', projectId: 'allowed-project', createdAt: 1, updatedAt: 2, path: 'private rollout path' },
         { id: 'unprojected-thread', cwd: `${this.root}-unprojected`, createdAt: 1, updatedAt: 2, path: 'private rollout path' },
+        ...(this.capitalCwd
+          ? [{ id: 'capital-thread', projectId: 'allowed-project', cwd: this.root.toUpperCase(), createdAt: 1, updatedAt: 2 }]
+          : []),
         { id: 'missing-cwd', createdAt: 1, updatedAt: 2 },
       ],
       nextCursor: null,

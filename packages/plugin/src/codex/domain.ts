@@ -248,19 +248,17 @@ export class CodexRemoteDomain {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params)) as {
         data: Record<string, unknown>[]
       }
-      const authorized = filterThreadListByWorkspaceAuthority(
-        result,
-        await this.readWorkspaceAuthority(result.data),
-      ) as { data: Record<string, unknown>[] }
+      const authority = await this.readWorkspaceAuthority(result.data)
+      const authorized = filterThreadListByWorkspaceAuthority(result, authority) as { data: Record<string, unknown>[] }
       // One Session per thread. Codex lists a thread once per rollout file it finds
       // (a re-send or a fork writes another), but the App Server can only open the
       // thread's current rollout, so the extra rows are Sessions that all lead to the
       // same place. Their ids stay the real thread id: the wire identity is
       // `codex:<threadId>` and a row key belongs nowhere near it.
-      return {
+      return rebaseThreadListCwds({
         ...authorized,
         data: uniqueCodexThreadRows(authorized.data),
-      }
+      }, authority.roots)
     }
     if (call.method === 'thread/start') {
       const cwd = await this.requireCodexWorkspacePath(call.params.cwd as string)
@@ -1484,8 +1482,37 @@ function filterThreadListByWorkspaceAuthority(result: unknown, authority: CodexW
   }
 }
 
-function sanitizeProject(value: unknown): Record<string, unknown> | undefined {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return undefined
+/**
+ * Report a thread's cwd under the Project root's spelling.
+ *
+ * Codex records one Windows directory under more than one case (`OpenCOOD` vs
+ * the Project's `opencood`), and a client that groups rows by a literal prefix
+ * then hides one spelling. Keep the directory, spell the root as the Project
+ * does; POSIX case is significant and is left alone.
+ */
+function rebaseThreadListCwds<T extends { data: Record<string, unknown>[] }>(result: T, roots: readonly string[]): T {
+  if (process.platform !== 'win32' || roots.length === 0) return result
+  const ordered = [...roots].sort((left, right) => right.length - left.length)
+  return {
+    ...result,
+    data: result.data.map(thread => {
+      const cwd = typeof thread.cwd === 'string' ? thread.cwd : undefined
+      if (cwd === undefined) return thread
+      const root = ordered.find(candidate => containsCodexPath(candidate, cwd))
+      if (root === undefined) return thread
+      const normalizedRoot = normalizeCodexPathForCompare(root)
+      const normalizedCwd = normalizeCodexPathForCompare(cwd)
+      const rebased = normalizedCwd === normalizedRoot
+        ? root
+        : normalizedCwd.startsWith(`${normalizedRoot}/`) || normalizedCwd.startsWith(`${normalizedRoot}\\`)
+          ? `${root}${cwd.slice(root.length)}`
+          : cwd
+      return rebased === cwd ? thread : { ...thread, cwd: rebased }
+    }),
+  }
+}
+
+function sanitizeProject(value: unknown): Record<string, unknown> | undefined {  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return undefined
   const roots = Array.isArray(value.roots)
     ? value.roots.flatMap(root => {
         const path = isRecord(root) && typeof root.path === 'string' && root.path.length > 0 ? root.path : undefined

@@ -25133,14 +25133,12 @@ var CodexRemoteDomain = class {
     }
     if (call.method === "thread/list") {
       const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
-      const authorized = filterThreadListByWorkspaceAuthority(
-        result,
-        await this.readWorkspaceAuthority(result.data)
-      );
-      return {
+      const authority = await this.readWorkspaceAuthority(result.data);
+      const authorized = filterThreadListByWorkspaceAuthority(result, authority);
+      return rebaseThreadListCwds({
         ...authorized,
         data: uniqueCodexThreadRows(authorized.data)
-      };
+      }, authority.roots);
     }
     if (call.method === "thread/start") {
       const cwd = await this.requireCodexWorkspacePath(call.params.cwd);
@@ -26145,6 +26143,23 @@ function filterThreadListByWorkspaceAuthority(result, authority) {
   return {
     ...result,
     data: result.data.map((record7) => isRecord12(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+  };
+}
+function rebaseThreadListCwds(result, roots) {
+  if (process.platform !== "win32" || roots.length === 0) return result;
+  const ordered = [...roots].sort((left, right) => right.length - left.length);
+  return {
+    ...result,
+    data: result.data.map((thread) => {
+      const cwd = typeof thread.cwd === "string" ? thread.cwd : void 0;
+      if (cwd === void 0) return thread;
+      const root = ordered.find((candidate) => containsCodexPath(candidate, cwd));
+      if (root === void 0) return thread;
+      const normalizedRoot = normalizeCodexPathForCompare(root);
+      const normalizedCwd = normalizeCodexPathForCompare(cwd);
+      const rebased = normalizedCwd === normalizedRoot ? root : normalizedCwd.startsWith(`${normalizedRoot}/`) || normalizedCwd.startsWith(`${normalizedRoot}\\`) ? `${root}${cwd.slice(root.length)}` : cwd;
+      return rebased === cwd ? thread : { ...thread, cwd: rebased };
+    })
   };
 }
 function sanitizeProject(value) {
