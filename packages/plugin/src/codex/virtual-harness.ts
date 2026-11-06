@@ -1,4 +1,7 @@
 import type { ApiProxy, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import {
   CodexRemoteClient,
   deriveCodexCwdWorkspaces,
@@ -1724,15 +1727,41 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private publishHistoryCacheStats(): void {
+    const stats = this.historyCacheStats()
+    this.writeHistoryCacheStatsFile(stats)
     const scope = globalThis as unknown as {
       document?: { documentElement?: { setAttribute?: (name: string, value: string) => void } }
     }
     const root = scope.document?.documentElement
     if (root?.setAttribute === undefined) return
     try {
-      root.setAttribute('data-dsh-codex-history-cache-stats', JSON.stringify(this.historyCacheStats()))
+      root.setAttribute('data-dsh-codex-history-cache-stats', JSON.stringify(stats))
     } catch {
       // A DOM attribute is best-effort debug output; never fail a history read.
+    }
+  }
+
+  /**
+   * The Codex virtual harness runs in the DSH client's Node process, not in the
+   * browser page, so DevTools cannot see its globals. Mirror the same metadata to
+   * the client home for inspection without any message content.
+   */
+  private writeHistoryCacheStatsFile(stats: CodexHistoryCacheStats): void {
+    if (process.env.VITEST !== undefined) return
+    try {
+      const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      mkdirSync(home, { recursive: true })
+      writeFileSync(
+        join(home, 'codex-history-cache-stats.json'),
+        JSON.stringify({
+          ...stats,
+          pid: process.pid,
+          source: 'codex-harness',
+          writtenAt: new Date().toISOString(),
+        }, null, 2),
+      )
+    } catch {
+      // Debug output is best-effort; never fail a history read because of it.
     }
   }
 

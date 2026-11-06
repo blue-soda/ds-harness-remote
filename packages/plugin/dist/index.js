@@ -4,6 +4,11 @@ var __export = (target2, all) => {
     __defProp(target2, name2, { get: all[name2], enumerable: true });
 };
 
+// src/client-runtime.ts
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join6 } from "node:path";
+
 // ../webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
   const started = Date.now();
@@ -17598,6 +17603,11 @@ function patchWelcomeDescribe2(value) {
   return { ...value, namespaces };
 }
 
+// src/codex/virtual-harness.ts
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join4 } from "node:path";
+
 // src/codex/permissions.ts
 function codexPermissionPresetFromResponse(value) {
   const root = record(value);
@@ -19184,11 +19194,35 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     scope.console?.info?.("[dsh-remote] codex history cache inspector ready; call __dshCodexHistoryCacheStats()");
   }
   publishHistoryCacheStats() {
+    const stats = this.historyCacheStats();
+    this.writeHistoryCacheStatsFile(stats);
     const scope = globalThis;
     const root = scope.document?.documentElement;
     if (root?.setAttribute === void 0) return;
     try {
-      root.setAttribute("data-dsh-codex-history-cache-stats", JSON.stringify(this.historyCacheStats()));
+      root.setAttribute("data-dsh-codex-history-cache-stats", JSON.stringify(stats));
+    } catch {
+    }
+  }
+  /**
+   * The Codex virtual harness runs in the DSH client's Node process, not in the
+   * browser page, so DevTools cannot see its globals. Mirror the same metadata to
+   * the client home for inspection without any message content.
+   */
+  writeHistoryCacheStatsFile(stats) {
+    if (process.env.VITEST !== void 0) return;
+    try {
+      const home = process.env.DSH_HOME ?? join4(homedir(), ".dsh");
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join4(home, "codex-history-cache-stats.json"),
+        JSON.stringify({
+          ...stats,
+          pid: process.pid,
+          source: "codex-harness",
+          writtenAt: (/* @__PURE__ */ new Date()).toISOString()
+        }, null, 2)
+      );
     } catch {
     }
   }
@@ -20808,7 +20842,7 @@ import { networkInterfaces } from "node:os";
 // src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname as dirname3, join as join4 } from "node:path";
+import { delimiter, dirname as dirname3, join as join5 } from "node:path";
 import { fileURLToPath } from "node:url";
 var cachedExternalFactory;
 var cachedExternalFactoryResolved = false;
@@ -20859,21 +20893,21 @@ function nodeBinaryCandidates() {
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
   if (process.versions.electron === void 0) add3(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join4(part, process.platform === "win32" ? "node.exe" : "node"));
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join5(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");
   add3("/usr/bin/node");
-  add3(join4(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join4(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join4(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
-  const root = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
+  const root = join5(process.env.HOME ?? "", ".nvm", "versions", "node");
   if (root === "" || !existsSync(root)) return [];
   try {
-    return readdirSync(root).map((version) => join4(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root).map((version) => join5(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -23377,7 +23411,25 @@ var ClientModeRuntime = class {
     };
     globalScope.__dshCodexHistoryCacheStats = inspect;
     if (scope.window !== void 0) scope.window.__dshCodexHistoryCacheStats = inspect;
+    this.writeCodexHistoryCacheStats(inspect());
     scope.console?.info?.("[dsh-remote] codex history cache inspector ready (client runtime)");
+  }
+  writeCodexHistoryCacheStats(stats) {
+    if (process.env.VITEST !== void 0) return;
+    try {
+      const home = process.env.DSH_HOME ?? join6(homedir2(), ".dsh");
+      mkdirSync2(home, { recursive: true });
+      writeFileSync2(
+        join6(home, "codex-history-cache-stats.json"),
+        JSON.stringify({
+          ...stats,
+          pid: process.pid,
+          source: "client-runtime",
+          writtenAt: (/* @__PURE__ */ new Date()).toISOString()
+        }, null, 2)
+      );
+    } catch {
+    }
   }
   assertRemoteCompatible(remote) {
     this.selectHarnessRemoteTransport(remote);
@@ -24085,14 +24137,14 @@ function iceServersForAttempt(attempt, iceServers) {
 // src/client-target-store.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join5 } from "node:path";
+import { join as join7 } from "node:path";
 var FILE_NAME = "client-target.json";
 var ClientTargetStore = class {
   constructor(directory) {
     this.directory = directory;
   }
   get file() {
-    return join5(this.directory, FILE_NAME);
+    return join7(this.directory, FILE_NAME);
   }
   /** Read the record. A missing, unreadable or malformed file reads as "no record". */
   async load() {
@@ -24168,8 +24220,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync as existsSync2 } from "node:fs";
 import { createHash } from "node:crypto";
 import { chmod as chmod3, cp, mkdir as mkdir3, readFile as readFile4, rm as rm3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname as dirname4, join as join6 } from "node:path";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname4, join as join8 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -24198,14 +24250,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join6(options.homeDirectory ?? homedir(), ".dsh");
-    this.directory = options.directory ?? join6(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join8(options.homeDirectory ?? homedir3(), ".dsh");
+    this.directory = options.directory ?? join8(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
     await mkdir3(this.directory, { recursive: true, mode: 448 });
     await chmod3(this.directory, 448);
-    const devicePath = join6(this.directory, "device.json");
-    const keyPath = join6(this.directory, "device.key");
+    const devicePath = join8(this.directory, "device.json");
+    const keyPath = join8(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -24274,7 +24326,7 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join6(this.directory, "trusted-peers.json");
+    const path = join8(this.directory, "trusted-peers.json");
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
@@ -24290,7 +24342,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join6(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join8(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -24299,7 +24351,7 @@ var IdentityStore = class {
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
   const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join6(root, "servers", scope, role);
+  return join8(root, "servers", scope, role);
 }
 async function ensureDeviceDirectory(root, serverUrl) {
   const directory = serverStorageDirectory(root, serverUrl, "device");
@@ -24503,8 +24555,8 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 import { Buffer as Buffer4 } from "node:buffer";
 import { accessSync, constants, existsSync as existsSync3, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { basename as basename2, isAbsolute as isAbsolute2, join as join7, posix, relative, resolve } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join9, posix, relative, resolve } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -26373,7 +26425,7 @@ var CodexRemoteDomain = class {
     return paths;
   }
 };
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2(), localAppData = process.env.LOCALAPPDATA) {
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir4(), localAppData = process.env.LOCALAPPDATA) {
   if (configured !== "codex") return [configured];
   if (hostPlatform === "win32") {
     return [.../* @__PURE__ */ new Set([
@@ -26409,12 +26461,12 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ])];
 }
 function bundledWindowsCodex(userHome) {
-  return bundledWindowsCodexAt(join7(userHome, "AppData", "Local"));
+  return bundledWindowsCodexAt(join9(userHome, "AppData", "Local"));
 }
 function bundledWindowsCodexAt(localAppData) {
-  const bin = join7(localAppData, "OpenAI", "Codex", "bin");
+  const bin = join9(localAppData, "OpenAI", "Codex", "bin");
   try {
-    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join7(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync3(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
+    const newest = readdirSync2(bin, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join9(bin, entry.name, "codex.exe")).filter((candidate2) => existsSync3(candidate2)).map((candidate2) => ({ candidate: candidate2, modified: statSync2(candidate2).mtimeMs })).sort((left, right) => right.modified - left.modified);
     const candidate = newest[0]?.candidate;
     return candidate === void 0 ? [] : [candidate];
   } catch {
@@ -27780,12 +27832,12 @@ function isOversizedListing(value) {
 
 // src/remote-directory-browser.ts
 import { readdir as readdir3, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir3, platform as platform2 } from "node:os";
+import { homedir as homedir5, platform as platform2 } from "node:os";
 import { basename as basename3, dirname as dirname5, isAbsolute as isAbsolute3, parse, resolve as resolve2 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve2(homedir3());
+  const home = resolve2(homedir5());
   const target2 = path === void 0 || path.trim() === "" ? home : resolve2(path);
   if (!isAbsolute3(target2)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir3(target2, { withFileTypes: true });
@@ -28650,7 +28702,7 @@ function concatChunks2(chunks, totalBytes) {
 
 // src/harness-remote-bridge.ts
 import { Buffer as Buffer5 } from "node:buffer";
-import { isAbsolute as isAbsolute4, join as join8, relative as relative2, sep } from "node:path";
+import { isAbsolute as isAbsolute4, join as join10, relative as relative2, sep } from "node:path";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema3 = external_exports.object({
@@ -29331,13 +29383,13 @@ function rerootWorkspacePath(headerCwd, liveCwd, target2) {
   if (isAbsolute4(target2)) {
     const suffix = relative2(headerCwd, target2);
     if (suffix === "" || suffix === "." || isAbsolute4(suffix) || suffix.startsWith(`..${sep}`) || suffix === "..") return void 0;
-    return join8(liveCwd, suffix);
+    return join10(liveCwd, suffix);
   }
   const prefix = relative2(headerCwd, liveCwd);
   if (prefix !== "" && prefix !== "." && !isAbsolute4(prefix) && !prefix.startsWith(`..${sep}`) && prefix !== "..") {
-    return join8(prefix, target2);
+    return join10(prefix, target2);
   }
-  return join8(liveCwd, target2);
+  return join10(liveCwd, target2);
 }
 function samePath(left, right) {
   const normalize = (value) => {
@@ -29569,7 +29621,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 // src/codex-workspace-bridge.ts
 import { spawn as spawn4 } from "node:child_process";
 import { realpath as realpath2, lstat, readdir as readdir4, readFile as readFile5, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join9, relative as relative3, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join11, relative as relative3, resolve as resolve3 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -29656,7 +29708,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join9(target2, entry.name);
+          const item = join11(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -30483,7 +30535,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join10 } from "node:path";
+import { join as join12 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -30571,7 +30623,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join10(directory, "device.json"))) {
+  if (!await exists3(join12(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -30615,7 +30667,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join10(directory, "device.json"))) {
+  if (!await exists3(join12(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;

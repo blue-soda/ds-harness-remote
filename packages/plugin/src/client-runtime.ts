@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { connectionFailureDetail } from './server-connection.js'
 import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
@@ -2065,7 +2068,27 @@ export class ClientModeRuntime {
     }
     globalScope.__dshCodexHistoryCacheStats = inspect
     if (scope.window !== undefined) scope.window.__dshCodexHistoryCacheStats = inspect
+    this.writeCodexHistoryCacheStats(inspect())
     scope.console?.info?.('[dsh-remote] codex history cache inspector ready (client runtime)')
+  }
+
+  private writeCodexHistoryCacheStats(stats: CodexHistoryCacheStats): void {
+    if (process.env.VITEST !== undefined) return
+    try {
+      const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      mkdirSync(home, { recursive: true })
+      writeFileSync(
+        join(home, 'codex-history-cache-stats.json'),
+        JSON.stringify({
+          ...stats,
+          pid: process.pid,
+          source: 'client-runtime',
+          writtenAt: new Date().toISOString(),
+        }, null, 2),
+      )
+    } catch {
+      // Debug output is best-effort.
+    }
   }
 
   private assertRemoteCompatible(remote: ConnectedRemote): void {
