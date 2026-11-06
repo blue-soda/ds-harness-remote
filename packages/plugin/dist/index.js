@@ -17628,133 +17628,14 @@ function resolveCodexThreadKey(key) {
   return codexThreadIdFromKey(key) ?? key;
 }
 
-// src/codex/method-policy.ts
-var id2 = external_exports.string().min(1).max(256);
-var cursor = external_exports.string().min(1).max(4096).nullable().optional();
-var textInput = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
-  message: "Image data must use canonical base64."
-});
-var imageInput = external_exports.object({
-  type: external_exports.literal("image"),
-  mediaType: imageMediaType,
-  data: canonicalBase64
-}).strict();
-var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
-var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
-var projectRoot = external_exports.object({
-  path: external_exports.string().min(1).max(4096)
-}).strict();
-var CODEX_HISTORY_MAX_MESSAGES = 200;
-var schemas = {
-  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
-  "model/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    includeHidden: external_exports.boolean().optional()
-  }).strict(),
-  "project/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional()
-  }).strict(),
-  "project/create": external_exports.object({
-    name: external_exports.string().trim().min(1).max(256),
-    roots: external_exports.array(projectRoot).length(1),
-    idempotencyKey: external_exports.string().min(16).max(256)
-  }).strict(),
-  "thread/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
-    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
-    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
-    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
-    archived: external_exports.boolean().optional(),
-    isPinned: external_exports.boolean().optional(),
-    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
-    useStateDbOnly: external_exports.boolean().optional(),
-    searchTerm: external_exports.string().max(1024).optional(),
-    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
-    // legitimate client query into "The CodeX call parameters are invalid.".
-    originators: external_exports.array(external_exports.string().min(1).max(256)).max(32).nullable().optional(),
-    sectionId: external_exports.string().max(256).nullable().optional()
-  }).strict(),
-  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    threadId: id2,
-    beforeSeq: external_exports.number().int().nonnegative().optional(),
-    throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional()
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "thread/start": external_exports.object({
-    cwd: external_exports.string().min(1).max(4096),
-    model: external_exports.string().min(1).max(128).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/resume": external_exports.object({
-    threadId: id2,
-    model: external_exports.string().min(1).max(128).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/fork": external_exports.object({
-    threadId: id2,
-    lastTurnId: id2.optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  // Upstream declares a plain string and uses the empty value to clear a name, so the
-  // trim-based minimum rejected a legitimate rename.
-  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().max(256) }).strict(),
-  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
-  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
-  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
-  "turn/start": external_exports.object({
-    threadId: id2,
-    input,
-    model: external_exports.string().min(1).max(128).optional(),
-    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
-    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "turn/steer": external_exports.object({
-    threadId: id2,
-    input,
-    expectedTurnId: id2,
-    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
-    clientUserMessageId: external_exports.string().max(256).nullable().optional()
-  }).strict(),
-  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
-};
-var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
-function parseCodexCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
-  }
-  const schema = schemas[method];
-  const parsed = schema.safeParse(params);
-  if (!parsed.success) {
-    const detail = parsed.error.issues.slice(0, 4).map((issue) => {
-      const path = issue.path.length === 0 ? "(root)" : issue.path.join(".");
-      const keys = "keys" in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(", ")}]` : "";
-      return `${path}${keys}: ${issue.code}`;
-    }).join(", ");
-    throw new RpcError("INVALID_MESSAGE", `The CodeX call parameters are invalid. (${method} \u2192 ${detail})`);
-  }
-  return { method, params: parsed.data };
-}
-function isThreadMutation(method) {
-  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
-}
-function threadIdFromParams(params) {
-  return typeof params.threadId === "string" ? params.threadId : void 0;
+// src/history-policy.ts
+var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
+var HISTORY_BUDGET_BYTES = MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES;
+function historyPageSizes(start = HISTORY_PAGE_SIZES[0]) {
+  const sizes = [start];
+  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
+  return sizes;
 }
 
 // src/codex/codex-image-codec.ts
@@ -17991,7 +17872,6 @@ var CODEX_MODEL = "codex";
 var CODEX_PAGE_LIMIT = 100;
 var MAX_CODEX_PAGES = 32;
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
-var DEFAULT_HISTORY_MESSAGES = 50;
 var SESSION_SEARCH_RESULT_LIMIT = 20;
 var SESSION_SEARCH_SNIPPET_CODE_POINTS = 240;
 var CODEX_DEFAULT_PERMISSION = "workspace-write";
@@ -19216,29 +19096,13 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     return thread;
   }
   async readHistoryPage(threadId, page, signal) {
-    const maxMessages = page.maxMessages === void 0 ? void 0 : Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, page.maxMessages));
-    let value;
-    try {
-      value = record3(await this.client.request("dsh/sessionHistory", {
-        threadId,
-        ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
-        ...page.throughSeq === void 0 ? {} : { throughSeq: page.throughSeq },
-        ...maxMessages === void 0 ? {} : { maxMessages }
-      }, signal));
-    } catch (error) {
-      if (!isLegacySessionHistoryUnsupported(error)) throw error;
-      const result = record3(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
-      const thread = record3(result.thread);
-      if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
-      value = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
-        {
-          beforeSeq: page.beforeSeq,
-          throughSeq: page.throughSeq,
-          maxMessages
-        }
-      );
-    }
+    const maxMessages = HISTORY_PAGE_SIZES[0];
+    let value = record3(await this.client.request("dsh/sessionHistory", {
+      threadId,
+      ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
+      ...page.throughSeq === void 0 ? {} : { throughSeq: page.throughSeq },
+      maxMessages
+    }, signal));
     value = adaptCodexHistoryPage(value, this.sessionGeneration);
     if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
       throw new Error("CodeX Remote returned an invalid paginated History.");
@@ -19703,7 +19567,7 @@ function paginateCodexNativeHistory(history, request) {
   const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq);
   const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
   const window = endSeq < 0 ? [] : history.entries.filter((entry) => entry.event.seq <= endSeq);
-  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES;
+  const maxMessages = request.maxMessages ?? HISTORY_PAGE_SIZES[0];
   let messages = 0;
   let cut = 0;
   for (let index = window.length - 1; index >= 0; index -= 1) {
@@ -20321,10 +20185,6 @@ function fail(code, message, details = {}) {
 function failFrom(error) {
   const source = error instanceof Error ? error : new Error(String(error));
   return fail(errorCode3(source) ?? "internal", source.message, errorDetails(source));
-}
-function isLegacySessionHistoryUnsupported(error) {
-  if (!(error instanceof Error)) return false;
-  return errorCode3(error) === "METHOD_NOT_ALLOWED" || errorCode3(error) === "METHOD_NOT_FOUND" || error.message.includes("The requested Codex method is not available over Remote.");
 }
 function errorCode3(error) {
   return "code" in error && typeof error.code === "string" ? error.code : void 0;
@@ -24496,6 +24356,7 @@ var ControlStatusStream = class {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
+import { Buffer as Buffer4 } from "node:buffer";
 import { accessSync, constants, existsSync as existsSync3, readFileSync, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
@@ -24754,6 +24615,135 @@ function safeUpstreamCode(value) {
 }
 function isRecord10(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/codex/method-policy.ts
+var id2 = external_exports.string().min(1).max(256);
+var cursor = external_exports.string().min(1).max(4096).nullable().optional();
+var textInput = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+  message: "Image data must use canonical base64."
+});
+var imageInput = external_exports.object({
+  type: external_exports.literal("image"),
+  mediaType: imageMediaType,
+  data: canonicalBase64
+}).strict();
+var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
+var projectRoot = external_exports.object({
+  path: external_exports.string().min(1).max(4096)
+}).strict();
+var CODEX_HISTORY_MAX_MESSAGES = 200;
+var schemas = {
+  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
+  "model/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    includeHidden: external_exports.boolean().optional()
+  }).strict(),
+  "project/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional()
+  }).strict(),
+  "project/create": external_exports.object({
+    name: external_exports.string().trim().min(1).max(256),
+    roots: external_exports.array(projectRoot).length(1),
+    idempotencyKey: external_exports.string().min(16).max(256)
+  }).strict(),
+  "thread/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
+    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
+    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
+    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
+    archived: external_exports.boolean().optional(),
+    isPinned: external_exports.boolean().optional(),
+    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
+    useStateDbOnly: external_exports.boolean().optional(),
+    searchTerm: external_exports.string().max(1024).optional(),
+    // Upstream `ThreadListParams` declares these two as well. Refusing them turned a
+    // legitimate client query into "The CodeX call parameters are invalid.".
+    originators: external_exports.array(external_exports.string().min(1).max(256)).max(32).nullable().optional(),
+    sectionId: external_exports.string().max(256).nullable().optional()
+  }).strict(),
+  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    threadId: id2,
+    beforeSeq: external_exports.number().int().nonnegative().optional(),
+    throughSeq: external_exports.number().int().min(-1).optional(),
+    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_MAX_MESSAGES).optional()
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "thread/start": external_exports.object({
+    cwd: external_exports.string().min(1).max(4096),
+    model: external_exports.string().min(1).max(128).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/resume": external_exports.object({
+    threadId: id2,
+    model: external_exports.string().min(1).max(128).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/fork": external_exports.object({
+    threadId: id2,
+    lastTurnId: id2.optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  // Upstream declares a plain string and uses the empty value to clear a name, so the
+  // trim-based minimum rejected a legitimate rename.
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
+  "turn/start": external_exports.object({
+    threadId: id2,
+    input,
+    model: external_exports.string().min(1).max(128).optional(),
+    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "turn/steer": external_exports.object({
+    threadId: id2,
+    input,
+    expectedTurnId: id2,
+    // Declared by upstream `TurnSteerParams`; see the thread/list note above.
+    clientUserMessageId: external_exports.string().max(256).nullable().optional()
+  }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
+};
+var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
+function parseCodexCall(method, params) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
+  }
+  const schema = schemas[method];
+  const parsed = schema.safeParse(params);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.slice(0, 4).map((issue) => {
+      const path = issue.path.length === 0 ? "(root)" : issue.path.join(".");
+      const keys = "keys" in issue && Array.isArray(issue.keys) ? ` [${issue.keys.join(", ")}]` : "";
+      return `${path}${keys}: ${issue.code}`;
+    }).join(", ");
+    throw new RpcError("INVALID_MESSAGE", `The CodeX call parameters are invalid. (${method} \u2192 ${detail})`);
+  }
+  return { method, params: parsed.data };
+}
+function isThreadMutation(method) {
+  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
+}
+function threadIdFromParams(params) {
+  return typeof params.threadId === "string" ? params.threadId : void 0;
 }
 
 // src/codex/peer-bridge.ts
@@ -25072,6 +25062,11 @@ var CodexRemoteDomain = class {
   turnOwners = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
+  /**
+   * Full projected histories, one per Thread, so a second open does not walk every
+   * turn again. Keyed by Thread id; refreshed when the Thread metadata changes.
+   */
+  historyWindows = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
   restartTimer;
   restartAttempt = 0;
@@ -25201,21 +25196,13 @@ var CodexRemoteDomain = class {
     }
     const threadId = threadIdFromParams(call.params);
     if (call.method === "dsh/sessionHistory") {
-      const thread = await this.readThreadForHistory(connectionId, threadId);
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger2(call.params.beforeSeq),
-          throughSeq: optionalInteger2(call.params.throughSeq),
-          maxMessages: optionalInteger2(call.params.maxMessages)
-        }
-      );
-      const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
-      return {
-        ...page,
-        ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
-        permissionPreset: this.permissionPresets.get(threadId) ?? null
-      };
+      const { thread: metadata } = await this.readKnownThread(threadId);
+      const window = await this.historyWindow(connectionId, threadId, metadata);
+      return this.historyPage(window, threadId, {
+        beforeSeq: optionalInteger2(call.params.beforeSeq),
+        throughSeq: optionalInteger2(call.params.throughSeq),
+        maxMessages: optionalInteger2(call.params.maxMessages)
+      });
     }
     if (call.method === "dsh/directoryList") {
       return this.listCodexDirectory(call.params.path);
@@ -25723,32 +25710,83 @@ var CodexRemoteDomain = class {
     }
     return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
   }
-  async readThreadForHistory(connectionId, threadId) {
-    const { thread: metadata } = await this.readKnownThread(threadId);
+  async historyWindow(connectionId, threadId, metadata) {
+    const updatedAt = typeof metadata.updatedAt === "number" ? metadata.updatedAt : void 0;
+    const cached = this.historyWindows.get(threadId);
+    const fresh = cached !== void 0 && (updatedAt === void 0 || cached.updatedAt === void 0 || cached.updatedAt === updatedAt) && Date.now() - cached.at < 5 * 6e4;
+    if (fresh && cached !== void 0) {
+      cached.at = Date.now();
+      this.logger.debug("codex history cache hit", {
+        threadId,
+        turns: cached.history.nextTurn,
+        events: cached.history.entries.length
+      });
+      return cached;
+    }
+    const startedAt = performance.now();
+    let turns;
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
+      turns = await this.readThreadTurns(connectionId, threadId, "full");
     } catch (fullError) {
       if (!isHistoryReadRecoverable(fullError)) throw fullError;
       this.logHistoryFallback(connectionId, "turns-full", fullError);
+      turns = await this.readThreadTurns(connectionId, threadId, "summary");
     }
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
-    } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
-      this.logHistoryFallback(connectionId, "turns-summary", summaryError);
-    }
-    try {
-      const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
-      const legacyThread = extractThread(legacyResult);
-      if (legacyThread === void 0 || legacyThread.id !== threadId) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
+    const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`);
+    const entry = {
+      history,
+      ...updatedAt === void 0 ? {} : { updatedAt },
+      ...cached?.acceptedPageSize === void 0 ? {} : { acceptedPageSize: cached.acceptedPageSize },
+      at: Date.now()
+    };
+    this.rememberHistoryWindow(threadId, entry);
+    this.logger.debug("codex history cache filled", {
+      threadId,
+      turns: history.nextTurn,
+      events: history.entries.length,
+      updatedAt: updatedAt ?? null,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    return entry;
+  }
+  historyPage(window, threadId, request) {
+    const requested = request.maxMessages ?? HISTORY_PAGE_SIZES[0];
+    const start = Math.max(1, Math.min(requested, HISTORY_PAGE_SIZES[0], window.acceptedPageSize ?? requested));
+    const activeTurnId2 = this.turnOwners.get(threadId)?.turnId;
+    for (const size of historyPageSizes(start)) {
+      const page = paginateCodexNativeHistory(window.history, {
+        beforeSeq: request.beforeSeq,
+        throughSeq: request.throughSeq,
+        maxMessages: size
+      });
+      const resolvedActiveTurnId = page.activeTurnId ?? activeTurnId2;
+      const response = {
+        ...page,
+        ...resolvedActiveTurnId === void 0 ? {} : { activeTurnId: resolvedActiveTurnId },
+        permissionPreset: this.permissionPresets.get(threadId) ?? null
+      };
+      const bytes = Buffer4.byteLength(JSON.stringify(response), "utf8");
+      this.logger.debug("codex history page", {
+        threadId,
+        requested,
+        size,
+        bytes,
+        budget: HISTORY_BUDGET_BYTES,
+        fromCache: true
+      });
+      if (bytes <= HISTORY_BUDGET_BYTES) {
+        window.acceptedPageSize = size;
+        return response;
       }
-      return legacyThread;
-    } catch (legacyError) {
-      if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
-      this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
-      return { ...metadata, turns: [] };
     }
+    throw new RpcError("RESPONSE_TOO_LARGE", "The Codex history page is too large for the secure Remote channel.");
+  }
+  rememberHistoryWindow(threadId, entry) {
+    if (this.historyWindows.size >= 16 && !this.historyWindows.has(threadId)) {
+      const oldest = this.historyWindows.keys().next().value;
+      if (oldest !== void 0) this.historyWindows.delete(oldest);
+    }
+    this.historyWindows.set(threadId, entry);
   }
   async readThreadTurns(connectionId, threadId, itemsView) {
     const turns = [];
@@ -28360,7 +28398,7 @@ function concatChunks2(chunks, totalBytes) {
 }
 
 // src/harness-remote-bridge.ts
-import { Buffer as Buffer4 } from "node:buffer";
+import { Buffer as Buffer5 } from "node:buffer";
 import { isAbsolute as isAbsolute4, join as join8, relative as relative2, sep } from "node:path";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
@@ -28410,10 +28448,8 @@ var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var STREAM_FRAME_ENVELOPE_BYTES = 4 * 1024;
-var RESPONSE_ENVELOPE_BYTES = 8 * 1024;
-var HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
+var RESPONSE_ENVELOPE_BYTES2 = 8 * 1024;
 var WORKSPACE_FILE_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/stat", "workspaceFiles/read", "workspaceFiles/readBytes", "workspaceFiles/list"]);
-var MAX_HISTORY_PAGE_MESSAGES = HISTORY_PAGE_SIZES[0];
 var REMOTE_HISTORY_CALL_ENDPOINTS = /* @__PURE__ */ new Set(["session/page", "session/history"]);
 var REMOTE_HISTORY_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["session/follow"]);
 var MAX_CACHED_HISTORY_PAGES = 64;
@@ -28677,7 +28713,7 @@ var HarnessRemoteBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer4.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer5.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input2) {
@@ -28797,7 +28833,7 @@ var HarnessRemoteBridge = class {
         hasMore: value?.hasMore,
         bytes
       });
-      if (bytes <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES) {
+      if (bytes <= MAX_SECURE_MESSAGE_BYTES - RESPONSE_ENVELOPE_BYTES2) {
         this.rememberHistoryPageSize(key, size);
         return wire;
       }
@@ -28977,11 +29013,6 @@ function windowedRequest(request, maxMessages) {
   }
   return next;
 }
-function historyPageSizes(start) {
-  const sizes = [start];
-  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size);
-  return sizes;
-}
 function historyRequestOf(payload) {
   let node = payload;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -29076,10 +29107,10 @@ function historyPageKey(payload) {
   }
 }
 function responseBytes(result) {
-  return Buffer4.byteLength(JSON.stringify(result), "utf8");
+  return Buffer5.byteLength(JSON.stringify(result), "utf8");
 }
 function streamFrameBytes(frame) {
-  return Buffer4.byteLength(JSON.stringify(frame), "utf8");
+  return Buffer5.byteLength(JSON.stringify(frame), "utf8");
 }
 function remainingIterable(iterator) {
   return { [Symbol.asyncIterator]: () => iterator };
@@ -29139,7 +29170,7 @@ async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) 
   );
 }
 function decodeCanonicalBase643(value) {
-  const bytes = Buffer4.from(value, "base64");
+  const bytes = Buffer5.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
 }

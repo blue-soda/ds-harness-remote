@@ -121,6 +121,44 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('serves the second history read from the per-thread cache', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
+    await domain.start()
+
+    const first = await domain.call('connection-1', {
+      method: 'dsh/sessionHistory',
+      params: { threadId: 'allowed-thread' },
+    })
+    const turnCalls = app.calls.filter(call => call.method === 'thread/turns/list').length
+    expect(turnCalls).toBeGreaterThan(0)
+
+    const second = await domain.call('connection-1', {
+      method: 'dsh/sessionHistory',
+      params: { threadId: 'allowed-thread' },
+    })
+    expect(app.calls.filter(call => call.method === 'thread/turns/list').length).toBe(turnCalls)
+    expect(second).toMatchObject({ cursor: (first as { cursor: number }).cursor })
+    await domain.close()
+  })
+
+  it('steps the Codex history page down until it fits the secure budget', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    app.largeHistory = true
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
+    await domain.start()
+
+    const page = await domain.call('connection-1', {
+      method: 'dsh/sessionHistory',
+      params: { threadId: 'allowed-thread', maxMessages: 50 },
+    }) as { records: unknown[] }
+    expect(page.records.length).toBeGreaterThan(0)
+    expect(page.records.length).toBeLessThan(50)
+    await domain.close()
+  })
+
   it('lists and reads threads outside every project when showUnprojectedSessions is on', async () => {
     const { root, outside } = await directories()
     const app = new FakeAppServer(root, outside)
@@ -528,27 +566,6 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
-  it('falls back to legacy full Thread reads when paginated history is unavailable', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    app.rejectTurnPagination = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex', showUnprojectedSessions: false }, logger(), () => app)
-    await domain.start()
-
-    const history = await domain.call('connection-1', {
-      method: 'dsh/sessionHistory',
-      params: { threadId: 'allowed-thread', maxMessages: 1 },
-    })
-
-    expect(history).toMatchObject({ cursor: 5, hasMore: true })
-    expect(app.calls.map(call => call.method)).toContain('thread/turns/list')
-    expect(app.calls.at(-1)).toEqual({
-      method: 'thread/read',
-      params: { threadId: 'allowed-thread', includeTurns: true },
-    })
-    await domain.close()
-  })
-
   it('treats resume as idempotent when App Server already has the allowed thread loaded', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
@@ -773,6 +790,8 @@ class FakeAppServer implements CodexAppServerLike {
   duplicateThreadRows = false
   /** Emit one thread whose cwd spells the project root with a different case. */
   capitalCwd = false
+  /** Emit a turn whose messages are large enough to exercise the history page budget. */
+  largeHistory = false
 
   constructor(private readonly root: string, private readonly outside = root) {}
 
@@ -876,10 +895,16 @@ class FakeAppServer implements CodexAppServerLike {
           startedAt: 1,
           completedAt: 2,
           itemsView: 'full',
-          items: [
-            { id: 'user-1', type: 'userMessage', text: 'First' },
-            { id: 'assistant-1', type: 'agentMessage', text: 'Second' },
-          ],
+          items: this.largeHistory
+            ? Array.from({ length: 60 }, (_, index) => ({
+                id: `user-${index}`,
+                type: 'userMessage',
+                text: `message-${index}-` + 'x'.repeat(100_000),
+              }))
+            : [
+                { id: 'user-1', type: 'userMessage', text: 'First' },
+                { id: 'assistant-1', type: 'agentMessage', text: 'Second' },
+              ],
         }],
         nextCursor: null,
         backwardsCursor: null,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CODEX_HISTORY_MAX_MESSAGES } from '../src/codex/method-policy.js'
+import { HISTORY_PAGE_SIZES } from '../src/history-policy.js'
 import {
   CodexVirtualHarness,
   discoverCodexVirtualWorkspaces,
@@ -1283,7 +1283,7 @@ describe('CodexVirtualHarness', () => {
     const historyCalls = client.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory')
     expect(historyCalls.length).toBeGreaterThan(0)
     for (const call of historyCalls) {
-      expect((call[1] as { maxMessages?: number }).maxMessages).toBeLessThanOrEqual(CODEX_HISTORY_MAX_MESSAGES)
+      expect((call[1] as { maxMessages?: number }).maxMessages).toBeLessThanOrEqual(HISTORY_PAGE_SIZES[0])
     }
     await target.close()
   })
@@ -1317,33 +1317,6 @@ describe('CodexVirtualHarness', () => {
       model: 'gpt-5.6-sol',
       effort: 'low',
     }, expect.any(AbortSignal))
-    await target.close()
-  })
-
-  it('falls back to thread/read history when a remote Host lacks the paginated DSH method', async () => {
-    const client = fakeCodex()
-    const originalRequest = client.request.getMockImplementation() as
-      | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
-      | undefined
-    client.request.mockImplementation(async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
-      if (method === 'dsh/sessionHistory') {
-        throw Object.assign(new Error('The requested Codex method is not available over Remote.'), {
-          code: 'METHOD_NOT_ALLOWED',
-        })
-      }
-      return originalRequest?.(method, params, signal)
-    })
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-
-    const history = await target.api.sessions.history({
-      rpcId: 'history-legacy' as never,
-      payload: { sessionId: 'codex:thr_1' as never, maxMessages: 3 },
-    })
-
-    expect(history.result).toMatchObject({ ok: true, value: { hasMore: true } })
-    if (!history.result.ok) throw new Error('history failed')
-    expect(history.result.value.events.map(entry => entry.event.seq)).toEqual([3, 4, 5, 6, 7, 8, 9])
-    expect(client.request).toHaveBeenCalledWith('thread/read', { threadId: 'thr_1', includeTurns: true }, expect.any(AbortSignal))
     await target.close()
   })
 

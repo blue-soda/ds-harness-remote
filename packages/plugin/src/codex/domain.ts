@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -7,6 +8,7 @@ import { deriveCodexCwdWorkspaces, uniqueCodexThreadRows } from '@dsh-remote/cli
 import type { CodexAppFrameData, CodexAppStreamClosedData, CodexPermissionPreset } from '@dsh-remote/protocol'
 import type { ResolvedCodexConfig } from '../config.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
+import { HISTORY_BUDGET_BYTES, HISTORY_PAGE_SIZES, historyPageSizes } from '../history-policy.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
 import {
@@ -24,7 +26,7 @@ import {
 import { CodexPeerBridge, type PublishCodexFrame } from './peer-bridge.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import { resolveCodexThreadKey } from './session-id.js'
-import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual-harness.js'
+import { paginateCodexNativeHistory, projectCodexNativeHistory, type CodexNativeHistory } from './virtual-harness.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
@@ -119,6 +121,16 @@ export class CodexRemoteDomain {
   private readonly turnOwners = new Map<string, ActiveTurnOwner>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly permissionPresets = new Map<string, CodexPermissionPreset>()
+  /**
+   * Full projected histories, one per Thread, so a second open does not walk every
+   * turn again. Keyed by Thread id; refreshed when the Thread metadata changes.
+   */
+  private readonly historyWindows = new Map<string, {
+    history: CodexNativeHistory
+    updatedAt?: number
+    acceptedPageSize?: number
+    at: number
+  }>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
   private restartAttempt = 0
@@ -283,23 +295,13 @@ export class CodexRemoteDomain {
     const threadId = threadIdFromParams(call.params)
 
     if (call.method === 'dsh/sessionHistory') {
-      const thread = await this.readThreadForHistory(connectionId, threadId!)
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger(call.params.beforeSeq),
-          throughSeq: optionalInteger(call.params.throughSeq),
-          maxMessages: optionalInteger(call.params.maxMessages),
-        },
-      )
-      const activeTurnId = typeof page.activeTurnId === 'string'
-        ? page.activeTurnId
-        : this.turnOwners.get(threadId!)?.turnId
-      return {
-        ...page,
-        ...(activeTurnId === undefined ? {} : { activeTurnId }),
-        permissionPreset: this.permissionPresets.get(threadId!) ?? null,
-      }
+      const { thread: metadata } = await this.readKnownThread(threadId!)
+      const window = await this.historyWindow(connectionId, threadId!, metadata)
+      return this.historyPage(window, threadId!, {
+        beforeSeq: optionalInteger(call.params.beforeSeq),
+        throughSeq: optionalInteger(call.params.throughSeq),
+        maxMessages: optionalInteger(call.params.maxMessages),
+      })
     }
     if (call.method === 'dsh/directoryList') {
       return this.listCodexDirectory(call.params.path as string)
@@ -898,32 +900,99 @@ export class CodexRemoteDomain {
     return { thread, ...(typeof thread.cwd === 'string' && thread.cwd.length > 0 ? { cwd: thread.cwd } : {}) }
   }
 
-  private async readThreadForHistory(connectionId: string, threadId: string): Promise<Record<string, unknown>> {
-    const { thread: metadata } = await this.readKnownThread(threadId)
+  private async historyWindow(
+    connectionId: string,
+    threadId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<{ history: CodexNativeHistory; updatedAt?: number; acceptedPageSize?: number; at: number }> {
+    const updatedAt = typeof metadata.updatedAt === 'number' ? metadata.updatedAt : undefined
+    const cached = this.historyWindows.get(threadId)
+    const fresh = cached !== undefined
+      && (updatedAt === undefined || cached.updatedAt === undefined || cached.updatedAt === updatedAt)
+      && Date.now() - cached.at < 5 * 60_000
+    if (fresh && cached !== undefined) {
+      cached.at = Date.now()
+      this.logger.debug('codex history cache hit', {
+        threadId,
+        turns: cached.history.nextTurn,
+        events: cached.history.entries.length,
+      })
+      return cached
+    }
+
+    const startedAt = performance.now()
+    let turns: Record<string, unknown>[]
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'full') }
+      turns = await this.readThreadTurns(connectionId, threadId, 'full')
     } catch (fullError) {
       if (!isHistoryReadRecoverable(fullError)) throw fullError
       this.logHistoryFallback(connectionId, 'turns-full', fullError)
+      turns = await this.readThreadTurns(connectionId, threadId, 'summary')
     }
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'summary') }
-    } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError
-      this.logHistoryFallback(connectionId, 'turns-summary', summaryError)
+    const history = projectCodexNativeHistory({ ...metadata, turns }, `codex:${threadId}`)
+    const entry = {
+      history,
+      ...(updatedAt === undefined ? {} : { updatedAt }),
+      ...(cached?.acceptedPageSize === undefined ? {} : { acceptedPageSize: cached.acceptedPageSize }),
+      at: Date.now(),
     }
-    try {
-      const legacyResult = await this.callUpstream('thread/read', { threadId, includeTurns: true })
-      const legacyThread = extractThread(legacyResult)
-      if (legacyThread === undefined || legacyThread.id !== threadId) {
-        throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Thread history.')
+    this.rememberHistoryWindow(threadId, entry)
+    this.logger.debug('codex history cache filled', {
+      threadId,
+      turns: history.nextTurn,
+      events: history.entries.length,
+      updatedAt: updatedAt ?? null,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
+    return entry
+  }
+
+  private historyPage(
+    window: { history: CodexNativeHistory; acceptedPageSize?: number },
+    threadId: string,
+    request: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+  ): unknown {
+    const requested = request.maxMessages ?? HISTORY_PAGE_SIZES[0]
+    const start = Math.max(1, Math.min(requested, HISTORY_PAGE_SIZES[0], window.acceptedPageSize ?? requested))
+    const activeTurnId = this.turnOwners.get(threadId)?.turnId
+    for (const size of historyPageSizes(start)) {
+      const page = paginateCodexNativeHistory(window.history, {
+        beforeSeq: request.beforeSeq,
+        throughSeq: request.throughSeq,
+        maxMessages: size,
+      })
+      const resolvedActiveTurnId = page.activeTurnId ?? activeTurnId
+      const response = {
+        ...page,
+        ...(resolvedActiveTurnId === undefined ? {} : { activeTurnId: resolvedActiveTurnId }),
+        permissionPreset: this.permissionPresets.get(threadId) ?? null,
       }
-      return legacyThread
-    } catch (legacyError) {
-      if (!isHistoryReadRecoverable(legacyError)) throw legacyError
-      this.logHistoryFallback(connectionId, 'thread-read-full', legacyError)
-      return { ...metadata, turns: [] }
+      const bytes = Buffer.byteLength(JSON.stringify(response), 'utf8')
+      this.logger.debug('codex history page', {
+        threadId,
+        requested,
+        size,
+        bytes,
+        budget: HISTORY_BUDGET_BYTES,
+        fromCache: true,
+      })
+      if (bytes <= HISTORY_BUDGET_BYTES) {
+        window.acceptedPageSize = size
+        return response
+      }
     }
+    throw new RpcError('RESPONSE_TOO_LARGE', 'The Codex history page is too large for the secure Remote channel.')
+  }
+
+  private rememberHistoryWindow(
+    threadId: string,
+    entry: { history: CodexNativeHistory; updatedAt?: number; acceptedPageSize?: number; at: number },
+  ): void {
+    if (this.historyWindows.size >= 16 && !this.historyWindows.has(threadId)) {
+      const oldest = this.historyWindows.keys().next().value
+      if (oldest !== undefined) this.historyWindows.delete(oldest)
+    }
+    this.historyWindows.set(threadId, entry)
   }
 
   private async readThreadTurns(

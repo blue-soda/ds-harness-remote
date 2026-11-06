@@ -14,7 +14,7 @@ import type {
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import { parseCodexSessionId } from './session-id.js'
 import { decodeByteValue } from '../rpc-binary-attachments.js'
-import { CODEX_HISTORY_MAX_MESSAGES } from './method-policy.js'
+import { HISTORY_PAGE_SIZES } from '../history-policy.js'
 import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
 import type { HarnessSessionGeneration } from '../harness-version.js'
 import {
@@ -31,7 +31,6 @@ const CODEX_MODEL = 'codex'
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
 const MAX_LIVE_TOOL_OUTPUT = 128 * 1024
-const DEFAULT_HISTORY_MESSAGES = 50
 const SESSION_SEARCH_RESULT_LIMIT = 20
 const SESSION_SEARCH_SNIPPET_CODE_POINTS = 240
 const CODEX_DEFAULT_PERMISSION = 'workspace-write'
@@ -1603,35 +1602,18 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
     signal?: AbortSignal,
   ): Promise<CodexNativeHistoryPage> {
-    // The Host's call policy caps a history page at CODEX_HISTORY_MAX_MESSAGES, and the
-    // native UI asks for a far larger page. Forwarding that request was refused outright
-    // ("dsh/sessionHistory -> maxMessages: too_big") and the session history never loaded,
-    // so every read clamps to the same constant the policy uses.
-    const maxMessages = page.maxMessages === undefined
-      ? undefined
-      : Math.min(CODEX_HISTORY_MAX_MESSAGES, Math.max(1, page.maxMessages))
-    let value: unknown
-    try {
-      value = record(await this.client.request('dsh/sessionHistory', {
-        threadId,
-        ...(page.beforeSeq === undefined ? {} : { beforeSeq: page.beforeSeq }),
-        ...(page.throughSeq === undefined ? {} : { throughSeq: page.throughSeq }),
-        ...(maxMessages === undefined ? {} : { maxMessages }),
-      }, signal))
-    } catch (error) {
-      if (!isLegacySessionHistoryUnsupported(error)) throw error
-      const result = record(await this.client.request('thread/read', { threadId, includeTurns: true }, signal))
-      const thread = record(result.thread)
-      if (string(thread.id) !== threadId) throw new Error('CodeX returned an invalid Thread history.')
-      value = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
-        {
-          beforeSeq: page.beforeSeq,
-          throughSeq: page.throughSeq,
-          maxMessages,
-        },
-      )
-    }
+    // Both ends share one first-paint size. A caller asking for fewer records keeps
+    // its smaller window; a larger request is clamped to the shared first step.
+    const maxMessages = Math.min(
+      HISTORY_PAGE_SIZES[0],
+      Math.max(1, page.maxMessages ?? HISTORY_PAGE_SIZES[0]),
+    )
+    let value: unknown = record(await this.client.request('dsh/sessionHistory', {
+      threadId,
+      ...(page.beforeSeq === undefined ? {} : { beforeSeq: page.beforeSeq }),
+      ...(page.throughSeq === undefined ? {} : { throughSeq: page.throughSeq }),
+      maxMessages,
+    }, signal))
     value = adaptCodexHistoryPage(value, this.sessionGeneration)
     if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
       throw new Error('CodeX Remote returned an invalid paginated History.')
@@ -2156,7 +2138,7 @@ export function paginateCodexNativeHistory(
   const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq)
   const endSeq = Math.min(throughSeq, request.beforeSeq === undefined ? throughSeq : request.beforeSeq - 1)
   const window = endSeq < 0 ? [] : history.entries.filter(entry => entry.event.seq <= endSeq)
-  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES
+  const maxMessages = request.maxMessages ?? HISTORY_PAGE_SIZES[0]
   let messages = 0
   let cut = 0
   for (let index = window.length - 1; index >= 0; index -= 1) {
@@ -2929,13 +2911,6 @@ function fail(code: string, message: string, details: JsonRecord = {}): TypertRp
 function failFrom(error: unknown): TypertRpcResult {
   const source = error instanceof Error ? error : new Error(String(error))
   return fail(errorCode(source) ?? 'internal', source.message, errorDetails(source))
-}
-
-function isLegacySessionHistoryUnsupported(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  return errorCode(error) === 'METHOD_NOT_ALLOWED'
-    || errorCode(error) === 'METHOD_NOT_FOUND'
-    || error.message.includes('The requested Codex method is not available over Remote.')
 }
 
 function errorCode(error: Error): string | undefined {

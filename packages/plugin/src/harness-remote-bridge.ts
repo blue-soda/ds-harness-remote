@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { isAbsolute, join, relative, sep } from 'node:path'
+import { HISTORY_PAGE_SIZES, historyPageSizes } from './history-policy.js'
 import type {
   HarnessApiTransferChunkParams,
   HarnessApiTransferCommitResult,
@@ -121,11 +122,9 @@ const RESPONSE_ENVELOPE_BYTES = 8 * 1024
  * cheap on every Session (a 500-message page can be several MiB and stall the client), and a
  * dense Session steps down only when the measured frame does not fit.
  */
-const HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1] as const
 /** Workspace-file endpoints whose locator the Host resolves against the Session header cwd. */
 const WORKSPACE_FILE_ENDPOINTS = new Set(['workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/list'])
 /** Largest window one page may ask for; the ladder's first step is the cap. */
-const MAX_HISTORY_PAGE_MESSAGES = HISTORY_PAGE_SIZES[0]
 /** Unary endpoints whose single page has to fit in one secure message. */
 const REMOTE_HISTORY_CALL_ENDPOINTS = new Set(['session/page', 'session/history'])
 /** Stream endpoints whose opening page has to fit in one secure message frame. */
@@ -777,12 +776,7 @@ function windowedRequest(request: Record<string, unknown>, maxMessages: number):
   return next
 }
 
-/** Windows to try for one page: the starting window, then every smaller fixed step. */
-function historyPageSizes(start: number): number[] {
-  const sizes = [start]
-  for (const size of HISTORY_PAGE_SIZES) if (size < start) sizes.push(size)
-  return sizes
-}
+/** Windows to try for one page come from the shared history policy. */
 
 /** The innermost history request object, whichever wrapper the carrier used. */
 function historyRequestOf(payload: unknown): Record<string, unknown> | undefined {
