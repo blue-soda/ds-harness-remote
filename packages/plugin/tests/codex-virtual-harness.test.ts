@@ -5,6 +5,7 @@ import {
   discoverCodexVirtualWorkspaces,
   paginateCodexNativeHistory,
   projectCodexNativeHistory,
+  type CodexHistoryCacheStats,
 } from '../src/codex/virtual-harness.js'
 
 describe('CodexVirtualHarness', () => {
@@ -423,6 +424,39 @@ describe('CodexVirtualHarness', () => {
   // A Client that cached a Session id from the composite-row-key release must not be left with a
   // history that cannot load: the key resolves to its thread, and the projected history is the
   // thread's, so the id the native UI holds keeps working until the next catalog read replaces it.
+  it('exposes history cache metadata without message content', async () => {
+    const scope = globalThis as unknown as { window?: Record<string, unknown> }
+    const win: Record<string, unknown> = {}
+    const previous = scope.window
+    scope.window = win
+    try {
+      const client = fakeCodex()
+      const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+      const signal = new AbortController().signal
+      const request = { sessionId: 'codex:thr_1' }
+      await target.dispatch('session/history', { args: { request } }, signal)
+      await target.dispatch('session/history', { args: { request } }, signal)
+
+      const inspect = win.__dshCodexHistoryCacheStats as (() => CodexHistoryCacheStats) | undefined
+      expect(typeof inspect).toBe('function')
+      const stats = inspect!()
+      expect(stats).toMatchObject({
+        ttlMs: 60_000,
+        hits: 1,
+        misses: 1,
+        entries: [expect.objectContaining({ sessionId: 'codex:thr_1', records: expect.any(Number) })],
+      })
+      expect(JSON.stringify(stats)).not.toContain('Use native UI')
+      expect(JSON.stringify(stats)).not.toContain('Done.')
+
+      await target.close()
+      expect(win.__dshCodexHistoryCacheStats).toBeUndefined()
+    } finally {
+      if (previous === undefined) delete scope.window
+      else scope.window = previous
+    }
+  })
+
   it('reuses the last history page when a Session is reopened', async () => {
     const client = fakeCodex()
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })

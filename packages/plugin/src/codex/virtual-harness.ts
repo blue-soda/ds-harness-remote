@@ -277,6 +277,27 @@ export async function discoverCodexVirtualWorkspaces(
 // The predicate lives with the client runtime; a function declaration, so the cycle is hoisted and safe.
 import { isCodexSessionLoss } from '../client-runtime.js'
 
+/** Metadata for one cached client history page; never includes message text. */
+export interface CodexHistoryCacheEntryStat {
+  key: string
+  ageMs: number
+  expired: boolean
+  sessionId: string
+  records: number
+  cursor: number
+  nextTurn: number
+  hasMore: boolean
+  firstSeq?: number
+  lastSeq?: number
+}
+
+export interface CodexHistoryCacheStats {
+  ttlMs: number
+  hits: number
+  misses: number
+  entries: CodexHistoryCacheEntryStat[]
+}
+
 export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   readonly api: ApiProxy
 
@@ -295,6 +316,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly selectedPermissions = new Map<string, CodexPermissionPreset>()
   private readonly imageAttachments = new Map<string, CodexImageAttachmentEntry>()
   private readonly historyPageCache = new Map<string, { page: CodexNativeHistoryPage; at: number }>()
+  private historyPageHits = 0
+  private historyPageMisses = 0
+  private historyCacheInspector?: () => CodexHistoryCacheStats
   private modelDirectory?: CodexModelDirectory
   private modelDirectoryPromise?: Promise<CodexModelDirectory>
   private lastProjectionSeq = 0
@@ -319,6 +343,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     private readonly hostCarrier?: RemoteTypertGatewayTarget,
   ) {
     this.api = this.createApiProxy()
+    this.installHistoryCacheInspector()
     // The Host states whether Codex is available; whether that costs this client its session is decided here,
     // because only this side knows what is on screen. `available: true` is never a loss - it is Codex coming back,
     // and a session that still needs restoring is put back by the retry ladder, not by the announcement.
@@ -560,6 +585,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.selectedModels.clear()
     this.selectedPermissions.clear()
     this.imageAttachments.clear()
+    this.historyPageCache.clear()
+    const scope = globalThis as unknown as { window?: Record<string, unknown> }
+    if (scope.window !== undefined && this.historyCacheInspector !== undefined
+      && scope.window.__dshCodexHistoryCacheStats === this.historyCacheInspector) {
+      delete scope.window.__dshCodexHistoryCacheStats
+    }
+    this.historyCacheInspector = undefined
   }
 
   private async refreshCatalog(signal?: AbortSignal): Promise<CatalogState> {
@@ -1616,9 +1648,11 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const cacheKey = `${this.host.deviceId}|${threadId}|${page.beforeSeq ?? ''}|${page.throughSeq ?? ''}|${maxMessages}`
     const cached = this.historyPageCache.get(cacheKey)
     if (cached !== undefined && Date.now() - cached.at < HISTORY_PAGE_CACHE_TTL_MS) {
+      this.historyPageHits += 1
       this.cacheHistoryImages(cached.page)
       return cached.page
     }
+    this.historyPageMisses += 1
     let value: unknown = record(await this.client.request('dsh/sessionHistory', {
       threadId,
       ...(page.beforeSeq === undefined ? {} : { beforeSeq: page.beforeSeq }),
@@ -1647,6 +1681,45 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const marker = `|${threadId}|`
     for (const key of [...this.historyPageCache.keys()]) {
       if (key.includes(marker)) this.historyPageCache.delete(key)
+    }
+  }
+
+  /**
+   * Expose cache metadata to the current page's DevTools as
+   * `__dshCodexHistoryCacheStats()`. The function is metadata only: it never
+   * returns message text or event data, so the Session content stays private.
+   */
+  private installHistoryCacheInspector(): void {
+    const scope = globalThis as unknown as { window?: Record<string, unknown> }
+    if (scope.window === undefined) return
+    const inspector = (): CodexHistoryCacheStats => this.historyCacheStats()
+    scope.window.__dshCodexHistoryCacheStats = inspector
+    this.historyCacheInspector = inspector
+  }
+
+  private historyCacheStats(): CodexHistoryCacheStats {
+    const now = Date.now()
+    return {
+      ttlMs: HISTORY_PAGE_CACHE_TTL_MS,
+      hits: this.historyPageHits,
+      misses: this.historyPageMisses,
+      entries: [...this.historyPageCache.entries()].map(([key, { page, at }]) => {
+        const records = page.records
+        const firstSeq = records[0]?.event.seq
+        const lastSeq = records.at(-1)?.event.seq
+        return {
+          key,
+          ageMs: now - at,
+          expired: now - at >= HISTORY_PAGE_CACHE_TTL_MS,
+          sessionId: page.header.id,
+          records: records.length,
+          cursor: page.cursor,
+          nextTurn: page.nextTurn,
+          hasMore: page.hasMore,
+          ...(firstSeq === undefined ? {} : { firstSeq }),
+          ...(lastSeq === undefined ? {} : { lastSeq }),
+        }
+      }),
     }
   }
 

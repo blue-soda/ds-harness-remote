@@ -17922,6 +17922,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.sessionGeneration = sessionGeneration;
     this.hostCarrier = hostCarrier;
     this.api = this.createApiProxy();
+    this.installHistoryCacheInspector();
     this.stopCapabilityWatch = this.client.watchCapability?.((available) => {
       if (!available) this.onSessionLost?.("domain-notice");
     });
@@ -17942,6 +17943,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   selectedPermissions = /* @__PURE__ */ new Map();
   imageAttachments = /* @__PURE__ */ new Map();
   historyPageCache = /* @__PURE__ */ new Map();
+  historyPageHits = 0;
+  historyPageMisses = 0;
+  historyCacheInspector;
   modelDirectory;
   modelDirectoryPromise;
   lastProjectionSeq = 0;
@@ -18174,6 +18178,12 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.selectedModels.clear();
     this.selectedPermissions.clear();
     this.imageAttachments.clear();
+    this.historyPageCache.clear();
+    const scope = globalThis;
+    if (scope.window !== void 0 && this.historyCacheInspector !== void 0 && scope.window.__dshCodexHistoryCacheStats === this.historyCacheInspector) {
+      delete scope.window.__dshCodexHistoryCacheStats;
+    }
+    this.historyCacheInspector = void 0;
   }
   async refreshCatalog(signal) {
     const catalog = await loadCatalog(this.client, signal, this.pendingThreads);
@@ -19107,9 +19117,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const cacheKey = `${this.host.deviceId}|${threadId}|${page.beforeSeq ?? ""}|${page.throughSeq ?? ""}|${maxMessages}`;
     const cached = this.historyPageCache.get(cacheKey);
     if (cached !== void 0 && Date.now() - cached.at < HISTORY_PAGE_CACHE_TTL_MS) {
+      this.historyPageHits += 1;
       this.cacheHistoryImages(cached.page);
       return cached.page;
     }
+    this.historyPageMisses += 1;
     let value = record3(await this.client.request("dsh/sessionHistory", {
       threadId,
       ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
@@ -19138,6 +19150,43 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     for (const key of [...this.historyPageCache.keys()]) {
       if (key.includes(marker)) this.historyPageCache.delete(key);
     }
+  }
+  /**
+   * Expose cache metadata to the current page's DevTools as
+   * `__dshCodexHistoryCacheStats()`. The function is metadata only: it never
+   * returns message text or event data, so the Session content stays private.
+   */
+  installHistoryCacheInspector() {
+    const scope = globalThis;
+    if (scope.window === void 0) return;
+    const inspector = () => this.historyCacheStats();
+    scope.window.__dshCodexHistoryCacheStats = inspector;
+    this.historyCacheInspector = inspector;
+  }
+  historyCacheStats() {
+    const now = Date.now();
+    return {
+      ttlMs: HISTORY_PAGE_CACHE_TTL_MS,
+      hits: this.historyPageHits,
+      misses: this.historyPageMisses,
+      entries: [...this.historyPageCache.entries()].map(([key, { page, at }]) => {
+        const records = page.records;
+        const firstSeq = records[0]?.event.seq;
+        const lastSeq = records.at(-1)?.event.seq;
+        return {
+          key,
+          ageMs: now - at,
+          expired: now - at >= HISTORY_PAGE_CACHE_TTL_MS,
+          sessionId: page.header.id,
+          records: records.length,
+          cursor: page.cursor,
+          nextTurn: page.nextTurn,
+          hasMore: page.hasMore,
+          ...firstSeq === void 0 ? {} : { firstSeq },
+          ...lastSeq === void 0 ? {} : { lastSeq }
+        };
+      })
+    };
   }
   cacheHistoryImages(history) {
     const sessionId = history.header.id;
