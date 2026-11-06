@@ -36,5 +36,10 @@ describe('CodexHistoryWindows', () => {
     expect(older.olderCursor).toBeUndefined()
     expect(older.turnNumbers.get('turn-1')).toBe(1)
     expect(older.history.nextTurn).toBe(31)
+
+    for (const history of [tail.history, older.history]) {
+      const seqs = history.entries.map(entry => entry.event.seq)
+      expect(seqs.every((seq, index) => index === 0 || seq === seqs[index - 1]! + 1)).toBe(true)
+    }
   })
 })

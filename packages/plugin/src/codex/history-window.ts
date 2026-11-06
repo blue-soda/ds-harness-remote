@@ -11,7 +11,11 @@ export interface CodexHistoryWindow {
   metadata: Record<string, unknown>
   /** turn id -> absolute 1-based turn number, built from the turn summary index. */
   turnNumbers: Map<string, number>
+  /** turn id -> first event seq of that turn, from the summary event-count index. */
+  turnStartSeq: Map<string, number>
   totalTurns: number
+  /** Total projected events across every indexed turn. */
+  totalEvents: number
   /** Full-item turns loaded for the current window. */
   loaded: Map<string, Record<string, unknown>>
   history: CodexNativeHistory
@@ -87,10 +91,11 @@ export class CodexHistoryWindows {
     const window: CodexHistoryWindow = {
       metadata,
       turnNumbers: index.numbers,
+      turnStartSeq: index.turnStartSeq,
       totalTurns: index.total,
+      totalEvents: index.totalEvents,
       loaded: new Map(),
       history: projectCodexNativeHistory({ ...metadata, turns: [] }, `codex:${threadId}`, 'legacy', {
-        stable: true,
         turnNumbers: index.numbers,
       }),
       ...(typeof metadata.updatedAt === 'number' ? { updatedAt: metadata.updatedAt } : {}),
@@ -107,9 +112,17 @@ export class CodexHistoryWindows {
     return window
   }
 
-  private async readTurnIndex(threadId: string): Promise<{ numbers: Map<string, number>; total: number; pages: number }> {
+  private async readTurnIndex(threadId: string): Promise<{
+    numbers: Map<string, number>
+    turnStartSeq: Map<string, number>
+    total: number
+    totalEvents: number
+    pages: number
+  }> {
     const numbers = new Map<string, number>()
+    const turnStartSeq = new Map<string, number>()
     let total = 0
+    let totalEvents = 0
     let pages = 0
     let cursor: string | undefined
     for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -120,11 +133,13 @@ export class CodexHistoryWindows {
         if (turnId === undefined || numbers.has(turnId)) continue
         total += 1
         numbers.set(turnId, total)
+        turnStartSeq.set(turnId, totalEvents)
+        totalEvents += projectCodexNativeHistory({ turns: [rawTurn] }, `codex:${threadId}`).entries.length
       }
       cursor = result.nextCursor
       if (cursor === undefined) break
     }
-    return { numbers, total, pages }
+    return { numbers, turnStartSeq, total, totalEvents, pages }
   }
 
   private async loadTail(threadId: string, window: CodexHistoryWindow): Promise<void> {
@@ -207,6 +222,8 @@ export class CodexHistoryWindows {
       if (!window.turnNumbers.has(turnId)) {
         window.totalTurns += 1
         window.turnNumbers.set(turnId, window.totalTurns)
+        window.turnStartSeq.set(turnId, window.totalEvents)
+        window.totalEvents += projectCodexNativeHistory({ turns: [turn] }, window.history.header.id).entries.length
       }
       window.loaded.set(turnId, turn)
     }
@@ -216,8 +233,11 @@ export class CodexHistoryWindows {
     const turns = [...window.loaded.entries()]
       .sort((left, right) => (window.turnNumbers.get(left[0]) ?? 0) - (window.turnNumbers.get(right[0]) ?? 0))
       .map(([, turn]) => turn)
+    const first = [...window.loaded.keys()]
+      .sort((left, right) => (window.turnNumbers.get(left) ?? 0) - (window.turnNumbers.get(right) ?? 0))[0]
+    const startSeq = first === undefined ? 0 : window.turnStartSeq.get(first) ?? 0
     const history = projectCodexNativeHistory({ ...window.metadata, turns }, `codex:${threadId}`, 'legacy', {
-      stable: true,
+      seq: startSeq,
       turnNumbers: window.turnNumbers,
     })
     history.nextTurn = window.totalTurns + 1

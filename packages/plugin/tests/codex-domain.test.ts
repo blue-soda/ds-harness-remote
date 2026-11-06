@@ -577,9 +577,9 @@ describe('CodexRemoteDomain', () => {
       method: 'dsh/sessionHistory',
       params: { threadId: 'allowed-thread', maxMessages: 1 },
     })
-    expect(tail).toMatchObject({ cursor: 4101, hasMore: true })
+    expect(tail).toMatchObject({ cursor: 5, hasMore: true })
     expect((tail as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
-      .toEqual([4099, 4100, 4101])
+      .toEqual([3, 4, 5])
     expect(app.calls.at(-1)).toEqual({
       method: 'thread/turns/list',
       params: { threadId: 'allowed-thread', limit: 25, sortDirection: 'desc', itemsView: 'full' },
@@ -590,10 +590,10 @@ describe('CodexRemoteDomain', () => {
 
     const older = await domain.call('connection-1', {
       method: 'dsh/sessionHistory',
-      params: { threadId: 'allowed-thread', beforeSeq: 4099, throughSeq: 4101, maxMessages: 1 },
+      params: { threadId: 'allowed-thread', beforeSeq: 3, throughSeq: 5, maxMessages: 1 },
     })
     expect((older as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
-      .toEqual([4098])
+      .toEqual([2])
     await domain.close()
   })
 

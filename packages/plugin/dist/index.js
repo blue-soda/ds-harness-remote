@@ -25095,10 +25095,11 @@ var CodexHistoryWindows = class {
     const window = {
       metadata,
       turnNumbers: index.numbers,
+      turnStartSeq: index.turnStartSeq,
       totalTurns: index.total,
+      totalEvents: index.totalEvents,
       loaded: /* @__PURE__ */ new Map(),
       history: projectCodexNativeHistory({ ...metadata, turns: [] }, `codex:${threadId}`, "legacy", {
-        stable: true,
         turnNumbers: index.numbers
       }),
       ...typeof metadata.updatedAt === "number" ? { updatedAt: metadata.updatedAt } : {},
@@ -25116,7 +25117,9 @@ var CodexHistoryWindows = class {
   }
   async readTurnIndex(threadId) {
     const numbers = /* @__PURE__ */ new Map();
+    const turnStartSeq = /* @__PURE__ */ new Map();
     let total = 0;
+    let totalEvents = 0;
     let pages = 0;
     let cursor2;
     for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -25127,11 +25130,13 @@ var CodexHistoryWindows = class {
         if (turnId === void 0 || numbers.has(turnId)) continue;
         total += 1;
         numbers.set(turnId, total);
+        turnStartSeq.set(turnId, totalEvents);
+        totalEvents += projectCodexNativeHistory({ turns: [rawTurn] }, `codex:${threadId}`).entries.length;
       }
       cursor2 = result.nextCursor;
       if (cursor2 === void 0) break;
     }
-    return { numbers, total, pages };
+    return { numbers, turnStartSeq, total, totalEvents, pages };
   }
   async loadTail(threadId, window) {
     let cursor2;
@@ -25206,14 +25211,18 @@ var CodexHistoryWindows = class {
       if (!window.turnNumbers.has(turnId)) {
         window.totalTurns += 1;
         window.turnNumbers.set(turnId, window.totalTurns);
+        window.turnStartSeq.set(turnId, window.totalEvents);
+        window.totalEvents += projectCodexNativeHistory({ turns: [turn] }, window.history.header.id).entries.length;
       }
       window.loaded.set(turnId, turn);
     }
   }
   project(threadId, window) {
     const turns = [...window.loaded.entries()].sort((left, right) => (window.turnNumbers.get(left[0]) ?? 0) - (window.turnNumbers.get(right[0]) ?? 0)).map(([, turn]) => turn);
+    const first = [...window.loaded.keys()].sort((left, right) => (window.turnNumbers.get(left) ?? 0) - (window.turnNumbers.get(right) ?? 0))[0];
+    const startSeq = first === void 0 ? 0 : window.turnStartSeq.get(first) ?? 0;
     const history = projectCodexNativeHistory({ ...window.metadata, turns }, `codex:${threadId}`, "legacy", {
-      stable: true,
+      seq: startSeq,
       turnNumbers: window.turnNumbers
     });
     history.nextTurn = window.totalTurns + 1;
