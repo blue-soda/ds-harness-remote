@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.9 - 2026-11-07
+
+- DSH 0.2.2's background-job panel works over Remote. 0.2.2 introduced the `job/list` and `job/follow` streams plus the `job/kill` call, but the Host's fixed Remote allowlist still stopped at the 0.2.0 endpoint set. The client therefore forwarded the job endpoints, received `METHOD_NOT_ALLOWED`, served `job/list` locally (one warning per call), and could not open the `job/follow` stream. All three job endpoints are now forwarded to the Host gateway, so the roster, live output and human kill work through Remote; the local fallback is no longer used for them when the Host supports them.
+- Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.9`.
+
 ## 0.5.8 - 2026-11-07
 
 - Codex history uses the same first-paint policy as DS. The 200-message clamp and the legacy `thread/read` fallback are gone; an opening or older page starts at the shared 50/30/20/12/6/3/1 ladder and is measured against the same secure budget. The Host indexes turn ids and event counts from the summary listing (no full items), then loads full items **tail-first**: a first open of a real 136-turn thread loads only 25 tail turns (50-message page, about 464 KB) rather than every turn, and older pages extend backwards from the oldest loaded turn. Before answering an older page the Host counts the messages still available before `beforeSeq` and loads more turns until the requested page can be filled; a click at a window boundary therefore returns 50 messages instead of a 2-message remainder. Seqs stay contiguous: the summary index records each turn's event count and a window projects from the absolute start of its oldest loaded turn, so the client journal never sees a gap between turns. A per-Thread window cache (16 Threads, five-minute metadata freshness) serves later opens and appends only turns newer than the cached newest; a rewrite or eviction rebuilds once. Logs: `codex history index/tail/older/page/cache hit/appended` with turn counts, chosen size and byte count.

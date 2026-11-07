@@ -41,6 +41,33 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
+  it('forwards the 0.2.2 job roster, follow and kill endpoints', async () => {
+    const open = vi.fn(async () => (async function* () {
+      yield { type: 'roster', jobs: [] }
+    })())
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { outcome: 'accepted' } }))
+    const bridge = new HarnessRemoteBridge(gateway({ open, dispatch }), vi.fn(async () => undefined))
+
+    await expect(bridge.openStream({
+      streamId: 'job-list-1',
+      endpoint: 'job/list',
+      payload: { args: { request: { sessionId: 'session-1' } } },
+    })).resolves.toEqual({ opened: true, streamId: 'job-list-1' })
+    await expect(bridge.openStream({
+      streamId: 'job-follow-1',
+      endpoint: 'job/follow',
+      payload: { args: { request: { sessionId: 'session-1', jobId: 'job-1' } } },
+    })).resolves.toEqual({ opened: true, streamId: 'job-follow-1' })
+    await expect(bridge.call({
+      endpoint: 'job/kill',
+      payload: { args: { request: { sessionId: 'session-1', jobId: 'job-1' } } },
+    })).resolves.toMatchObject({ ok: true })
+
+    expect(open).toHaveBeenCalledWith('job/list', { args: { request: { sessionId: 'session-1' } } }, expect.any(AbortSignal))
+    expect(open).toHaveBeenCalledWith('job/follow', { args: { request: { sessionId: 'session-1', jobId: 'job-1' } } }, expect.any(AbortSignal))
+    expect(dispatch).toHaveBeenCalledWith('job/kill', { args: { request: { sessionId: 'session-1', jobId: 'job-1' } } }, expect.any(AbortSignal))
+  })
+
   it('falls back to Host directory metadata for the v0.1.2-rc.1 native-only picker failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-remote-alpha-directory-'))
     await mkdir(join(root, 'project'))

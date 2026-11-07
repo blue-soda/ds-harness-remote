@@ -13543,7 +13543,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.8";
+var PLUGIN_VERSION = "0.5.9";
 
 // src/server-api.ts
 var ENABLED_QR_PROVIDERS = ["github"];
@@ -28779,6 +28779,9 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "goals/edit",
   "goals/pause",
   "goals/resume",
+  "job/follow",
+  "job/kill",
+  "job/list",
   "llm/discoverModels",
   "llm/listConfigurableProviders",
   "llm/listProviders",
