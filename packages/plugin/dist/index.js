@@ -20489,7 +20489,13 @@ function normalizeByteResult2(endpoint, result) {
 
 // src/typert-gateway-switch.ts
 var REMOTE_COMMAND_METHODS = ["execute", "list"];
-var LOCAL_ONLY_NAMESPACES = /* @__PURE__ */ new Set(["dynamicCordisRunner"]);
+var LOCAL_ONLY_NAMESPACES = /* @__PURE__ */ new Set([
+  "account",
+  "dynamicCordisRunner",
+  "remoteAccess",
+  "schedule",
+  "web"
+]);
 var LOCAL_FALLBACK_NAMESPACES = /* @__PURE__ */ new Set(["$events", "settings", "credentials", "dynamicCordisRunner"]);
 var PEER_GONE_CODES = /* @__PURE__ */ new Set([
   "TRANSPORT_CLOSED",
@@ -29048,11 +29054,13 @@ var HarnessRemoteBridge = class {
       if (REMOTE_HISTORY_STREAM_ENDPOINTS.has(params.endpoint)) {
         const opened = await this.openHistoryStream(params, nativePayload, controller.signal);
         void this.pump(params.streamId, opened.source, controller.signal, opened.frame);
+        this.logger?.debug("harness remote stream opened", { endpoint: params.endpoint, streamId: params.streamId });
         return { opened: true, streamId: params.streamId };
       }
       const source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, nativePayload, controller.signal);
       controller.signal.throwIfAborted();
       void this.pump(params.streamId, source, controller.signal);
+      this.logger?.debug("harness remote stream opened", { endpoint: params.endpoint, streamId: params.streamId });
       return { opened: true, streamId: params.streamId };
     } catch (error) {
       this.streams.delete(params.streamId);

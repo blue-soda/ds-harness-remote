@@ -23,6 +23,22 @@ describe('TypertGatewaySwitch', () => {
     expect(remoteInvoke).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps local-shell namespaces out of the remote carrier', async () => {
+    const localInvoke = vi.fn(async () => 'local')
+    const remoteInvoke = vi.fn(async () => 'remote')
+    const gateway: TypertGatewayLike = { invoke: localInvoke }
+    const target = new TypertGatewaySwitch(gateway)
+
+    target.install()
+    target.selectRemote(remoteInvoke)
+
+    for (const namespace of ['account', 'dynamicCordisRunner', 'remoteAccess', 'schedule', 'web']) {
+      await expect(gateway.invoke({ namespace, method: 'list', args: {} })).resolves.toBe('local')
+    }
+    expect(remoteInvoke).not.toHaveBeenCalled()
+    expect(localInvoke).toHaveBeenCalledTimes(5)
+  })
+
   it('returns an empty command catalog for legacy Hosts while forwarding execution', async () => {
     const localInvoke = vi.fn(async () => 'local')
     const remoteInvoke = vi.fn(async () => 'remote')

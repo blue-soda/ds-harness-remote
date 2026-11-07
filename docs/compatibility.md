@@ -55,5 +55,5 @@ after either upstream is upgraded are recorded in
 
 `0.5.8` changes no wire format: Codex history indexes turn ids and event counts without full items, loads full items tail-first on the shared 50-message ladder, keeps seqs contiguous, and reuses the last page in the client for 60 seconds. The optional `codex-history-cache-stats.json` diagnostics file is off by default and is enabled with `DSH_CODEX_HISTORY_STATS=1` in the client environment. Everything above still applies.
 
-`0.5.9` changes no wire format: it adds the DSH 0.2.2 `job/list` and `job/follow` streams and the `job/kill` call to the Host's Remote allowlist. Without them the client received `METHOD_NOT_ALLOWED`, served `job/list` locally and could not open `job/follow`; the job roster, live output and human kill now work over Remote. Everything above still applies.
+`0.5.9` changes no wire format: it adds the DSH 0.2.2 `job/list` and `job/follow` streams and the `job/kill` call to the Host's Remote allowlist, and keeps the Client-local `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` namespaces local instead of sending them to the Host and falling back with a warning. Without them the client served `job/list` locally and could not open `job/follow`; the job roster, live output and human kill now work over Remote. Everything above still applies.
 

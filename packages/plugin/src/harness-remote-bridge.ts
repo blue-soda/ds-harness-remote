@@ -445,12 +445,14 @@ export class HarnessRemoteBridge {
         // frame is buffered and published by the pump before the live tail.
         const opened = await this.openHistoryStream(params, nativePayload, controller.signal)
         void this.pump(params.streamId, opened.source, controller.signal, opened.frame)
+        this.logger?.debug('harness remote stream opened', { endpoint: params.endpoint, streamId: params.streamId })
         return { opened: true, streamId: params.streamId }
       }
       const source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
         ?? await this.gateway.open(params.endpoint, nativePayload, controller.signal)
       controller.signal.throwIfAborted()
       void this.pump(params.streamId, source, controller.signal)
+      this.logger?.debug('harness remote stream opened', { endpoint: params.endpoint, streamId: params.streamId })
       return { opened: true, streamId: params.streamId }
     } catch (error) {
       this.streams.delete(params.streamId)

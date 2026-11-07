@@ -48,7 +48,22 @@ interface RuntimeGateway extends TypertGatewayLike {
 }
 
 const REMOTE_COMMAND_METHODS = ['execute', 'list'] as const
-const LOCAL_ONLY_NAMESPACES = new Set(['dynamicCordisRunner'])
+/**
+ * Namespaces owned by the local shell, never by the selected Host.
+ *
+ * These describe this installation or this connection: its account, its local
+ * model/provider listing, the Remote control surface and local schedules. DSH
+ * 0.2.2 added several of them; sending them to the Host produced
+ * `METHOD_NOT_ALLOWED`, a local fallback and one warning per call. They must not
+ * touch the remote carrier at all.
+ */
+const LOCAL_ONLY_NAMESPACES = new Set([
+  'account',
+  'dynamicCordisRunner',
+  'remoteAccess',
+  'schedule',
+  'web',
+])
 
 /**
  * Namespaces the local shell keeps answering even when the peer is gone.

@@ -3,6 +3,7 @@
 ## 0.5.9 - 2026-11-07
 
 - DSH 0.2.2's background-job panel works over Remote. 0.2.2 introduced the `job/list` and `job/follow` streams plus the `job/kill` call, but the Host's fixed Remote allowlist still stopped at the 0.2.0 endpoint set. The client therefore forwarded the job endpoints, received `METHOD_NOT_ALLOWED`, served `job/list` locally (one warning per call), and could not open the `job/follow` stream. All three job endpoints are now forwarded to the Host gateway, so the roster, live output and human kill work through Remote; the local fallback is no longer used for them when the Host supports them.
+- 0.2.2 local-shell namespaces stay local. `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` describe the Client itself, but the switch asked the Host first; the Host correctly refused them and the client logged a local-fallback warning for each call. They are now in the local-only set, so they never reach the remote carrier and the warning spam is gone.
 - Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.5.9`.
 
 ## 0.5.8 - 2026-11-07
