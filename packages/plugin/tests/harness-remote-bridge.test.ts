@@ -41,6 +41,37 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
+  it('opts an existing Workspace in when its directory was deleted', async () => {
+    const open = vi.fn(async () => (async function* () {
+      yield {
+        type: 'baseline',
+        value: {
+          items: [{ id: 'ws-ely', path: 'C:\\Workspace\\ELY', title: 'ELY', sessionIds: [] }],
+        },
+      }
+    })())
+    const dispatch = vi.fn(async (endpoint: string) => endpoint === 'workspace/create'
+      ? {
+        ok: false as const,
+        error: {
+          code: 'workspace/invalid-path',
+          message: 'cannot create a Workspace at "C:\\\\Workspace\\\\ELY": ENOENT: no such file or directory, realpath \'C:\\\\Workspace\\\\ELY\'',
+          details: { path: 'C:\\Workspace\\ELY' },
+        },
+      }
+      : { ok: true as const, value: {} })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), vi.fn(async () => undefined))
+
+    await expect(bridge.call({
+      endpoint: 'workspace/create',
+      payload: { args: { request: { path: 'C:\\Workspace\\ELY' } } },
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { created: false, workspace: { id: 'ws-ely', path: 'C:\\Workspace\\ELY' } },
+    })
+    expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} }, expect.any(AbortSignal))
+  })
+
   it('forwards the 0.2.2 job roster, follow and kill endpoints', async () => {
     const open = vi.fn(async () => (async function* () {
       yield { type: 'roster', jobs: [] }

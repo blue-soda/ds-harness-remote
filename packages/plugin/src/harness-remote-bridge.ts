@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { HISTORY_PAGE_SIZES, historyPageSizes } from './history-policy.js'
 import type {
   HarnessApiTransferChunkParams,
@@ -285,6 +285,10 @@ export class HarnessRemoteBridge {
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
+      if (params.endpoint === 'workspace/create' && isInvalidWorkspacePath(result)) {
+        const recovered = await this.recoverWorkspaceCreate(params.payload, signal)
+        if (recovered !== undefined) return recovered
+      }
       this.logger?.debug('harness remote call ok', {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
@@ -292,6 +296,10 @@ export class HarnessRemoteBridge {
       return reservation === undefined ? result : this.terminal.result(params.endpoint, params.payload, result, reservation)
     } catch (error) {
       if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
+      if (params.endpoint === 'workspace/create' && isInvalidWorkspacePath(error)) {
+        const recovered = await this.recoverWorkspaceCreate(params.payload, signal)
+        if (recovered !== undefined) return recovered
+      }
       if (params.endpoint === 'directoryPicker/list') {
         const result = await this.directoryList(params.payload, signal)
         this.logger?.debug('harness remote call ok', {
@@ -317,6 +325,46 @@ export class HarnessRemoteBridge {
     const args = requestArgs(payload)
     const params = directoryListSchema.parse(args)
     return { ok: true, value: await listRemoteDirectory(params.path, signal) }
+  }
+
+  /**
+   * Resolve an existing Workspace when `workspace/create` cannot realpath a
+   * deleted directory.
+   *
+   * DSH keeps a registered Workspace open after its directory disappears, but
+   * `workspace/create` canonicalizes the path first and fails with ENOENT. The
+   * Client can still open the Workspace it sees in the Host's list; resolve that
+   * list by lexical path and return the existing row instead of failing.
+   * @param payload - workspace/create request payload.
+   * @param signal - call lifetime.
+   * @returns an existing-workspace result, or undefined when none matches.
+   */
+  private async recoverWorkspaceCreate(payload: unknown, signal: AbortSignal): Promise<TypertRpcResult | undefined> {
+    const path = requestArgs(payload).path
+    if (typeof path !== 'string' || path === '') return undefined
+    let source: AsyncIterable<unknown>
+    try {
+      source = await this.gateway.open('workspace/follow', { args: {} }, signal)
+    } catch {
+      return undefined
+    }
+    const iterator = source[Symbol.asyncIterator]()
+    let first: IteratorResult<unknown>
+    try {
+      first = await iterator.next()
+    } catch {
+      return undefined
+    } finally {
+      await iterator.return?.().catch(() => undefined)
+    }
+    const frame = isRecord(first.value) ? first.value : {}
+    const baseline = isRecord(frame.value) ? frame.value : frame
+    const items = Array.isArray(baseline.items) ? baseline.items : []
+    const target = workspacePathIdentity(path)
+    const workspace = items.find(item => isRecord(item)
+      && typeof item.path === 'string'
+      && workspacePathIdentity(item.path) === target)
+    return workspace === undefined ? undefined : { ok: true, value: { workspace, created: false } }
   }
 
   openTransfer(input: unknown): { opened: true; transferId: string } {
@@ -445,14 +493,12 @@ export class HarnessRemoteBridge {
         // frame is buffered and published by the pump before the live tail.
         const opened = await this.openHistoryStream(params, nativePayload, controller.signal)
         void this.pump(params.streamId, opened.source, controller.signal, opened.frame)
-        this.logger?.debug('harness remote stream opened', { endpoint: params.endpoint, streamId: params.streamId })
         return { opened: true, streamId: params.streamId }
       }
       const source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
         ?? await this.gateway.open(params.endpoint, nativePayload, controller.signal)
       controller.signal.throwIfAborted()
       void this.pump(params.streamId, source, controller.signal)
-      this.logger?.debug('harness remote stream opened', { endpoint: params.endpoint, streamId: params.streamId })
       return { opened: true, streamId: params.streamId }
     } catch (error) {
       this.streams.delete(params.streamId)
@@ -1032,4 +1078,23 @@ function record(value: unknown): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The canonical comparison spelling for a Workspace path (Windows is case-insensitive). */
+function workspacePathIdentity(path: string): string {
+  const normalized = resolve(path).replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+/**
+ * Whether a `workspace/create` result/error means the directory no longer
+ * realpaths while a registered Workspace may still own that path.
+ */
+function isInvalidWorkspacePath(input: unknown): boolean {
+  const error = isRecord(input) && input.ok === false && isRecord(input.error) ? input.error : input
+  if (!isRecord(error)) return false
+  const code = typeof error.code === 'string' ? error.code : ''
+  const message = typeof error.message === 'string' ? error.message : ''
+  return code === 'workspace/invalid-path'
+    || (message.includes('cannot create a Workspace at') && message.includes('ENOENT'))
 }

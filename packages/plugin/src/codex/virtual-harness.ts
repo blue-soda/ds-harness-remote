@@ -1723,7 +1723,6 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     if (scope.window !== undefined) scope.window.__dshCodexHistoryCacheStats = inspector
     this.historyCacheInspector = inspector
     this.publishHistoryCacheStats()
-    scope.console?.info?.('[dsh-remote] codex history cache inspector ready; call __dshCodexHistoryCacheStats()')
   }
 
   private publishHistoryCacheStats(): void {
@@ -1766,6 +1765,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private logHistoryCache(event: 'hit' | 'miss', threadId: string, page: { beforeSeq?: number; maxMessages?: number }, records?: number, ageMs?: number): void {
+    if (!codexHistoryStatsFileEnabled()) return
     const scope = globalThis as unknown as { console?: Console }
     scope.console?.info?.('[dsh-remote] codex history page cache ' + event, {
       threadId,

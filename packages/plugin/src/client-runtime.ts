@@ -2070,7 +2070,6 @@ export class ClientModeRuntime {
     globalScope.__dshCodexHistoryCacheStats = inspect
     if (scope.window !== undefined) scope.window.__dshCodexHistoryCacheStats = inspect
     this.writeCodexHistoryCacheStats(inspect())
-    scope.console?.info?.('[dsh-remote] codex history cache inspector ready (client runtime)')
   }
 
   private writeCodexHistoryCacheStats(stats: CodexHistoryCacheStats): void {
