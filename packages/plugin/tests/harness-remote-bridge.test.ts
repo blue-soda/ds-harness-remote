@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
@@ -39,6 +39,31 @@ describe('HarnessRemoteBridge', () => {
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
     }
+  })
+
+  it('denies native workspace reads that escape the Session workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-remote-workspace-'))
+    const outside = join(root, '..', 'outside.txt')
+    await writeFile(join(root, 'inside.txt'), 'inside')
+    await writeFile(outside, 'outside')
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { content: 'ok' } }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, undefined, undefined, undefined, () => root)
+
+    await expect(bridge.call({
+      endpoint: 'workspaceFiles/read',
+      payload: { args: { sessionId: 'session-1', path: '../outside.txt' } },
+    })).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+    expect(dispatch).not.toHaveBeenCalled()
+
+    await expect(bridge.call({
+      endpoint: 'workspaceFiles/read',
+      payload: { args: { sessionId: 'session-1', path: 'inside.txt' } },
+    })).resolves.toMatchObject({ ok: true })
+    expect(dispatch).toHaveBeenCalledWith('workspaceFiles/read', expect.objectContaining({
+      args: expect.objectContaining({ path: 'inside.txt' }),
+    }), expect.any(AbortSignal))
+    await rm(root, { recursive: true, force: true })
+    await rm(outside, { force: true })
   })
 
   it('opts an existing Workspace in when its directory was deleted', async () => {

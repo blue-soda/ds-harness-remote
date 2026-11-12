@@ -22,6 +22,15 @@ describe('IdentityStore', () => {
     }
   })
 
+  it('serializes concurrent first-use identity creation', async () => {
+    const directory = await temporaryDirectory()
+    const stores = Array.from({ length: 4 }, () => new IdentityStore({ directory }))
+    const identities = await Promise.all(stores.map((store, index) => store.loadOrCreate(`Host ${index}`)))
+    expect(new Set(identities.map(identity => identity.deviceId)).size).toBe(1)
+    expect(new Set(identities.map(identity => identity.publicKey)).size).toBe(1)
+    expect(new Set(identities.map(identity => identity.privateKey)).size).toBe(1)
+  })
+
   it('persists trusted peers without private material', async () => {
     const hostDirectory = await temporaryDirectory()
     const clientDirectory = await temporaryDirectory()

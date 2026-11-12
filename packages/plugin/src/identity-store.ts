@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
@@ -76,6 +76,19 @@ export class IdentityStore {
   async loadOrCreate(deviceName: string): Promise<HostIdentity> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
     await chmod(this.directory, 0o700)
+    // Two DSH starts (or a Host and Client in one process) can race between
+    // "no device.json" and the first write. Serialize the whole read-create
+    // sequence so both callers observe the same key pair instead of one
+    // silently replacing the other's identity.
+    const release = await this.acquireCreationLock()
+    try {
+      return await this.loadOrCreateLocked(deviceName)
+    } finally {
+      await release()
+    }
+  }
+
+  private async loadOrCreateLocked(deviceName: string): Promise<HostIdentity> {
     const devicePath = join(this.directory, 'device.json')
     const keyPath = join(this.directory, 'device.key')
     const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
@@ -108,6 +121,40 @@ export class IdentityStore {
     } catch (error: unknown) {
       if (error instanceof IdentityInvalidError) throw error
       throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error)}`)
+    }
+  }
+
+  private async acquireCreationLock(): Promise<() => Promise<void>> {
+    const lockPath = join(this.directory, '.identity.lock')
+    const deadline = Date.now() + 30_000
+    for (;;) {
+      try {
+        const handle = await open(lockPath, 'wx', 0o600)
+        try {
+          await handle.writeFile(`${process.pid}\n`)
+        } finally {
+          await handle.close()
+        }
+        return async () => { await rm(lockPath, { force: true }) }
+      } catch (error: unknown) {
+        if (!isNodeError(error) || error.code !== 'EEXIST') throw error
+        // A crashed process must not lock the identity forever. The lock is
+        // only held for a few filesystem writes, so a minute is already stale.
+        try {
+          const info = await stat(lockPath)
+          if (Date.now() - info.mtimeMs > 60_000) {
+            await rm(lockPath, { force: true })
+            continue
+          }
+        } catch (statError: unknown) {
+          if (isNodeError(statError) && statError.code === 'ENOENT') continue
+          throw statError
+        }
+        if (Date.now() >= deadline) {
+          throw new IdentityInvalidError('device identity creation is locked by another DSH process')
+        }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
     }
   }
 

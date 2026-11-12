@@ -1,5 +1,10 @@
 ## English
 
+- **Native workspace reads stay inside the workspace.** The Remote bridge rejects `..`, client absolute paths, symlinked ancestors and symlinked targets, re-checks the canonical target, caps `readAll` at 4 MiB, and rewrites the locator to a workspace-relative path. Reports that native file endpoints could read outside the workspace no longer apply to this bridge.
+- **Concurrent first-use identity creation is serialized.** An exclusive identity lock stops two DSH starts from generating different key pairs and leaving a mismatched device identity; stale locks are reclaimed after a minute.
+- **Codex writer leases are released on terminal Thread status.** A failed or interrupted turn that only reports `thread/status/changed` no longer leaves the next Prompt reporting the Thread as occupied; approvals from that Thread are declined too. Genuine active-writer conflicts with the Host Codex app are still authoritative.
+- **Windows Codex discovery falls back across builds.** Every installed Codex desktop build is tried newest-first instead of only the newest.
+- **The card button now says Codex设置 / Codex Settings.**
 - **DSH 0.2.2 background jobs work over Remote.** 0.2.2 added the `job/list` and `job/follow` streams and the `job/kill` call, but the Host Remote allowlist still ended at the 0.2.0 set. The client received `METHOD_NOT_ALLOWED`, served `job/list` locally (warning per call), and could not open the `job/follow` stream. All three endpoints are forwarded to the Host again, so the job roster, live output and human kill work through Remote.
 - **0.2.2 local-shell endpoints stay local.** `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` describe the Client; they no longer take a remote round trip just to be refused and fall back with a warning.
 - **A Host Workspace whose directory was deleted still opens from the Client.** If `workspace/create` hits `ENOENT`, the Host returns the existing Workspace row from its list by lexical path, so the Client opens the Workspace the Host itself can open.
@@ -18,6 +23,11 @@
 
 ## 中文
 
+- **原生工作区文件读取不再越界。** Remote bridge 在派发前拒绝客户端绝对路径、`..`、符号链接祖先和符号链接目标，重新校验 canonical target，把 `readAll` 限制在 4 MiB，并把 locator 改写为工作区相对路径；原生文件端点读到工作区外的问题不再适用于这个 bridge。
+- **首次身份创建已串行化。** 排他身份锁阻止两个 DSH 启动各自生成不同密钥对、留下公私钥不匹配的设备身份；崩溃遗留锁一分钟后再回收。
+- **Codex 在 Thread 终态时释放 writer lease。** 只发 `thread/status/changed` 的失败/中断 turn 不再让下一次 Prompt 报“会话被占用”，该 Thread 的审批也会被拒绝；Host Codex 应用真的持有 active writer 时仍然以 Codex 为准。
+- **Windows Codex 发现会跨 build 回退。** 按新到旧尝试所有已安装的 Codex desktop build，而不是只试最新一个。
+- **卡片按钮文案改为 Codex设置 / Codex Settings。**
 - **DSH 0.2.2 的后台任务面板可以通过 Remote 使用。** 0.2.2 新增了 `job/list`、`job/follow` 两个 stream 和 `job/kill` 调用，但 Host 的 Remote 白名单仍停在 0.2.0 的端点集合。客户端把 job 端点转发过去后收到 `METHOD_NOT_ALLOWED`，`job/list` 退回本地并每调用一次刷一条 warning，`job/follow` stream 也打不开。现在三个 job 端点都会转发到 Host gateway，任务列表、实时输出和人工终止都能远程使用。
 - **0.2.2 的本地 shell 端点不再绕远端。** `account/*`、`web/*`、`remoteAccess/*`、`schedule/*` 描述的是 Client 自身；它们不再先发给 Host、被拒绝后再本地兜底并打印 warning。
 - **Host 工作区目录被删除后，Client 仍能打开它。** `workspace/create` 遇到 `ENOENT` 时，Host 会按字面路径从工作区列表返回已有条目，Client 因此能打开 Host 自己仍能打开的工作区。

@@ -777,6 +777,19 @@ export class CodexRemoteDomain {
     }
     if (message.method === 'thread/closed' && threadId !== undefined) this.permissionPresets.delete(threadId)
     if (message.method === 'turn/completed' && threadId !== undefined) this.turnOwners.delete(threadId)
+    if (message.method === 'thread/status/changed' && threadId !== undefined
+      && isTerminalThreadStatus(message.params)) {
+      // App Server can report a failed/interrupted turn only as a terminal
+      // Thread status, without turn/completed. Holding the Host-side writer
+      // lease after that would make the next Client look "occupied" forever.
+      this.turnOwners.delete(threadId)
+      for (const [handle, approval] of this.approvals) {
+        if (approval.threadId !== threadId) continue
+        this.approvals.delete(handle)
+        void this.appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
+      }
+      this.scheduleApprovalExpiry()
+    }
     if (message.method === 'turn/started' && threadId !== undefined) {
       const owner = this.turnOwners.get(threadId)
       const turnId = extractTurnId(message.params)
@@ -1329,8 +1342,7 @@ function bundledWindowsCodexAt(localAppData: string): string[] {
       .filter(candidate => existsSync(candidate))
       .map(candidate => ({ candidate, modified: statSync(candidate).mtimeMs }))
       .sort((left, right) => right.modified - left.modified)
-    const candidate = newest[0]?.candidate
-    return candidate === undefined ? [] : [candidate]
+    return newest.map(entry => entry.candidate)
   } catch {
     return []
   }
@@ -1682,4 +1694,9 @@ function maskId(value: string): string {
 
 function isActiveWriterMessage(message: string): boolean {
   return message.toLowerCase().includes('active writer')
+}
+
+function isTerminalThreadStatus(params: unknown): boolean {
+  if (!isRecord(params) || !isRecord(params.status) || typeof params.status.type !== 'string') return false
+  return params.status.type !== 'active'
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-11-12
+
+- Native workspace reads are now proven inside the Session workspace before they reach DSH. The Remote bridge rejects client-controlled absolute paths, `..` traversal, symlinked ancestors and symlinked targets, re-checks the canonical target with `realpath`, caps `workspaceFiles/readAll` at 4 MiB and rewrites the locator to a workspace-relative path. `workspaceFiles/list` is guarded the same way. This closes the class of Host file reads that could escape the workspace through a native `workspaceFiles/*` call; a Session whose cwd no longer exists keeps the old Host error path instead of being misclassified.
+- First-use identity creation is serialized with an exclusive `.identity.lock` under the Remote storage directory. Two DSH starts (or two identity stores in one process) can no longer both observe "no device.json", generate different key pairs and leave the Host with a public key that does not match its private key. A crashed lock older than one minute is reclaimed; a live lock waits up to 30 seconds.
+- Codex releases its Host-side writer lease when App Server reports a terminal `thread/status/changed` (`idle`, `failed`, `interrupted`, ...), not only on `turn/completed`. The same transition declines approvals that belonged to the finished Thread. A failed or interrupted turn no longer leaves the next Remote Prompt reporting `CODEX_TURN_OWNED` / `CODEX_THREAD_BUSY` as "occupied"; Codex's own active-writer lock is still respected when the Host Codex app is genuinely writing.
+- Windows Codex discovery now returns every installed build under `%LOCALAPPDATA%\OpenAI\Codex\bin` (newest first) instead of only the newest one, so a broken newest build falls through to the previous Codex desktop build before the bare `codex` command.
+- The Remote card's Codex button now reads **Codex设置** (English: **Codex Settings**), matching the settings panel it opens.
+- No wire-format change. Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.6.0`.
+
 ## 0.5.9 - 2026-11-07
 
 - DSH 0.2.2's background-job panel works over Remote. 0.2.2 introduced the `job/list` and `job/follow` streams plus the `job/kill` call, but the Host's fixed Remote allowlist still stopped at the 0.2.0 endpoint set. The client therefore forwarded the job endpoints, received `METHOD_NOT_ALLOWED`, served `job/list` locally (one warning per call), and could not open the `job/follow` stream. All three job endpoints are now forwarded to the Host gateway, so the roster, live output and human kill work through Remote; the local fallback is no longer used for them when the Host supports them.

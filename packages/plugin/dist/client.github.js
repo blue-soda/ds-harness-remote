@@ -199,6 +199,7 @@
     serverUrlHint: "HTTPS origin used for account authorization and encrypted relay.",
     serverSaved: "Server address saved. Restart DSH to apply it.",
     codexRemote: "Codex Remote",
+    codexSettings: "Codex Settings",
     codexStatusLine: "Current state: {state}",
     codexControlAllow: "Allow other users to control Codex on this device",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
@@ -473,6 +474,7 @@
     serverUrlHint: "\u7528\u4E8E\u8D26\u53F7\u6388\u6743\u548C\u52A0\u5BC6\u4E2D\u7EE7\u7684 HTTPS \u5730\u5740\u3002",
     serverSaved: "Server \u5730\u5740\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     codexRemote: "Codex Remote",
+    codexSettings: "Codex\u8BBE\u7F6E",
     codexStatusLine: "\u5F53\u524D\u72B6\u6001\uFF1A{state}",
     codexControlAllow: "\u5141\u8BB8\u5176\u4ED6\u7528\u6237\u63A7\u5236\u672C\u8BBE\u5907Codex",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
@@ -1994,10 +1996,10 @@
                             // Match the "allow control" label exactly: 12px/18px in the secondary label colour, so it
                             // reads as the same kind of control instead of a page-level action.
                             style: { fontWeight: "normal", fontSize: "12px", lineHeight: "18px", height: "auto", minWidth: "0", padding: "0 4px", color: "var(--dsw-alias-label-secondary)" },
-                            title: t("codexRemote"),
-                            "aria-label": t("codexRemote"),
+                            title: t("codexSettings"),
+                            "aria-label": t("codexSettings"),
                             onClick: () => setCodexOpen(!0)
-                          }, t("codexRemote"))
+                          }, t("codexSettings"))
                         ),
                         connectedMenu
                       )

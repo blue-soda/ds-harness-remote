@@ -366,6 +366,7 @@ const en = {
   serverUrlHint: 'HTTPS origin used for account authorization and encrypted relay.',
   serverSaved: 'Server address saved. Restart DSH to apply it.',
   codexRemote: 'Codex Remote',
+  codexSettings: 'Codex Settings',
   codexStatusLine: 'Current state: {state}',
   codexControlAllow: 'Allow other users to control Codex on this device',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
@@ -643,6 +644,7 @@ const zh: Record<keyof typeof en, string> = {
   serverUrlHint: '用于账号授权和加密中继的 HTTPS 地址。',
   serverSaved: 'Server 地址已保存，重启 DSH 后生效。',
   codexRemote: 'Codex Remote',
+  codexSettings: 'Codex设置',
   codexStatusLine: '当前状态：{state}',
   codexControlAllow: '允许其他用户控制本设备Codex',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
@@ -2755,10 +2757,10 @@ for (let attempt = 0; attempt < 10; attempt++) {
                           // Match the "allow control" label exactly: 12px/18px in the secondary label colour, so it
                           // reads as the same kind of control instead of a page-level action.
                           style: { fontWeight: 'normal', fontSize: '12px', lineHeight: '18px', height: 'auto', minWidth: '0', padding: '0 4px', color: 'var(--dsw-alias-label-secondary)' },
-                          title: t('codexRemote'),
-                          'aria-label': t('codexRemote'),
+                          title: t('codexSettings'),
+                          'aria-label': t('codexSettings'),
                           onClick: () => setCodexOpen(true),
-                        }, t('codexRemote'))),
+                        }, t('codexSettings'))),
                       connectedMenu)),
         codexOpen ? React.createElement(CodexConnectionDetails, {
           control: props.control,

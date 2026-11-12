@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, realpath, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { HISTORY_PAGE_SIZES, historyPageSizes } from './history-policy.js'
 import type {
   HarnessApiTransferChunkParams,
@@ -124,6 +125,9 @@ const RESPONSE_ENVELOPE_BYTES = 8 * 1024
  */
 /** Workspace-file endpoints whose locator the Host resolves against the Session header cwd. */
 const WORKSPACE_FILE_ENDPOINTS = new Set(['workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/list'])
+/** Native reads that must be proven inside the Session workspace before dispatch. */
+const WORKSPACE_FILE_READ_ENDPOINTS = new Set(['workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll', 'workspaceFiles/list'])
+const MAX_WORKSPACE_READ_BYTES = 4 * 1024 * 1024
 /** Largest window one page may ask for; the ladder's first step is the cap. */
 /** Unary endpoints whose single page has to fit in one secure message. */
 const REMOTE_HISTORY_CALL_ENDPOINTS = new Set(['session/page', 'session/history'])
@@ -277,11 +281,14 @@ export class HarnessRemoteBridge {
     const signal = AbortSignal.timeout(60_000)
     try {
       const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      const guardedPayload = this.sessionHeaderCwd !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)
+        ? await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
+        : nativePayload
       const nativeResult = REMOTE_HISTORY_CALL_ENDPOINTS.has(params.endpoint)
-        ? await this.dispatchHistoryPage(params.endpoint, nativePayload, signal)
+        ? await this.dispatchHistoryPage(params.endpoint, guardedPayload, signal)
         : params.endpoint === 'commands/execute'
           ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-          : await this.dispatchWorkspaceFile(params.endpoint, nativePayload, signal)
+          : await this.dispatchWorkspaceFile(params.endpoint, guardedPayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -325,6 +332,115 @@ export class HarnessRemoteBridge {
     const args = requestArgs(payload)
     const params = directoryListSchema.parse(args)
     return { ok: true, value: await listRemoteDirectory(params.path, signal) }
+  }
+
+  /**
+   * Prove a native workspace read stays inside the Session's workspace.
+   *
+   * DSH's workspace-file endpoints are also reachable from the local UI, but
+   * this bridge is the trust boundary for a remote peer: a client-controlled
+   * absolute path, `..`, or symlink must never leave the Session cwd.
+   * @param endpoint - allowlisted native workspace read endpoint.
+   * @param payload - original endpoint payload.
+   * @param signal - call lifetime.
+   * @returns the payload with a canonical, workspace-relative locator.
+   */
+  private async assertNativeWorkspaceFileCall(endpoint: string, payload: unknown, signal: AbortSignal): Promise<unknown> {
+    const rootPayload = isRecord(payload) ? payload : {}
+    const args = requestArgs(payload)
+    const sessionId = typeof args.workspaceFileScopeId === 'string'
+      ? args.workspaceFileScopeId
+      : typeof args.sessionId === 'string'
+        ? args.sessionId
+        : typeof args.agentId === 'string' ? args.agentId : undefined
+    if (sessionId === undefined) {
+      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
+    }
+    const cwd = this.sessionHeaderCwd?.(sessionId)
+    if (cwd === undefined) throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+    let root: string
+    try {
+      root = await realpath(cwd)
+      if (!(await stat(root)).isDirectory()) throw new Error('not a directory')
+    } catch {
+      // Older Hosts and synthetic/test sessions may name a cwd that no longer
+      // exists. There is no workspace to prove containment against; leave the
+      // original payload to the Host so its own error path stays authoritative.
+      return payload
+    }
+    signal.throwIfAborted()
+
+    const options = isRecord(args.options) ? args.options : undefined
+    const rawBaseFile = options !== undefined && 'baseFile' in options ? options.baseFile : args.baseFile
+    if (rawBaseFile !== undefined && typeof rawBaseFile !== 'string') {
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    }
+    const path = typeof args.path === 'string' ? args.path : '.'
+    if (rawBaseFile !== undefined) {
+      const baseCandidate = isAbsolute(rawBaseFile) ? resolve(rawBaseFile) : resolve(root, rawBaseFile)
+      await this.verifyWorkspacePathContainment(root, baseCandidate, 'workspaceFiles/stat')
+      const target = isAbsolute(path) ? resolve(path) : resolve(dirname(baseCandidate), path)
+      await this.verifyWorkspacePathContainment(root, target, endpoint)
+      // Keep DSH's baseFile-relative spelling; both the base and the target
+      // have now been proven to canonicalize inside the Session workspace.
+      return payload
+    }
+    const safeRel = await this.verifyWorkspacePathContainment(root, path, endpoint)
+    const nextArgs: Record<string, unknown> = isRecord(rootPayload.args)
+      ? { ...rootPayload.args, path: safeRel }
+      : { ...rootPayload, path: safeRel }
+    return isRecord(rootPayload.args) ? { ...rootPayload, args: nextArgs } : nextArgs
+  }
+
+  private async verifyWorkspacePathContainment(root: string, path: string, endpoint: string): Promise<string> {
+    const candidate = isAbsolute(path) ? resolve(path) : resolve(root, path)
+    if (process.platform === 'win32' && parse(root).root.toLowerCase() !== parse(candidate).root.toLowerCase()) {
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    }
+    const relativeToRoot = relative(root, candidate)
+    if (isPathOutside(relativeToRoot)) {
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    }
+
+    try {
+      const rootInfo = await lstat(root)
+      if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The workspace root is invalid or a symlink.')
+      }
+      const segments = relativeToRoot.split(sep).filter(segment => segment.length > 0 && segment !== '.')
+      let current = root
+      for (const segment of segments.slice(0, -1)) {
+        current = join(current, segment)
+        if (isPathOutside(relative(root, current))) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        }
+        const info = await lstat(current)
+        if (info.isSymbolicLink() || !info.isDirectory()) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'An ancestor directory is invalid or a symlink.')
+        }
+      }
+      const target = await lstat(candidate)
+      if (target.isSymbolicLink()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+      const canonical = await realpath(candidate)
+      if (isPathOutside(relative(root, canonical))) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      const info = await stat(canonical)
+      const directoryAllowed = endpoint === 'workspaceFiles/stat' || endpoint === 'workspaceFiles/list'
+      if (!directoryAllowed && !info.isFile()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+      if (endpoint === 'workspaceFiles/readAll' && info.size > MAX_WORKSPACE_READ_BYTES) {
+        throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+      }
+      const safeRel = relativeToRoot === '' ? '.' : relativeToRoot
+      return process.platform === 'win32' ? safeRel.replaceAll('\\', '/') : safeRel
+    } catch (error) {
+      if (error instanceof RpcError) throw error
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.')
+    }
   }
 
   /**
@@ -1078,6 +1194,11 @@ function record(value: unknown): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** True when a relative path escapes its root. */
+function isPathOutside(relativePath: string): boolean {
+  return relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)
 }
 
 /** The canonical comparison spelling for a Workspace path (Windows is case-insensitive). */

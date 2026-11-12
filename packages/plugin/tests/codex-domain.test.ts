@@ -53,7 +53,7 @@ describe('CodexRemoteDomain', () => {
     await utimes(newer, new Date(2_000_000), new Date(2_000_000))
 
     const candidates = codexBinaryCandidates('codex', 'win32', home, join(home, 'no-local-app-data'))
-    expect(candidates[0]).toBe(newer)
+    expect(candidates.slice(0, 2)).toEqual([newer, older])
     expect(candidates.at(-1)).toBe('codex')
     // An explicit binary is still used exactly as configured.
     expect(codexBinaryCandidates('C:/custom/codex.exe', 'win32', home, join(home, 'no-local-app-data'))).toEqual(['C:/custom/codex.exe'])
@@ -748,6 +748,28 @@ describe('CodexRemoteDomain', () => {
 
     await peerOne.closeAll()
     await peerReplacement.closeAll()
+    await domain.close()
+  })
+
+  it('releases the writer lease when App Server reports a terminal thread status', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    await domain.call('connection-1', {
+      method: 'turn/start',
+      params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Run tests' }] },
+    })
+    app.emit({
+      kind: 'notification',
+      method: 'thread/status/changed',
+      params: { threadId: 'allowed-thread', status: { type: 'idle' } },
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await expect(domain.call('connection-2', {
+      method: 'turn/start',
+      params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Continue' }] },
+    })).resolves.toBeDefined()
     await domain.close()
   })
 

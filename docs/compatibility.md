@@ -57,3 +57,5 @@ after either upstream is upgraded are recorded in
 
 `0.5.9` changes no wire format: it adds the DSH 0.2.2 `job/list` and `job/follow` streams and the `job/kill` call to the Host's Remote allowlist, keeps the Client-local `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` namespaces local instead of sending them to the Host and falling back with a warning, and resolves an existing Workspace by lexical path when `workspace/create` hits ENOENT for a deleted directory. Without them the client served `job/list` locally and could not open `job/follow`, and a Workspace whose directory disappeared was visible but not openable. The job roster, live output and human kill now work over Remote; the same registered Workspace the Host can open now opens from the Client. Everything above still applies.
 
+`0.6.0` changes no wire format. It closes native workspace-file reads that could escape the Session workspace, serializes first-use identity creation, releases Codex writer leases on terminal Thread status, and tries every Windows Codex desktop build newest-first. The card's Codex entry is renamed to **Codex Settings**; the protocol and endpoint set are unchanged.
+
