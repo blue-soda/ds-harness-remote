@@ -8,7 +8,6 @@
 - **The Remote dialog is no longer trapped in the mobile sidebar.** It renders through a body portal, so the new DSH mobile drawer's `transform` cannot turn the fixed backdrop into a box inside the navigation column.
 - **The Host row is vertically centred.** 主机, 允许控制设备, the switch, Codex设置 and the connected count now share one 24px line box. In portrait the heading column stretches, so the count stays right-aligned like it is in landscape.
 - **The sidebar 退出 link disappears after the final fallback.** It now appears only while the Client is remote or still reconnecting; once the reconnect ladder gives up and the header is gone, the stale exit control goes with it.
-- **Self-hosted account/password Hosts survive DSH sign-out reconciliation.** Only a DeepSeek-backed Server authorization follows DSH's DeepSeek session; a Host authorized with a self-hosted Server account or registration code stays online when that DSH profile has no DeepSeek session.
 - **DSH 0.2.2 background jobs work over Remote.** 0.2.2 added the `job/list` and `job/follow` streams and the `job/kill` call, but the Host Remote allowlist still ended at the 0.2.0 set. The client received `METHOD_NOT_ALLOWED`, served `job/list` locally (warning per call), and could not open the `job/follow` stream. All three endpoints are forwarded to the Host again, so the job roster, live output and human kill work through Remote.
 - **0.2.2 local-shell endpoints stay local.** `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` describe the Client; they no longer take a remote round trip just to be refused and fall back with a warning.
 - **A Host Workspace whose directory was deleted still opens from the Client.** If `workspace/create` hits `ENOENT`, the Host returns the existing Workspace row from its list by lexical path, so the Client opens the Workspace the Host itself can open.
@@ -35,7 +34,6 @@
 - **Remote 弹窗不再被移动端侧栏困住。** 新版 DSH 移动端的抽屉带有 `transform`，会把 fixed backdrop 的包含块变成导航栏，弹窗只剩左侧一条。现在通过 body portal 渲染，脱离 transform 祖先；缺少 `react-dom` 或 `document.body` 时仍回退为内联渲染。
 - **主机这一行已垂直居中。** 主机、允许控制设备、开关、Codex设置和已连接数量统一使用 24px 行盒；竖屏时标题列会撑满，连接数量仍然贴在最右侧，与横屏一致。
 - **侧栏“退出”在最终回退后消失。** 现在只在远程中或仍在重连时显示；重连阶梯放弃、顶部状态已消失后，残留的退出按钮也一并消失。
-- **自部署账号/密码授权的 Host 不再被 DSH 登出联动清掉。** 只有 DeepSeek 授权的连接才跟随 DSH 的 DeepSeek 会话；账号或注册码授权的 Host 在没有 DeepSeek 会话的 DSH profile 中仍保持在线。
 - **DSH 0.2.2 的后台任务面板可以通过 Remote 使用。** 0.2.2 新增了 `job/list`、`job/follow` 两个 stream 和 `job/kill` 调用，但 Host 的 Remote 白名单仍停在 0.2.0 的端点集合。客户端把 job 端点转发过去后收到 `METHOD_NOT_ALLOWED`，`job/list` 退回本地并每调用一次刷一条 warning，`job/follow` stream 也打不开。现在三个 job 端点都会转发到 Host gateway，任务列表、实时输出和人工终止都能远程使用。
 - **0.2.2 的本地 shell 端点不再绕远端。** `account/*`、`web/*`、`remoteAccess/*`、`schedule/*` 描述的是 Client 自身；它们不再先发给 Host、被拒绝后再本地兜底并打印 warning。
 - **Host 工作区目录被删除后，Client 仍能打开它。** `workspace/create` 遇到 `ENOENT` 时，Host 会按字面路径从工作区列表返回已有条目，Client 因此能打开 Host 自己仍能打开的工作区。

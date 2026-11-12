@@ -56,7 +56,7 @@ plugin version through DSH's plugin manager:
 - Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host and authorize it with a GitHub QR code
 - The Harness Host does not need a public listening port. Connect securely from anywhere with internet access over a bidirectional end-to-end encrypted channel
 - Native workspace files, read-only previews, terminal access, and authorized local development-service previews are available through the Harness sidebar.
-- 0.6.0 confines native workspace-file reads to the workspace, keeps account/password-authorized self-hosted Hosts online through DSH sign-out reconciliation, and fixes the mobile Remote dialog and stale exit control.
+- 0.6.0 confines native workspace-file reads to the workspace and fixes the mobile Remote dialog and stale exit control.
 
 ## Install
 
