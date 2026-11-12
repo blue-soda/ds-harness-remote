@@ -567,6 +567,12 @@ export class ClientModeRuntime {
       this.server.bindIdentity(identity)
       authorization = await this.server.authorizeWithAccount(identity, email, password)
     }
+    // The account login wrote fresh credentials. This runtime's ClientServerApi
+    // and the Host control both cache the previous access token; reload them
+    // before the first `devices`/connection request, otherwise a successful
+    // sign-in still reports ACCOUNT_AUTH_REQUIRED.
+    this.server.reloadCredentials()
+    this.host?.reloadCredentials?.()
     this.logger.info('Client account authorized')
     return authorization
   }

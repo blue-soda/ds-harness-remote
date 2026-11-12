@@ -22189,6 +22189,8 @@ var ClientModeRuntime = class {
       this.server.bindIdentity(identity);
       authorization = await this.server.authorizeWithAccount(identity, email, password);
     }
+    this.server.reloadCredentials();
+    this.host?.reloadCredentials?.();
     this.logger.info("Client account authorized");
     return authorization;
   }
