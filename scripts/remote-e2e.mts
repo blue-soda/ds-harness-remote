@@ -909,7 +909,10 @@ async function main(): Promise<void> {
         '  4. run this script again — the authorization is stored in the Host home from then on',
         '',
       ].join('\n'))
-      if (!loginHost) return
+      if (!loginHost) {
+        process.exitCode = 2
+        return
+      }
       process.stdout.write('Waiting for the authorization (up to ten minutes)…\n')
       let polls = 0
       const authorized = await waitFor('the Host to come online after authorizing', async () => {
