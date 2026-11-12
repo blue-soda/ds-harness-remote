@@ -8,7 +8,7 @@
 - Windows Codex discovery now returns every installed build under `%LOCALAPPDATA%\OpenAI\Codex\bin` (newest first) instead of only the newest one, so a broken newest build falls through to the previous Codex desktop build before the bare `codex` command.
 - The Remote card's Codex button now reads **Codex设置** (English: **Codex Settings**), matching the settings panel it opens.
 - The Remote dialog now renders through `ReactDOM.createPortal` into `document.body`. New DSH mobile shells put the sidebar inside a transformed drawer, which made the backdrop's `position: fixed` relative to that drawer instead of the viewport; the page was squeezed into the left navigation column. Portaling escapes the transformed ancestor while falling back to inline rendering when `react-dom` or `document.body` is unavailable.
-- The Host section headings share one 24px line box, so **主机**, **允许控制设备**, the control switch, **Codex设置** and **{n} 台已连接** sit on the same vertical centre instead of drifting by their different font line heights.
+- The Host section headings share one 24px line box, so **主机**, **允许控制设备**, the control switch, **Codex设置** and **{n} 台已连接** sit on the same vertical centre instead of drifting by their different font line heights. In portrait (<=620px) the heading becomes a stretched column, so the connected count still reaches the right edge instead of staying next to Codex设置.
 - No wire-format change. Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.6.0`.
 
 ## 0.5.9 - 2026-11-07
