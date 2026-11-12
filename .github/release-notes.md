@@ -7,6 +7,8 @@
 - **The card button now says Codex设置 / Codex Settings.**
 - **The Remote dialog is no longer trapped in the mobile sidebar.** It renders through a body portal, so the new DSH mobile drawer's `transform` cannot turn the fixed backdrop into a box inside the navigation column.
 - **The Host row is vertically centred.** 主机, 允许控制设备, the switch, Codex设置 and the connected count now share one 24px line box. In portrait the heading column stretches, so the count stays right-aligned like it is in landscape.
+- **The sidebar 退出 link disappears after the final fallback.** It now appears only while the Client is remote or still reconnecting; once the reconnect ladder gives up and the header is gone, the stale exit control goes with it.
+- **Self-hosted account/password Hosts survive DSH sign-out reconciliation.** Only a DeepSeek-backed Server authorization follows DSH's DeepSeek session; a Host authorized with a self-hosted Server account or registration code stays online when that DSH profile has no DeepSeek session.
 - **DSH 0.2.2 background jobs work over Remote.** 0.2.2 added the `job/list` and `job/follow` streams and the `job/kill` call, but the Host Remote allowlist still ended at the 0.2.0 set. The client received `METHOD_NOT_ALLOWED`, served `job/list` locally (warning per call), and could not open the `job/follow` stream. All three endpoints are forwarded to the Host again, so the job roster, live output and human kill work through Remote.
 - **0.2.2 local-shell endpoints stay local.** `account/*`, `web/*`, `remoteAccess/*` and `schedule/*` describe the Client; they no longer take a remote round trip just to be refused and fall back with a warning.
 - **A Host Workspace whose directory was deleted still opens from the Client.** If `workspace/create` hits `ENOENT`, the Host returns the existing Workspace row from its list by lexical path, so the Client opens the Workspace the Host itself can open.
@@ -32,6 +34,8 @@
 - **卡片按钮文案改为 Codex设置 / Codex Settings。**
 - **Remote 弹窗不再被移动端侧栏困住。** 新版 DSH 移动端的抽屉带有 `transform`，会把 fixed backdrop 的包含块变成导航栏，弹窗只剩左侧一条。现在通过 body portal 渲染，脱离 transform 祖先；缺少 `react-dom` 或 `document.body` 时仍回退为内联渲染。
 - **主机这一行已垂直居中。** 主机、允许控制设备、开关、Codex设置和已连接数量统一使用 24px 行盒；竖屏时标题列会撑满，连接数量仍然贴在最右侧，与横屏一致。
+- **侧栏“退出”在最终回退后消失。** 现在只在远程中或仍在重连时显示；重连阶梯放弃、顶部状态已消失后，残留的退出按钮也一并消失。
+- **自部署账号/密码授权的 Host 不再被 DSH 登出联动清掉。** 只有 DeepSeek 授权的连接才跟随 DSH 的 DeepSeek 会话；账号或注册码授权的 Host 在没有 DeepSeek 会话的 DSH profile 中仍保持在线。
 - **DSH 0.2.2 的后台任务面板可以通过 Remote 使用。** 0.2.2 新增了 `job/list`、`job/follow` 两个 stream 和 `job/kill` 调用，但 Host 的 Remote 白名单仍停在 0.2.0 的端点集合。客户端把 job 端点转发过去后收到 `METHOD_NOT_ALLOWED`，`job/list` 退回本地并每调用一次刷一条 warning，`job/follow` stream 也打不开。现在三个 job 端点都会转发到 Host gateway，任务列表、实时输出和人工终止都能远程使用。
 - **0.2.2 的本地 shell 端点不再绕远端。** `account/*`、`web/*`、`remoteAccess/*`、`schedule/*` 描述的是 Client 自身；它们不再先发给 Host、被拒绝后再本地兜底并打印 warning。
 - **Host 工作区目录被删除后，Client 仍能打开它。** `workspace/create` 遇到 `ENOENT` 时，Host 会按字面路径从工作区列表返回已有条目，Client 因此能打开 Host 自己仍能打开的工作区。
@@ -46,6 +50,6 @@
 - **官方 DSH 客户端的历史加载恢复。** 它的 RPC 用位置参数把请求包在 `{ args: [{ request }] }` 里，而分页阶梯改写了外层，Host 于是把每个分页（以及 `session/follow` 的首帧快照）都当成内部错误拒绝，所有会话都显示“历史加载失败”。现在会在最内层的 request 里改写窗口，无论外面是哪一层包装。
 - **凭据被拒后不再无限重连。** Server 拒绝 hello 时用 4001 关闭，并把拒绝原因写在 close reason 里。Host 以前忽略这个原因，把所有 4001 都当成网络故障，于是一个 token 已失效的 Host 每 30 秒拿着同一个死 token 重试——真实案例持续了四个小时，直到进程重启才恢复。现在会识别 close reason 里的已知拒绝码：终止类停止重试并让自动重新授权接管。
 - **健康的 Host 不会再被卡成“离线”。** 以前所有 Server 控制帧（包括心跳）都在同一个串行队列里，而 socket 关闭时又无期限地等这个队列。只要有一个慢处理器，心跳就会被饿到 Server 判定设备离线，随后连本该恢复的重连也被卡住，只能重启进程才能好。现在心跳立即在队列外应答，关闭路径最多等 5 秒就继续重连。
-- **0.5.1**–**0.5.8** 的全部内容同样包含在本版：Codex Session id 恢复为 `codex:<threadId>`、跟随 DSH 的登录、Codex 默认关闭、凭据刷新锁回收、对 dsh 0.2.1-rc.2 的网关兼容，以及待命/重连修复。
+- **0.5.1**–**0.5.9** 的全部内容同样包含在本版：Codex Session id 恢复为 `codex:<threadId>`、跟随 DSH 的登录、Codex 默认关闭、凭据刷新锁回收、对 dsh 0.2.1-rc.2 / 0.2.2-rc.1 的网关兼容，以及待命/重连修复。
 
-[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.5.8...v0.5.9) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.5.9/README.md)
+[Full changelog / 完整改动](https://github.com/blue-soda/ds-harness-remote/compare/v0.5.9...v0.6.0) · [Installation / 安装说明](https://github.com/blue-soda/ds-harness-remote/blob/v0.6.0/README.md)

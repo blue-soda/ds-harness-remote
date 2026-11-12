@@ -9,6 +9,8 @@
 - The Remote card's Codex button now reads **Codex设置** (English: **Codex Settings**), matching the settings panel it opens.
 - The Remote dialog now renders through `ReactDOM.createPortal` into `document.body`. New DSH mobile shells put the sidebar inside a transformed drawer, which made the backdrop's `position: fixed` relative to that drawer instead of the viewport; the page was squeezed into the left navigation column. Portaling escapes the transformed ancestor while falling back to inline rendering when `react-dom` or `document.body` is unavailable.
 - The Host section headings share one 24px line box, so **主机**, **允许控制设备**, the control switch, **Codex设置** and **{n} 台已连接** sit on the same vertical centre instead of drifting by their different font line heights. In portrait (<=620px) the heading becomes a stretched column, so the connected count still reaches the right edge instead of staying next to Codex设置.
+- The sidebar **退出** link is only shown while the Client is remote or still reconnecting. After the reconnect ladder gives up and the view has fallen back to local, the header is already gone and the stale exit control now disappears with it.
+- A Host authorized with a self-hosted Server account/password no longer follows DSH's DeepSeek sign-out. Reconciliation now clears a Host only when the stored Server authorization method is `deepseek`; password and registration-code authorizations survive a DSH profile with no DeepSeek session. The Client also reloads its Server credentials after account authorization, removing a stale `ACCOUNT_AUTH_REQUIRED` after a successful sign-in.
 - No wire-format change. Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.6.0`.
 
 ## 0.5.9 - 2026-11-07
