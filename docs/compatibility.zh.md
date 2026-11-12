@@ -53,5 +53,5 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.28` 会在 Host 暴�
 
 `0.5.9` 不改线协议：把 DSH 0.2.2 的 `job/list`、`job/follow` stream 和 `job/kill` 调用加入 Host 的 Remote 白名单；同时把 Client 本地的 `account/*`、`web/*`、`remoteAccess/*`、`schedule/*` 命名空间保持在本地，不再先发 Host、被拒绝后再兜底并打印 warning；当 `workspace/create` 因目录已删除而遇到 ENOENT 时，Host 会按字面路径从工作区列表返回已有条目。缺少 job 端点时客户端会把 `job/list` 退回本地且打不开 `job/follow`；工作区目录消失时则可见但打不开。现在任务列表、实时输出和人工终止都能通过 Remote 使用，Host 自己能打开的工作区 Client 也能打开。上面的内容仍然适用。
 
-`0.6.0` 不改线协议：修复原生工作区文件读取越界，串行化首次身份创建，Codex 在 Thread 终态时释放 writer lease，并让 Windows Codex 发现按新到旧尝试所有已安装 build。卡片入口文案改为 **Codex设置**；协议和端点集合不变。
+`0.6.0` 不改线协议：修复原生工作区文件读取越界，串行化首次身份创建，Codex 在 Thread 终态时释放 writer lease，并让 Windows Codex 发现按新到旧尝试所有已安装 build。Remote 弹窗改为 body portal，避免新版 DSH 移动端侧栏的 transform 限制其布局；卡片入口文案改为 **Codex设置**。协议和端点集合不变。
 

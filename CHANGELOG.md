@@ -7,6 +7,7 @@
 - Codex releases its Host-side writer lease when App Server reports a terminal `thread/status/changed` (`idle`, `failed`, `interrupted`, ...), not only on `turn/completed`. The same transition declines approvals that belonged to the finished Thread. A failed or interrupted turn no longer leaves the next Remote Prompt reporting `CODEX_TURN_OWNED` / `CODEX_THREAD_BUSY` as "occupied"; Codex's own active-writer lock is still respected when the Host Codex app is genuinely writing.
 - Windows Codex discovery now returns every installed build under `%LOCALAPPDATA%\OpenAI\Codex\bin` (newest first) instead of only the newest one, so a broken newest build falls through to the previous Codex desktop build before the bare `codex` command.
 - The Remote card's Codex button now reads **Codex设置** (English: **Codex Settings**), matching the settings panel it opens.
+- The Remote dialog now renders through `ReactDOM.createPortal` into `document.body`. New DSH mobile shells put the sidebar inside a transformed drawer, which made the backdrop's `position: fixed` relative to that drawer instead of the viewport; the page was squeezed into the left navigation column. Portaling escapes the transformed ancestor while falling back to inline rendering when `react-dom` or `document.body` is unavailable.
 - No wire-format change. Upgrade: `dsh plugin --profile web add -w @blue-soda/dsh-remote@0.6.0`.
 
 ## 0.5.9 - 2026-11-07

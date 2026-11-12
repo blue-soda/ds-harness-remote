@@ -1178,6 +1178,23 @@ function connectionStatusClass(status: RemoteStatus['host'] | undefined): string
   return status === undefined ? '' : ' isOffline'
 }
 
+type PortalRenderer = (children: unknown, container: Element) => unknown
+
+/**
+ * Render modal layers into document.body so a transformed host sidebar cannot
+ * become their fixed-position containing block. The fallback keeps SSR and
+ * older shells working inline.
+ */
+function renderBodyPortal(portal: PortalRenderer | undefined, children: unknown): unknown {
+  if (typeof portal !== 'function') return children
+  if (typeof document === 'undefined' || document.body === null) return children
+  try {
+    return portal(children, document.body)
+  } catch {
+    return children
+  }
+}
+
 window.__ModuleLoader__.load({
   id: clientModuleId,
   factory: require => {
@@ -1196,6 +1213,14 @@ window.__ModuleLoader__.load({
         getServerSnapshot?: () => T,
       ): T
     }
+    const portal = (() => {
+      try {
+        const reactDom = require('react-dom') as { createPortal?: PortalRenderer }
+        return typeof reactDom.createPortal === 'function' ? reactDom.createPortal.bind(reactDom) as PortalRenderer : undefined
+      } catch {
+        return undefined
+      }
+    })()
     const inject = [
       'connection', 'slots', 'locale', 'workspaces', 'sessions', 'uiWorkspace',
     ]
@@ -2665,7 +2690,7 @@ for (let attempt = 0; attempt < 10; attempt++) {
           disabled: busy,
           onClick: () => void openLocalWorkspaces(),
         }, t('exitRemote')) : null),
-        !open ? null : React.createElement('div', {
+        !open ? null : renderBodyPortal(portal, React.createElement('div', {
           className: 'dshRemoteBackdrop',
           role: 'presentation',
           onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setOpen(false) },
@@ -2940,7 +2965,7 @@ for (let attempt = 0; attempt < 10; attempt++) {
                         onClick: () => void openWorkspace(),
                       }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
             notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),
-            error === undefined || error === codexNotice ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))))
+            error === undefined || error === codexNotice ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error))))))
     }
 
 

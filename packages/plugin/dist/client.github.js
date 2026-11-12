@@ -865,10 +865,25 @@
   function connectionStatusClass(status) {
     return status?.online ? " isOnline" : status?.reconnecting ? " isReconnecting" : status === void 0 ? "" : " isOffline";
   }
+  function renderBodyPortal(portal, children) {
+    if (typeof portal != "function" || typeof document > "u" || document.body === null) return children;
+    try {
+      return portal(children, document.body);
+    } catch {
+      return children;
+    }
+  }
   window.__ModuleLoader__.load({
     id: clientModuleId,
     factory: (require2) => {
-      let module = { exports: {} }, React = require2("react"), inject = [
+      let module = { exports: {} }, React = require2("react"), portal = (() => {
+        try {
+          let reactDom = require2("react-dom");
+          return typeof reactDom.createPortal == "function" ? reactDom.createPortal.bind(reactDom) : void 0;
+        } catch {
+          return;
+        }
+      })(), inject = [
         "connection",
         "slots",
         "locale",
@@ -1849,7 +1864,7 @@
               onClick: () => void openLocalWorkspaces()
             }, t("exitRemote")) : null
           ),
-          open ? React.createElement("div", {
+          open ? renderBodyPortal(portal, React.createElement("div", {
             className: "dshRemoteBackdrop",
             role: "presentation",
             onMouseDown: (event) => {
@@ -2259,7 +2274,7 @@
               notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, notice),
               error === void 0 || error === codexNotice ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
             )
-          )) : null
+          ))) : null
         );
       }
       function CodexConnectionFields(props) {
