@@ -1857,7 +1857,7 @@
               { className: "dshRemoteSidebarLabel" },
               remoteLabel
             ) : null),
-            (status?.mode === "remote" || status?.fellBackToLocal === !0) && props.wide ? React.createElement("button", {
+            (status?.mode === "remote" || status?.reconnecting !== void 0) && props.wide ? React.createElement("button", {
               type: "button",
               className: "dshRemoteExitLink",
               disabled: busy,
@@ -1915,7 +1915,7 @@
             React.createElement(
               "main",
               { className: "dshRemotePageBody" },
-              status?.mode === "remote" || status?.fellBackToLocal === !0 ? React.createElement("button", {
+              status?.mode === "remote" || status?.reconnecting !== void 0 ? React.createElement("button", {
                 type: "button",
                 className: "dshRemoteLocalLink",
                 disabled: busy,

@@ -2684,7 +2684,7 @@ for (let attempt = 0; attempt < 10; attempt++) {
           ? React.createElement('span', { className: 'dshRemoteSidebarLabel' },
               remoteLabel)
           : null),
-        (status?.mode === 'remote' || status?.fellBackToLocal === true) && props.wide ? React.createElement('button', {
+        (status?.mode === 'remote' || status?.reconnecting !== undefined) && props.wide ? React.createElement('button', {
           type: 'button',
           className: 'dshRemoteExitLink',
           disabled: busy,
@@ -2723,7 +2723,7 @@ for (let attempt = 0; attempt < 10; attempt++) {
               }, t('refreshRemoteShort')),
               React.createElement('button', { type: 'button', className: 'dshRemotePageClose', onClick: () => setOpen(false), 'aria-label': t('close') }, '×'))),
           React.createElement('main', { className: 'dshRemotePageBody' },
-            status?.mode === 'remote' || status?.fellBackToLocal === true ? React.createElement('button', {
+            status?.mode === 'remote' || status?.reconnecting !== undefined ? React.createElement('button', {
               type: 'button',
               className: 'dshRemoteLocalLink',
               disabled: busy,
