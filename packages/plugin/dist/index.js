@@ -30586,9 +30586,10 @@ var HostPluginRuntime = class {
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password);
     this.serverApi.reloadCredentials();
-    if (!this.paused) {
-      this.serverConnection?.resume();
-      this.serverConnection?.reconnect();
+    await this.serverConnection?.stop();
+    if (this.identity !== void 0) {
+      this.serverConnection = this.createServerConnection(this.identity);
+      if (!this.paused) this.serverConnection.start();
     }
     this.logger.info("Host account authorized");
     return result;
