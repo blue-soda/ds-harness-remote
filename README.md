@@ -125,7 +125,7 @@ Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/d
 The plugin ships `https://sakakibara.ink:8443` as its default Server. To run your own multi-account
 Server, see the [self-hosted Server](apps/server/README.md); its Web page offers sign-in and device status.
 
-## Minimal self-hosted Server
+## Self-hosted Server
 
 Run the optional single-process, Relay-only Server in [`apps/server`](apps/server/README.md). It **supports multiple accounts**: devices and tokens are namespaced per account and stay invisible across them. `DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` configure a **seed account**; other accounts survive restarts. Account creation is **off by default** - enable it with `DSH_SERVER_REGISTRATION_CODE`, or sign in with a DeepSeek platform account (`DSH_SERVER_DEEPSEEK_LOGIN=on`) or a QR provider (`DSH_SERVER_OAUTH_PROVIDER=github|wechat`); `DSH_SERVER_PASSWORD_LOGIN=off` disables password login. The Web page currently offers login and device status only. Point both Host and Client at your Server URL and sign in to the same account; device credentials survive restarts. It is Relay-only: no Remote Web session UI, Admin or WebRTC/TURN. See [`apps/server/README.md`](apps/server/README.md) for the full configuration.
 

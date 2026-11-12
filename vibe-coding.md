@@ -5,7 +5,7 @@
 
 # DeepSeek Harness Remote — Full Vibecoding Development Prompt
 
-> 仓库范围变更：本文仅保留原始需求背景，权威边界见 `README.md` 和 `docs/README.md`。本仓库提供 Plugin、Client、共享协议和 `apps/server` 最小自部署版本；完整 Server、Remote Web 与 Admin 仍由独立仓库实现。
+> 仓库范围变更：本文仅保留原始需求背景，权威边界见 `README.md` 和 `docs/README.md`。本仓库提供 Plugin、Client、共享协议和 `apps/server` 自部署版本；完整 Server、Remote Web 与 Admin 仍由独立仓库实现。
 
 你是一名资深全栈 / Electron / React Native / WebRTC / FastAPI / TypeScript 工程师。
 

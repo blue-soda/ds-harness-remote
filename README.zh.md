@@ -118,9 +118,9 @@ Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/blue-soda/d
 4. 在另一台设备上打开 DeepSeek Harness 桌面版或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
-插件内置的默认 Server 是 `https://sakakibara.ink:8443`；要自建多账号 Server 见[最小自部署 Server](apps/server/README.zh.md)，其 Web 页面提供登录与设备状态。
+插件内置的默认 Server 是 `https://sakakibara.ink:8443`；要自建多账号 Server 见[自部署 Server](apps/server/README.zh.md)，其 Web 页面提供登录与设备状态。
 
-## 最小自部署 Server
+## 自部署 Server
 
 [`apps/server`](apps/server/README.zh.md) 是可独立运行的单进程 Relay Server，**支持多账号**：设备与令牌按账号命名空间隔离，跨账号互不可见。`DSH_SERVER_ACCOUNT`/`DSH_SERVER_PASSWORD` 配置的是**启动种子账号**，其余账号在重启后保留；**建号默认关闭** —— 需要时用 `DSH_SERVER_REGISTRATION_CODE` 开启注册码注册，或用 `DSH_SERVER_DEEPSEEK_LOGIN=on` 以 DeepSeek 平台账号登录、`DSH_SERVER_OAUTH_PROVIDER=github|wechat` 扫码登录（`DSH_SERVER_PASSWORD_LOGIN=off` 可关闭密码登录）。Web 页面目前只有登录与设备状态。Host 与客户端填写同一 Server 地址并登录同一账号，设备凭据在重启后保留 —— 它只做 Relay，不提供 Remote Web 会话界面、Admin 或 WebRTC/TURN；完整配置与部署见 [`apps/server/README.zh.md`](apps/server/README.zh.md)。
 

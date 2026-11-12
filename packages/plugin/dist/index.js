@@ -30585,7 +30585,11 @@ var HostPluginRuntime = class {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before signing in.", false);
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password);
-    if (!this.paused) this.serverConnection?.resume();
+    this.serverApi.reloadCredentials();
+    if (!this.paused) {
+      this.serverConnection?.resume();
+      this.serverConnection?.reconnect();
+    }
     this.logger.info("Host account authorized");
     return result;
   }
@@ -30594,7 +30598,11 @@ var HostPluginRuntime = class {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before entering a Host registration code.", false);
     }
     const result = await this.serverApi.authorizeHostWithCode(this.currentIdentity(), code);
-    if (!this.paused) this.serverConnection?.resume();
+    this.serverApi.reloadCredentials();
+    if (!this.paused) {
+      this.serverConnection?.resume();
+      this.serverConnection?.reconnect();
+    }
     this.logger.info("Host registration code authorized");
     return result;
   }

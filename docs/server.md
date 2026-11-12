@@ -2,13 +2,13 @@
 
 状态：Draft v0.1
 日期：2026-08-15
-实现状态：**完整站点位于独立 Server 仓库；本仓库 `apps/server` 提供最小自部署子集。**
+实现状态：**本仓库 `apps/server` 是本项目维护并部署的自部署 Server；支持账号/设备授权、Control/Noise handshake forwarding 与 opaque Relay。WebRTC/TURN/Admin 尚未纳入当前 Server 实现。**
 
 ## 0. 仓库边界（规范性）
 
-本文保留完整 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现最小自部署版本，其运行方式与支持的 API 见 [最小 Server 说明](../apps/server/README.zh.md)。
+本文保留 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现自部署版本，其运行方式与支持的 API 见 [自部署 Server 说明](../apps/server/README.zh.md)。
 
-最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量种子账号的多账号模型和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供 landing、登录与设备状态页（landing 含安装与连接指引、安全说明；主题跟随系统并支持手动切换）。后文记录独立 Server 项目的完整设计。
+实现版本使用环境变量种子账号的多账号模型和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供 landing、登录与设备状态页（landing 含安装与连接指引、安全说明；主题跟随系统并支持手动切换）。后文记录 Server 的完整设计目标，未实现的能力不会被声明为可用。
 
 ## 1. 定位
 

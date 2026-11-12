@@ -16,7 +16,7 @@ DSH Remote is a secure remote control surface for DeepSeek Harness. The Plugin e
 
 This repository implements the dual-role Harness Plugin, its Web client face, Android, shared protocol/crypto/transport packages, and mock interoperability tools. It also includes a self-hosted multi-account Relay Server in `apps/server` with JSON-file persistence, isolating devices and tokens per account. The full Remote Web, Admin backend, Server database and migrations remain outside this repository.
 
-The Server design and Remote Protocol remain first-class specifications in `docs/server.md` and `docs/protocol.md`. The separate Server project implements the full Server, Remote Web and Admin site. The minimal self-hosted subset is documented in `apps/server/README.md`.
+The Server design and Remote Protocol remain first-class specifications in `docs/server.md` and `docs/protocol.md`. The separate Server project implements the full Server, Remote Web and Admin site. The self-hosted Server implementation is documented in `apps/server/README.md`.
 
 ## Brand Personality
 

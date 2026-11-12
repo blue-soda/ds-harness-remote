@@ -12,7 +12,7 @@
 Composer、Tool、file change 与 approval UI 直接消费 CodeX 数据。
 
 CodeX 必须继续位于同一个 Remote Plugin 中，并作为 `packages/plugin/src/codex/` 下的独立领域。
-不得拆成第二个 Plugin，不修改 DSH 主仓库，也不得增加 Remote Web、完整 Server 或 Admin runtime（本仓库只保留 `apps/server` 最小自部署子集）。
+不得拆成第二个 Plugin，不修改 DSH 主仓库，也不得增加 Remote Web、完整 Server 或 Admin runtime（本仓库只保留 `apps/server` 自部署实现）。
 Android 可直接消费同一 `codex.app.*`；VS Code 暂不增加本功能。
 
 ## 产品入口

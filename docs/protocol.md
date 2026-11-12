@@ -3,7 +3,7 @@
 状态：Draft v0.2（首版发布前，不保留旧业务 RPC 兼容）
 日期：2026-09-10
 协议版本：`1`
-实现状态：**当前仓库实现 Client/Plugin 侧协议与最小多账号 Relay Server；完整 Server 由独立项目实现**
+实现状态：**当前仓库实现 Client/Plugin 侧协议与自部署 Server；Server 覆盖账号/设备、Control 与 Relay，WebRTC/TURN/Admin 尚未纳入当前实现**
 
 ## 0. 文档地位与仓库边界（规范性）
 
@@ -15,7 +15,7 @@
 - Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
 - Mock Host/Client 与协议 conformance fixtures
 
-`apps/server` 实现本文的多账号注册/刷新、设备发现、Control 与 Relay 子集；范围见 [最小 Server](../apps/server/README.md)。其余多账号、主机匹配码、Browser 授权、WebRTC/TURN 与 Admin 能力仍属于独立 Server，不得把未实现的能力声明为可用。
+`apps/server` 实现本文的多账号注册/刷新、设备发现、Control 与 Relay；范围见 [自部署 Server](../apps/server/README.md)。主机匹配码、Browser 授权、WebRTC/TURN 与 Admin 尚未纳入当前 Server 实现，不得把未实现的能力声明为可用。
 
 任何与本文不一致的示例代码都视为未完成实现，不能反向修改协议语义。当前尚未发布，
 旧 Android 业务 RPC 明确不兼容；首版发布后破坏兼容性的变更必须提升协议版本。

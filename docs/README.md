@@ -10,13 +10,13 @@
 - `protocol`、`crypto`、`webrtc`、`client-core` 等共享包
 - 用于客户端和插件联调的 Mock Host
 
-本仓库另提供 [最小自部署 Server](../apps/server/README.zh.md)：多账号（环境变量配置种子账号）鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
+本仓库另提供 [自部署 Server](../apps/server/README.zh.md)：多账号（环境变量配置种子账号）鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
 
-完整多账号 Server、Remote Web 会话 UI 和 Admin 仍在独立 Server 项目实现；这里的最小版本复用相同协议子集，保持独立进程，不扩展为完整站点。
+完整多账号能力中的 Remote Web 会话 UI 和 Admin 尚未纳入当前 Server 实现；本仓库的 Server 保持独立进程，不扩展为完整站点。
 
 ## 权威文档
 
-- [Server 设计说明](server.md)：定义外部 Server 的职责、API、安全边界、数据模型和部署要求；完整站点设计；最小自部署子集见上述运行文档。
+- [Server 设计说明](server.md)：定义外部 Server 的职责、API、安全边界、数据模型和部署要求；完整站点设计；自部署实现见上述运行文档。
 - [Host Plugin 接入指南](plugin-integration.md)：定义账号登录、Host 授权注册、设备凭证轮换、WebSocket 和本地状态隔离要求。
 - [Remote Protocol v1](protocol.md)：定义 Host、Server、Client 的线协议，是本仓库 Plugin、Client 和共享协议包的实现依据。
 - [产品与功能设计](design/README.md)：定义 Plugin、Client 和共享基础能力。

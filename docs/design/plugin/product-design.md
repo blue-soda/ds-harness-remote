@@ -44,7 +44,7 @@ Plugin 是受控数据网关，不是独立 Agent；除 Host 本地设置可关�
 - 不提供 SSH、远程桌面、任意文件系统访问或任意 Harness tool RPC；文件内容仅可由
   `dsh-file-viewer` provider 在其授权根/locator 内通过受限只读预览桥访问。
 - settings/credentials 仅通过官方 seam 代理：设置写入限 Host 实时注册的命名空间，credential 值只写；不代理 `settings.openDocument`、native path open/picker、目录写入、attachment upload 或下载 API。
-- 本仓库仅实现最小自部署 Server 子集（`apps/server`）；完整 Server、Remote Web 与 Admin runtime 在独立仓库。
+- 本仓库仅实现自部署 Server 子集（`apps/server`）；完整 Server、Remote Web 与 Admin runtime 在独立仓库。
 
 ## 5. 权限体验
 

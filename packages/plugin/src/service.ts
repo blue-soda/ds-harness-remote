@@ -397,9 +397,16 @@ export class HostPluginRuntime {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before signing in.', false)
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password)
+    // The account login wrote new credentials; the Host connection keeps the
+    // credential object it loaded at startup. Reload it and reconnect instead
+    // of resuming with the old (now rejected) access token.
+    this.serverApi.reloadCredentials()
     // An authorization does not lift an explicit pause: the UI shows the paused
     // state with its own resume action, so the user's choice stays in force.
-    if (!this.paused) this.serverConnection?.resume()
+    if (!this.paused) {
+      this.serverConnection?.resume()
+      this.serverConnection?.reconnect()
+    }
     this.logger.info('Host account authorized')
     return result
   }
@@ -409,9 +416,13 @@ export class HostPluginRuntime {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before entering a Host registration code.', false)
     }
     const result = await this.serverApi.authorizeHostWithCode(this.currentIdentity(), code)
+    this.serverApi.reloadCredentials()
     // An authorization does not lift an explicit pause: the UI shows the paused
     // state with its own resume action, so the user's choice stays in force.
-    if (!this.paused) this.serverConnection?.resume()
+    if (!this.paused) {
+      this.serverConnection?.resume()
+      this.serverConnection?.reconnect()
+    }
     this.logger.info('Host registration code authorized')
     return result
   }

@@ -207,7 +207,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 ## 不在本仓库实现
 
-- 完整多账号 Server、Remote Web、Admin runtime 及其数据库、队列和部署代码（`apps/server` 最小自部署版本除外）
+- 完整多账号 Server、Remote Web、Admin runtime 及其数据库、队列和部署代码（`apps/server` 自部署版本除外）
 - 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的原生 terminal 和受限 loopback 预览除外
 - 绕过 ApiProxy allowlist 的 Cordis service 反射
 
@@ -222,7 +222,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] Relay capture 无法解密 payload，篡改、重放和 identity mismatch 被拒绝
 - [x] 核心 check/test/build 与 Bundle 校验通过
 
-## 最小自部署 Server
+## 自部署 Server
 
 - [x] 环境变量单账号、登录/状态页、持久化设备凭据、Control/加密 Relay 转发
 - [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
