@@ -22269,6 +22269,10 @@ var ClientModeRuntime = class {
     if (this.server.hasStoredAuthorization === void 0) return false;
     return await this.server.hasStoredAuthorization().catch(() => false);
   }
+  /** How this device was authorized, so a DSH sign-out only clears a DeepSeek grant. */
+  async authorizationMethod() {
+    return (await this.server.currentAuthorization())?.method;
+  }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
     if (!enabled) {
@@ -27137,7 +27141,8 @@ var PluginControlRuntime = class {
       const session = await this.deepseekSession.read();
       if (this.client !== void 0) this.client.hasDeepSeekSession = session !== void 0;
       const authorized = this.client === void 0 ? false : await this.client.hasServerAuthorization();
-      if (session === void 0 && authorized) {
+      const authorizationMethod = this.client === void 0 ? void 0 : await this.client.authorizationMethod?.();
+      if (session === void 0 && authorized && authorizationMethod === "deepseek") {
         await this.logout({ releaseDeepSeek: false });
         return;
       }

@@ -512,8 +512,13 @@ export class PluginControlRuntime {
       const session = await this.deepseekSession.read()
       if (this.client !== undefined) this.client.hasDeepSeekSession = session !== undefined
       const authorized = this.client === undefined ? false : await this.client.hasServerAuthorization()
-      if (session === undefined && authorized) {
-        // Never throttled: this is the local half, and opening the card must already reflect a DSH sign-out.
+      const authorizationMethod = this.client === undefined
+        ? undefined
+        : await this.client.authorizationMethod?.()
+      if (session === undefined && authorized && authorizationMethod === 'deepseek') {
+        // Only a DeepSeek-backed authorization follows DSH's DeepSeek session.
+        // Password/registration-code authorizations on a self-hosted Server must
+        // survive a DSH profile that has no DeepSeek account.
         await this.logout({ releaseDeepSeek: false })
         return
       }

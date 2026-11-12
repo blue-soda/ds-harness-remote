@@ -203,6 +203,8 @@ export interface HostAuthorizationControl {
     }>
   }
   hasStoredAuthorization?(): Promise<boolean>
+  /** How the stored Server authorization was obtained. */
+  authorizationMethod?(): Promise<string | undefined>
   /** Record, on the Server, whether this machine accepts control. */
   setHostControl?(enabled: boolean): Promise<void>
   /** Re-read this device's credentials from disk after a sign-in. */
@@ -665,6 +667,11 @@ export class ClientModeRuntime {
   async hasServerAuthorization(): Promise<boolean> {
     if (this.server.hasStoredAuthorization === undefined) return false
     return await this.server.hasStoredAuthorization().catch(() => false)
+  }
+
+  /** How this device was authorized, so a DSH sign-out only clears a DeepSeek grant. */
+  async authorizationMethod(): Promise<string | undefined> {
+    return (await this.server.currentAuthorization())?.method
   }
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
